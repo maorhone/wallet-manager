@@ -158,6 +158,31 @@ def prov_settings(settings) -> Settings:
 
 
 @pytest_asyncio.fixture
+async def login_wm(prov_settings, seeded, litellm, ro_engine):
+    """Like ``login`` but the app talks to the fake LiteLLM (client and read-only reader)."""
+    from app.litellm_client import LiteLLMReader
+
+    made = []
+
+    async def _login(who: str) -> httpx.AsyncClient:
+        app = create_app(
+            prov_settings.model_copy(update={"dev_auth": True}),
+            litellm=litellm,
+            reader=LiteLLMReader(ro_engine),
+        )
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        made.append((client, app))
+        r = await client.post("/auth/dev/login", json={"upn": f"{who}@corp.example"})
+        assert r.status_code == 200, r.text
+        return client
+
+    yield _login
+    for client, app in made:
+        await client.aclose()
+        await app.state.engine.dispose()
+
+
+@pytest_asyncio.fixture
 async def provisioned(seeded, prov_settings, litellm):
     """Seed + Joiner provisioning enqueued and drained into the fake LiteLLM."""
     from app.outbox.worker import drain

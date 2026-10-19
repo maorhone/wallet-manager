@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import dev, oidc
@@ -10,15 +11,29 @@ from app.config import Settings
 from app.db import make_engine, make_session_factory
 from app.directory import FixtureDirectory
 from app.errors import ApiError, install_error_handlers
-from app.routers import departments, groups, me, policies
+from app.litellm_client import LiteLLMClient, LiteLLMReader
+from app.routers import audit, departments, groups, me, platform, policies, reports
 from app.security_headers import SecurityHeadersMiddleware
 from app.writes import install_replay_handler
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    litellm: LiteLLMClient | None = None,
+    reader: LiteLLMReader | None = None,
+) -> FastAPI:
+    """``litellm`` and ``reader`` are injected by tests; by default they come from settings."""
     settings = settings or Settings()
     app = FastAPI(title="Wallet Manager")
     app.state.settings = settings
+    app.state.litellm = litellm or LiteLLMClient(
+        settings.litellm_base_url, settings.litellm_master_key
+    )
+    app.state.litellm_reader = reader or (
+        LiteLLMReader(create_async_engine(settings.litellm_database_url))
+        if settings.litellm_database_url
+        else None
+    )
     app.state.engine = make_engine(settings.database_url)
     app.state.session_factory = make_session_factory(app.state.engine)
     app.state.directory = FixtureDirectory(settings.seed_file)
@@ -44,6 +59,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(departments.router)
     app.include_router(groups.router)
     app.include_router(policies.router)
+    app.include_router(reports.router)
+    app.include_router(platform.router)
+    app.include_router(audit.router)
 
     @app.get("/healthz")
     async def healthz():

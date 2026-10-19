@@ -7,6 +7,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.metrics import VALIDATION_REJECTIONS
+
 
 class ApiError(Exception):
     def __init__(
@@ -125,6 +127,8 @@ def _envelope(request: Request, status: int, code: str, message: str, **extra) -
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(request: Request, exc: ApiError):
+        if exc.status == 422:
+            VALIDATION_REJECTIONS.labels(exc.code).inc()
         return _envelope(
             request, exc.status, exc.code, exc.message, requested=exc.requested,
             available=exc.available, parent_total=exc.parent_total, details=exc.details,

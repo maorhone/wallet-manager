@@ -10,6 +10,7 @@ from app.config import Settings
 from app.db import make_engine, make_session_factory
 from app.litellm_client import LiteLLMClient, LiteLLMReader
 from app.outbox.worker import drain
+from app.services.overallocation import scheduled_check
 from app.services.spend import take_snapshot
 
 BACKOFF_START, BACKOFF_MAX = 1.0, 60.0
@@ -47,8 +48,24 @@ async def snapshot_loop(settings: Settings) -> None:
         await engine.dispose()
 
 
+async def overallocation_loop(settings: Settings) -> None:
+    engine = make_engine(settings.database_url)
+    sf = make_session_factory(engine)
+    ro_engine = create_async_engine(settings.litellm_database_url)
+    reader = LiteLLMReader(ro_engine)
+    try:
+        while True:
+            await scheduled_check(sf, reader)
+            await asyncio.sleep(settings.overalloc_interval_s)
+    finally:
+        await ro_engine.dispose()
+        await engine.dispose()
+
+
 async def main(settings: Settings) -> None:
-    await asyncio.gather(outbox_loop(settings), snapshot_loop(settings))
+    await asyncio.gather(
+        outbox_loop(settings), snapshot_loop(settings), overallocation_loop(settings)
+    )
 
 
 if __name__ == "__main__":

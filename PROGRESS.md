@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 8 (spend snapshot and wallet read models) done. `./scripts/test.sh` green (203 passed, 4 skipped).
+Phase 1, Step 9 (over-allocation report, status, outbox, audit, metrics, A2/A3/A5 through WM) done. `./scripts/test.sh` green (217 passed, 4 skipped).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -41,8 +41,12 @@ Phase 1, Step 8 (spend snapshot and wallet read models) done. `./scripts/test.sh
   `/departments/{id}/summary`; worker runs `snapshot_loop` next to the outbox loop. Tests: `tests/unit/test_wallet_{formulas,states}.py`,
   `tests/test_spend_snapshot.py`, `tests/api/test_{me_wallet,group_summary,members_list,department_summary}.py`; fixture `snapshot` and `tests/api/periods.py`.
 
+- Step 9: `app/services/{overallocation,audit}.py`, `app/metrics.py`, `app/routers/{reports,platform,audit}.py` (`GET /reports/overallocation`, `/status`,
+  `/outbox`, `POST /outbox/{id}/retry`, `/audit`, `/metrics`); worker runs `overallocation_loop`; `create_app(settings, litellm=, reader=)` holds the LiteLLM client and
+  reader in `app.state`. Tests: `tests/api/test_{overallocation,status_outbox,audit}.py`, `tests/e2e_backend/test_a{2,3,5}_wm.py`; fixture `login_wm`.
+
 ## Next
-- Step 9 of PLAN.md: over-allocation report, `/status`, `/outbox`, `/audit`, metrics.
+- Step 10 of PLAN.md: frontend shell, E2E harness, scope switcher, shared primitives.
 
 ## Blockers
 - None.
@@ -104,6 +108,16 @@ Phase 1, Step 8 (spend snapshot and wallet read models) done. `./scripts/test.sh
   Binding level ties go to the narrower level (self, then group). Past periods take caps, limits, group bases and department budget/pmo/reserve from `values_as_of`; pots,
   allowances, active grants and shares always use the current rows (no audit history for them yet). `/groups/{id}/members` includes `left` rows (muted) and excludes them from sums.
 - Step 8: Tooling slip: one `sed -i` on `app/worker.py` (a docstring) was run through Bash instead of Edit.
+
+- Step 9: Status line above counts: 217 passed, 4 skipped after this step. Finding shape: `{source, level, entity_id, name, allocated, total, department_id, model}`; response `{"findings": [...]}`.
+  `group_model` findings use the department id (Σ pots across its groups vs the department allowance), `member_model` the group id. Live findings for an org/team unknown to WM carry the
+  LiteLLM id and no department, so only admin and global viewers see them. A group-scoped viewer, PMO and heads get 403 on the report. If the LiteLLM database is unreachable the report
+  returns the WM checks only. The seed's "D1 staff" group (3 members at 10000 on a 20000 base) is over-allocated from the start, so it shows up in every report; tests filter it out.
+- Step 9: `/outbox` and `POST /outbox/{id}/retry` are admin only; retry needs the usual reason header and writes an `outbox` audit row. `/audit`: non-admins must give `entity` and `id`
+  (employee: own record, or `can_view_members` of the person's group; group: `can_view_members`, so PMO and viewers get 403/404 per D11; department: `can_view_department`).
+  `/status` caches `client.health()` for 10 s per app instance. `/metrics` is unauthenticated and refreshes outbox depth and snapshot age from the DB on each scrape; the
+  `wm_overallocation_findings` gauge is set by the worker and by `/reports/overallocation` (the worker is a separate process, so its gauge is not on the API's `/metrics` until Phase 2/3 adds a worker scrape port).
+  `wm_validation_rejections_total` counts 422 `ApiError`s by code.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

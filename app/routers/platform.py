@@ -1,0 +1,91 @@
+import time
+
+from fastapi import APIRouter, Request, Response
+from sqlalchemy import func, select
+
+from app import metrics
+from app.auth.session import CurrentPrincipal, Db
+from app.errors import ApiError, invalid_request
+from app.models import LitellmWrite, SpendSnapshot
+from app.permissions import ADMIN
+from app.writes import Write
+
+router = APIRouter()
+HEALTH_TTL_S = 10
+
+
+async def _reachable(request: Request) -> bool:
+    cached = getattr(request.app.state, "litellm_health", None)
+    if cached and time.monotonic() - cached[0] < HEALTH_TTL_S:
+        return cached[1]
+    try:
+        ok = await request.app.state.litellm.health()
+    except Exception:
+        ok = False
+    request.app.state.litellm_health = (time.monotonic(), ok)
+    return ok
+
+
+@router.get("/status")
+async def status(request: Request, principal: CurrentPrincipal, db: Db):
+    """§5.4 banner data. No secrets; Redis status arrives in Phase 3."""
+    counts = await metrics.outbox_counts(db)
+    oldest = await db.scalar(
+        select(func.min(LitellmWrite.created_at)).where(LitellmWrite.status == "pending")
+    )
+    return {
+        "litellm_reachable": await _reachable(request),
+        "outbox": {
+            "pending": counts["pending"],
+            "failed": counts["failed"],
+            "oldest_pending_at": oldest,
+        },  # fmt: skip
+        "spend_taken_at": await db.scalar(select(func.max(SpendSnapshot.taken_at))),
+        "last_sync": None,
+    }
+
+
+def _admin_only(principal) -> None:
+    if not principal.is_admin:
+        raise ApiError(403, "FORBIDDEN", "Forbidden")
+
+
+@router.get("/outbox")
+async def list_outbox(principal: CurrentPrincipal, db: Db, status: str | None = None):
+    _admin_only(principal)
+    if status is not None and status not in metrics.STATUSES:
+        raise invalid_request("status must be pending, applied or failed")
+    q = select(LitellmWrite).order_by(LitellmWrite.id.desc()).limit(200)
+    if status:
+        q = q.where(LitellmWrite.status == status)
+    return [
+        {
+            "id": w.id,
+            "entity": w.entity,
+            "entity_id": w.entity_id,
+            "endpoint": w.endpoint,
+            "status": w.status,
+            "attempts": w.attempts,
+            "last_error": w.last_error,
+            "idempotency_key": w.idempotency_key,
+            "created_at": w.created_at,
+        }  # fmt: skip
+        for w in await db.scalars(q)
+    ]
+
+
+@router.post("/outbox/{write_id}/retry")
+async def retry_outbox(write_id: int, principal: CurrentPrincipal, ctx: Write):
+    _admin_only(principal)
+    row = await ctx.db.get(LitellmWrite, write_id)
+    if row is None:
+        raise ApiError(404, "NOT_FOUND", "Not found")
+    ctx.audit("outbox", write_id, {"status": row.status}, {"status": "pending"}, ADMIN)
+    row.status = "pending"
+    await ctx.db.commit()
+    return {"id": write_id, "status": "pending", "request_id": ctx.request_id}
+
+
+@router.get("/metrics")
+async def prometheus(db: Db):
+    return Response(await metrics.render(db), media_type="text/plain; version=0.0.4")
