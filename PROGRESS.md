@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 6 (department allocation) done. `./scripts/test.sh` green (139 passed, 4 skipped).
+Phase 1, Step 7 (group and member allocation) done. `./scripts/test.sh` green (168 passed, 4 skipped).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -33,8 +33,12 @@ Phase 1, Step 6 (department allocation) done. `./scripts/test.sh` green (139 pas
 - Step 6: `app/services/{validation,groups}.py`, `app/routers/groups.py`, `app/schemas/groups.py`; `GET /departments`, `PUT /departments/{id}/split|model-allowances`,
   `PUT /groups/{id}/model-pots|limits` (all under `lock(DEPARTMENT)` where sums are read). Tests: `tests/unit/test_validation.py`, `tests/api/test_{split,model_pots,group_limits,concurrency_locks}.py`.
 
+- Step 7: `app/services/{personal_values,members}.py`, `app/routers/policies.py`; `PUT /groups/{id}/members/caps|member-defaults`,
+  `PUT /groups/{id}/members/{upn}/model-caps|limits`, `GET /policies`. Tests: `tests/unit/test_personal_values.py`,
+  `tests/api/test_member_{caps,model_caps,limits,defaults}.py`.
+
 ## Next
-- Step 7 of PLAN.md: group and member allocation (DR9 rule, caps, model caps, limits, member defaults, `GET /policies`).
+- Step 8 of PLAN.md: spend snapshot and wallet read models.
 
 ## Blockers
 - None.
@@ -79,6 +83,12 @@ Phase 1, Step 6 (department allocation) done. `./scripts/test.sh` green (139 pas
   Pot checks cover only the models in the request, so an old over-allocation of another model does not block an edit. `ApiError` bodies convert Decimal to float.
   `set_split` has an `await asyncio.sleep(0)` after the sum check; the lock test patches it to widen the race window. `check_limit` exists and is unit tested but is not used until Step 7.
   A PMO/viewer split returns 403; a user who cannot see the department at all (group head) gets 404.
+
+- Step 7: `check_limit` now follows D7 (admin may exceed `max`, never go below `min`); Step 6's version let admins bypass `min`. Bulk caps authorize every row first
+  (all-or-nothing); the envelope code is SELF_ALLOCATION_FORBIDDEN if any row is a self-target, else the first row error, with `details.rows`. `SELF_ALLOCATION_FORBIDDEN`
+  carries `details.owner_role` (member→group_head, group_head→department_rep, rep/admin→platform_admin). A department rep writing a plain member's values gets 422
+  `SCOPE_FORBIDDEN` (PLAN rule 2: head or admin only). Outbox entity for member writes is `employee` (id = upn), as in the seed. `GET /policies` omits the internal
+  `member_defaults.group.*` rows. A missing concurrency/rpm policy row skips the range check. SPEC §11.1 and PLAN agree on all Step 7 paths and fields.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

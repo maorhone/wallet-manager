@@ -31,6 +31,7 @@ def check_model_sums(
 
 
 def check_limit(field: str, value, policy: dict, is_admin: bool) -> ApiError | None:
-    if is_admin or policy["min"] <= value <= policy["max"]:
+    """D7: an admin may exceed ``max`` but never go below ``min``."""
+    if value >= policy["min"] and (is_admin or value <= policy["max"]):
         return None
     return limit_out_of_policy(field, value, policy["min"], policy["max"])

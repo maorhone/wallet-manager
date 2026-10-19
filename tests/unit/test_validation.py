@@ -43,3 +43,4 @@ def test_check_limit():
         "field": "max_parallel", "min": 1, "max": 8,
     }  # fmt: skip
     assert check_limit("max_parallel", 9, policy, True) is None
+    assert check_limit("max_parallel", 0, policy, True).code == "LIMIT_OUT_OF_POLICY"

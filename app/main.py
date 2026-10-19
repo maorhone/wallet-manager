@@ -10,7 +10,7 @@ from app.config import Settings
 from app.db import make_engine, make_session_factory
 from app.directory import FixtureDirectory
 from app.errors import ApiError, install_error_handlers
-from app.routers import departments, groups, me
+from app.routers import departments, groups, me, policies
 from app.security_headers import SecurityHeadersMiddleware
 from app.writes import install_replay_handler
 
@@ -43,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(me.router)
     app.include_router(departments.router)
     app.include_router(groups.router)
+    app.include_router(policies.router)
 
     @app.get("/healthz")
     async def healthz():
