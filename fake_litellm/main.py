@@ -17,6 +17,7 @@ from app.litellm_client import models as m
 from . import db
 from .controls import router as controls_router
 from .db import budget, jwt_mapping, org_member, organization, team, team_member, token, user
+from .enforcement import router as enforcement_router
 from .state import FakeState
 
 
@@ -438,6 +439,7 @@ def create_app(
 
     for router in (_org_router(), _team_router(), _key_router()):
         app.include_router(router, dependencies=[Depends(guard)])
+    app.include_router(enforcement_router, dependencies=[Depends(check_outage)])
     if test_controls is None:
         test_controls = os.environ.get("FAKE_TEST_CONTROLS", "1") == "1"
     if test_controls:

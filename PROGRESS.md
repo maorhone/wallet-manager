@@ -16,8 +16,12 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
   via `init_db`, also used by `scripts/dev_db.py`), tests in `tests/litellm/`, fixtures `fake_app`/`litellm`/`ro_engine`.
   `./scripts/test.sh` green (27 tests).
 
+- Step 3: `fake_litellm/enforcement.py` (`/chat/completions`, `/v1/chat/completions`; key/JWT auth, R7 concurrency, R1/R2/R5/R6 budgets,
+  SpendLogs charging, `make_test_jwt`), `/_test/config` and `/_test/spend`, `tests/contract/` (fake|real `target` fixture, helpers, README,
+  A2/A3/A5), `tests/litellm/test_fake_enforcement.py`. `./scripts/test.sh` green (35 passed, 4 skipped real-target cases).
+
 ## Next
-- Step 3 of PLAN.md: fake runtime enforcement (§3.1) and contract-test harness.
+- Step 4 of PLAN.md: BFF auth (ADFS OIDC + dev login), session, CSRF, CSP, roles, `GET /me`, seed fixture.
 
 ## Blockers
 - None.
@@ -41,6 +45,9 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
 - Step 2: `KeyUpdate`/`KeyBlock` take `key` (token hash or plaintext; the fake accepts both). `/health/liveliness` is unauthenticated, as in LiteLLM.
   `spend_rows` buckets days in UTC; the caller maps periods to `APP_TIMEZONE`.
 - Step 2: the fake does not yet enforce R14 (team budget <= org budget at allocation time); add it in Step 3 if the contract tests need it.
+- Step 3: the contract tests did not need R14, so the fake still does not enforce it. Model budgets (R5) sum all SpendLogs and ignore `time_period`.
+  Fake error scopes: `key|team_member|team|organization|team_model|member_model` (a key-level model entry reports `key`). Fake JWT issuer is
+  `https://adfs.test`, secret from `FAKE_JWT_SECRET`. The `real` target cases are untested here (skipped without env).
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).
