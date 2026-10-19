@@ -1,6 +1,8 @@
 import uuid
+from decimal import Decimal
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -113,7 +115,11 @@ def _envelope(request: Request, status: int, code: str, message: str, **extra) -
     body = {"code": code, "message": message}
     body.update({k: v for k, v in extra.items() if v is not None})
     body["request_id"] = rid
-    return JSONResponse(body, status_code=status, headers={"X-Request-ID": rid})
+    return JSONResponse(
+        jsonable_encoder(body, custom_encoder={Decimal: float}),
+        status_code=status,
+        headers={"X-Request-ID": rid},
+    )
 
 
 def install_error_handlers(app: FastAPI) -> None:

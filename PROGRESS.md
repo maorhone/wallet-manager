@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 5 (write path, outbox) done. `./scripts/test.sh` green (118 passed, 4 skipped).
+Phase 1, Step 6 (department allocation) done. `./scripts/test.sh` green (139 passed, 4 skipped).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -30,8 +30,11 @@ Phase 1, Step 5 (write path, outbox) done. `./scripts/test.sh` green (118 passed
   `scripts/seed.py [--reset]` resets the fake, seeds and drains). Tests: `tests/test_write_path.py`, `test_outbox.py`, `test_seed_provisioning.py`,
   `tests/api/test_department_budget.py`; fixtures `prov_settings`/`provisioned`/`put_budget`.
 
+- Step 6: `app/services/{validation,groups}.py`, `app/routers/groups.py`, `app/schemas/groups.py`; `GET /departments`, `PUT /departments/{id}/split|model-allowances`,
+  `PUT /groups/{id}/model-pots|limits` (all under `lock(DEPARTMENT)` where sums are read). Tests: `tests/unit/test_validation.py`, `tests/api/test_{split,model_pots,group_limits,concurrency_locks}.py`.
+
 ## Next
-- Step 6 of PLAN.md: department allocation (split, model allowances, group pots, group limits, advisory locks).
+- Step 7 of PLAN.md: group and member allocation (DR9 rule, caps, model caps, limits, member defaults, `GET /policies`).
 
 ## Blockers
 - None.
@@ -71,6 +74,11 @@ Phase 1, Step 5 (write path, outbox) done. `./scripts/test.sh` green (118 passed
   Builders for `/team/member_update`, `/key/update`, `/team/update`, `/organization/update` exist for later steps. The enqueue-time payload is a preview
   (null when state is missing, e.g. the JWT mapping before the key exists); the apply-time payload overwrites it.
 - Step 5: one edit to app/seed.py's `_provision` and `ruff format app/outbox/worker.py` were done via a script/formatter run instead of Edit/Write.
+
+- Step 6: split always writes one `department` audit row (pmo_pool/reserve) plus one `group` row per changed base; `archived` groups are left out of the sum.
+  Pot checks cover only the models in the request, so an old over-allocation of another model does not block an edit. `ApiError` bodies convert Decimal to float.
+  `set_split` has an `await asyncio.sleep(0)` after the sum check; the lock test patches it to widen the race window. `check_limit` exists and is unit tested but is not used until Step 7.
+  A PMO/viewer split returns 403; a user who cannot see the department at all (group head) gets 404.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).
