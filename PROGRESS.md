@@ -50,13 +50,20 @@ Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives
   ScopeSwitcher, PeriodSelector, StateBadge, EmptyState, ErrorState), `pages/Login.tsx`, routes with placeholder pages. `scripts/e2e_stack.py`,
   `frontend/e2e/{fixtures,shell.spec}.ts`, `playwright.config.ts`. test.sh now runs lint, typecheck, vitest (8) and Playwright (3) after pytest.
 
+- Step 11: `frontend/src/components/{WalletCard, ModelTable, SharesTable, UsageChart, OwnersBox, LimitsBox}.tsx`, `pages/MyWallet.tsx` (route `/wallet`),
+  `useMyWallet`/`useMyUsage`, `he.wallet` strings. Tests: `WalletCard.test.tsx` (8), `e2e/wallet.spec.ts` (2, incl. U4).
+  `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 16; Playwright 5).
+
 ## Next
-- Step 11 of PLAN.md: "הארנק שלי" (My wallet).
+- Step 12 of PLAN.md: "הקבוצה" (Group): Overview, Members, History.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 11: `/me/shares` rows have no project name or per-share usage yet (Phase 1 has no grants), so `SharesTable` shows the grant id and `used` defaults to 0.
+  The usage chart draws daily stacked bars (left axis) plus a running-total line against the cap line, since a monthly cap cannot be compared with a single day.
+  The "contact" alert for group/department blocks names the group head from `owners.base_cap`.
 - PLAN.md Step 1 says "20 tables" but lists 18; SPEC §8.2 has exactly 18. Followed the spec (18).
 - pgembed URI `postgresql://postgres:@/postgres?host=/tmp/..` works with `postgresql+asyncpg://`:
   SQLAlchemy forwards `host=` to asyncpg as a unix-socket dir (verified). `to_asyncpg_url()` does the swap.

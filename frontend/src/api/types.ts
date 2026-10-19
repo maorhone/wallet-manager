@@ -59,3 +59,63 @@ export interface DevUser {
   display_name: string;
   roles: string[];
 }
+
+export type ApiState =
+  | 'healthy'
+  | 'near_limit'
+  | 'blocked_own'
+  | 'blocked_group'
+  | 'blocked_department'
+  | 'over_allocated'
+  | 'muted';
+
+export interface Person {
+  upn: string;
+  display_name: string;
+}
+
+export interface Owner {
+  role: string;
+  people: Person[];
+}
+
+export interface MyWallet {
+  period: string;
+  reset_date: string;
+  spend_taken_at: string | null;
+  read_only: boolean;
+  sync_status: SyncStatus;
+  wallet: {
+    total: number;
+    base_cap: number;
+    shares_total: number;
+    used: number;
+    remaining: number;
+    percent: number;
+    state: ApiState;
+    effective_remaining: number;
+    binding: {
+      level: 'self' | 'group' | 'department';
+      group_percent: number;
+      department_percent: number;
+    };
+  };
+  models: { model: string; cap: number | null; used: number; remaining: number | null }[];
+  shares: {
+    id: number;
+    grant_id: number;
+    amount: number;
+    used?: number;
+    expires_at: string | null;
+  }[];
+  limits: { max_parallel: number | null; rpm_limit: number | null };
+  group: { id: number; name: string; percent: number; state: ApiState };
+  department: { id: number; name: string; percent: number };
+  owners: Record<'base_cap' | 'model_caps' | 'limits' | 'shares', Owner>;
+}
+
+export interface UsagePoint {
+  day: string;
+  model: string;
+  spend: number;
+}

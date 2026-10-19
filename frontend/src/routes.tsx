@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter, useParams } from 'react-router-dom';
 import { Shell } from './App';
 import { he } from './i18n/he';
 import Login from './pages/Login';
+import MyWallet from './pages/MyWallet';
 
 // Page bodies arrive in Steps 11-13; the shell only owns the routes.
 const Placeholder = ({ title }: { title: string }) => <Title order={3}>{title}</Title>;
@@ -23,7 +24,7 @@ export const router = createBrowserRouter([
     path: '/',
     element: <Shell />,
     children: [
-      { path: 'wallet', element: <Placeholder title={he.myWallet} /> },
+      { path: 'wallet', element: <MyWallet /> },
       { path: 'group/:id', element: <Navigate to="overview" replace /> },
       { path: 'group/:id/:tab', element: <GroupPage /> },
       { path: 'department/:id', element: <Navigate to="overview" replace /> },

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch, apiPost } from './client';
-import type { DevUser, Me, Status, WriteResponse } from './types';
+import type { DevUser, Me, MyWallet, Status, UsagePoint, WriteResponse } from './types';
 
 export const keys = {
   me: ['me'] as const,
   status: ['status'] as const,
   devUsers: ['dev-users'] as const,
+  wallet: (period: string) => ['me-wallet', period] as const,
+  usage: (from: string, to: string) => ['me-usage', from, to] as const,
 };
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => apiFetch<Me>('/me') });
@@ -47,3 +49,18 @@ export const useRetryOutbox = () => {
     onSuccess: () => qc.invalidateQueries(),
   });
 };
+
+export const useMyWallet = (period: string) =>
+  useQuery({
+    queryKey: keys.wallet(period),
+    queryFn: () => apiFetch<MyWallet>(`/me/wallet?period=${period}`),
+    enabled: period !== '',
+    refetchInterval: 15000,
+  });
+
+export const useMyUsage = (from: string, to: string) =>
+  useQuery({
+    queryKey: keys.usage(from, to),
+    queryFn: () => apiFetch<UsagePoint[]>(`/me/usage?from=${from}&to=${to}`),
+    enabled: from !== '',
+  });
