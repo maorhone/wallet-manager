@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
+Phase 1, Step 4 (BFF auth) done. `./scripts/test.sh` green (104 passed, 4 skipped).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -20,8 +20,13 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
   SpendLogs charging, `make_test_jwt`), `/_test/config` and `/_test/spend`, `tests/contract/` (fake|real `target` fixture, helpers, README,
   A2/A3/A5), `tests/litellm/test_fake_enforcement.py`. `./scripts/test.sh` green (35 passed, 4 skipped real-target cases).
 
+- Step 4: `app/auth/{oidc,dev,session,csrf}.py` (signed `wm_session` cookie, authlib OIDC with PKCE/nonce, dev login only when `DEV_AUTH=1`,
+  double-submit CSRF middleware), `app/security_headers.py` (CSP + nosniff), `app/directory.py` (`FixtureDirectory`), `app/permissions.py`
+  (Principal, §12.2 helpers, `target_tier`), `GET /me`, `seed/dev.yaml` + `app/seed.py` + `scripts/seed.py [--reset]`, tests in `tests/auth/`,
+  `tests/test_permissions.py`, `tests/test_me.py`; fixtures `seeded`/`make_client`/`login` in `tests/conftest.py`.
+
 ## Next
-- Step 4 of PLAN.md: BFF auth (ADFS OIDC + dev login), session, CSRF, CSP, roles, `GET /me`, seed fixture.
+- Step 5 of PLAN.md: write path, outbox worker, audit, provisioning seed, `PUT /departments/{id}/budget`.
 
 ## Blockers
 - None.
@@ -48,6 +53,13 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
 - Step 3: the contract tests did not need R14, so the fake still does not enforce it. Model budgets (R5) sum all SpendLogs and ignore `time_period`.
   Fake error scopes: `key|team_member|team|organization|team_model|member_model` (a key-level model entry reports `key`). Fake JWT issuer is
   `https://adfs.test`, secret from `FAKE_JWT_SECRET`. The `real` target cases are untested here (skipped without env).
+
+- Step 4: permission helpers are `async f(session, principal, id)` and return the authorizing role. An unknown entity, or one the actor cannot
+  view at all, gives 404; visible but not permitted gives 403. `can_edit_dept_budget(principal)` is sync (admin only).
+- Step 4: scopes in `/me` carry `role` per entry; a global binding (admin, global viewer) appears as `{kind:"platform", role}`; `roles` also lists the implicit `employee`.
+- Step 4: the fixture directory's users double as the seed's employees (group = the user's DN that matches a group's `ad_group_dn`).
+  `SEED_FILE` setting (default `seed/dev.yaml`). Bad state/nonce/signature at the OIDC callback returns 401 `UNAUTHENTICATED`.
+- Step 4: the `groups` claim in the session is filtered at login; a `role_binding` added later takes effect only after re-login. `joserfc` (an authlib dependency) is imported directly.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

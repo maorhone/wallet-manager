@@ -17,6 +17,7 @@ from app.config import Settings
 from app.db import create_database, to_asyncpg_url
 from app.litellm_client import LiteLLMClient
 from app.main import create_app
+from app.seed import seed
 from fake_litellm import db as fake_db
 from fake_litellm.main import create_app as create_fake_app
 
@@ -109,6 +110,45 @@ async def ro_engine(fake_engine, litellm_url):
     eng = create_async_engine(url)
     yield eng
     await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def seeded(settings):
+    """Dev fixture rows loaded into the (freshly truncated) WM database."""
+    app = create_app(settings)
+    await seed(app.state.session_factory, settings.seed_file)
+    yield app.state.session_factory
+    await app.state.engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def make_client(settings, seeded):
+    """Build an ASGI client against the seeded DB; overrides patch Settings fields."""
+    made = []
+
+    async def _make(**overrides) -> httpx.AsyncClient:
+        app = create_app(settings.model_copy(update=overrides))
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        made.append((client, app))
+        return client
+
+    yield _make
+    for client, app in made:
+        await client.aclose()
+        await app.state.engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def login(make_client):
+    """Client logged in through the dev login as the given persona."""
+
+    async def _login(who: str, **overrides) -> httpx.AsyncClient:
+        client = await make_client(dev_auth=True, **overrides)
+        r = await client.post("/auth/dev/login", json={"upn": f"{who}@corp.example"})
+        assert r.status_code == 200, r.text
+        return client
+
+    return _login
 
 
 @pytest_asyncio.fixture

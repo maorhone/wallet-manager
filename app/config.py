@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     litellm_database_url: str = ""
     app_timezone: str = "Asia/Jerusalem"
     dev_auth: bool = False
+    seed_file: str = "seed/dev.yaml"
     session_secret: str = "change-me"
     cookie_secure: bool = False
     oidc_discovery_url: str = ""
