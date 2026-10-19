@@ -1,10 +1,13 @@
+import uuid
 from pathlib import Path
 
 import yaml
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import Department, Employee, Grp, Policy, RoleBinding
+from app.config import Settings
+from app.models import Department, Employee, Grp, LitellmWrite, Policy, RoleBinding
+from app.writes import WriteContext
 
 _DEPT_FIELDS = ("name", "ad_group_dn", "budget", "pmo_pool", "reserve")
 _GROUP_FIELDS = ("name", "ad_group_dn", "kind", "base_budget")
@@ -23,8 +26,41 @@ async def _upsert(session: AsyncSession, model, key_col: str, key: str, values: 
     return row
 
 
-async def seed(factory: async_sessionmaker[AsyncSession], path: str | Path, reset: bool = False):
-    """Load WM rows from the fixture. Idempotent; ``reset`` truncates every table first."""
+_JOINER = ("/user/new", "/team/member_add", "/key/generate", "/jwt/key/mapping/new")  # §9.3
+
+
+async def _provision(session: AsyncSession, settings: Settings) -> None:
+    """Enqueue the LiteLLM objects the seeded rows need: orgs, teams, then the Joiner sequence."""
+    ctx = WriteContext(session, settings, "seed", str(uuid.uuid4()), "initial provisioning")
+    depts = await session.scalars(select(Department).order_by(Department.id))
+    steps = [("department", str(d.id), "/organization/new") for d in depts]
+    groups = await session.scalars(select(Grp).order_by(Grp.id))
+    steps += [("group", str(g.id), "/team/new") for g in groups]
+    employees = await session.scalars(
+        select(Employee).where(Employee.group_id.is_not(None)).order_by(Employee.upn)
+    )
+    steps += [("employee", e.upn, ep) for e in employees for ep in _JOINER]
+    known = await session.execute(
+        select(LitellmWrite.entity, LitellmWrite.entity_id, LitellmWrite.endpoint)
+    )
+    done = {tuple(r) for r in known}
+    for entity, entity_id, endpoint in steps:
+        if (entity, entity_id, endpoint) in done:
+            continue
+        ctx.audit(entity, entity_id, None, {"enqueue": endpoint}, "sync_service")
+        await ctx.enqueue(entity, entity_id, endpoint)
+
+
+async def seed(
+    factory: async_sessionmaker[AsyncSession],
+    path: str | Path,
+    reset: bool = False,
+    settings: Settings | None = None,
+):
+    """Load WM rows from the fixture. Idempotent; ``reset`` truncates every table first.
+
+    With ``settings`` it also enqueues the LiteLLM provisioning (once per object).
+    """
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     async with factory() as session, session.begin():
         if reset:
@@ -81,3 +117,5 @@ async def seed(factory: async_sessionmaker[AsyncSession], path: str | Path, rese
                     scope_id=scope_ids[b["scope_kind"]][b.get("scope")],
                 )  # fmt: skip
             )
+        if settings is not None:
+            await _provision(session, settings)

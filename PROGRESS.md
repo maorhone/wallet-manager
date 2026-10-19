@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 4 (BFF auth) done. `./scripts/test.sh` green (104 passed, 4 skipped).
+Phase 1, Step 5 (write path, outbox) done. `./scripts/test.sh` green (118 passed, 4 skipped).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -25,8 +25,13 @@ Phase 1, Step 4 (BFF auth) done. `./scripts/test.sh` green (104 passed, 4 skippe
   (Principal, §12.2 helpers, `target_tier`), `GET /me`, `seed/dev.yaml` + `app/seed.py` + `scripts/seed.py [--reset]`, tests in `tests/auth/`,
   `tests/test_permissions.py`, `tests/test_me.py`; fixtures `seeded`/`make_client`/`login` in `tests/conftest.py`.
 
+- Step 5: `app/writes.py` (WriteContext, `write_context` dependency, replay handler, `sync_status`, `write_response`), `app/outbox/{desired,enqueue,worker}.py`,
+  `app/worker.py`, `PUT /departments/{id}/budget` (`app/services|routers|schemas/departments.py`), seed provisioning (`seed(..., settings=)`;
+  `scripts/seed.py [--reset]` resets the fake, seeds and drains). Tests: `tests/test_write_path.py`, `test_outbox.py`, `test_seed_provisioning.py`,
+  `tests/api/test_department_budget.py`; fixtures `prov_settings`/`provisioned`/`put_budget`.
+
 ## Next
-- Step 5 of PLAN.md: write path, outbox worker, audit, provisioning seed, `PUT /departments/{id}/budget`.
+- Step 6 of PLAN.md: department allocation (split, model allowances, group pots, group limits, advisory locks).
 
 ## Blockers
 - None.
@@ -60,6 +65,12 @@ Phase 1, Step 4 (BFF auth) done. `./scripts/test.sh` green (104 passed, 4 skippe
 - Step 4: the fixture directory's users double as the seed's employees (group = the user's DN that matches a group's `ad_group_dn`).
   `SEED_FILE` setting (default `seed/dev.yaml`). Bad state/nonce/signature at the OIDC callback returns 401 `UNAUTHENTICATED`.
 - Step 4: the `groups` claim in the session is filtered at login; a `role_binding` added later takes effect only after re-login. `joserfc` (an authlib dependency) is imported directly.
+
+- Step 5: `drain(sf, client, settings)` takes settings (JWT issuer, builders). `write_response` commits the transaction. A replayed request returns 200 with
+  the audit rows' `after` values (they include context ids such as `department_id`). `/team/member_add` and `/user/new` treat a 400 "already ..." as applied.
+  Builders for `/team/member_update`, `/key/update`, `/team/update`, `/organization/update` exist for later steps. The enqueue-time payload is a preview
+  (null when state is missing, e.g. the JWT mapping before the key exists); the apply-time payload overwrites it.
+- Step 5: one edit to app/seed.py's `_provision` and `ruff format app/outbox/worker.py` were done via a script/formatter run instead of Edit/Write.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

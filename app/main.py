@@ -10,8 +10,9 @@ from app.config import Settings
 from app.db import make_engine, make_session_factory
 from app.directory import FixtureDirectory
 from app.errors import ApiError, install_error_handlers
-from app.routers import me
+from app.routers import departments, me
 from app.security_headers import SecurityHeadersMiddleware
+from app.writes import install_replay_handler
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,6 +24,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.directory = FixtureDirectory(settings.seed_file)
     app.state.oauth = build_oauth(settings)
     install_error_handlers(app)
+    install_replay_handler(app)
 
     # Starlette runs the last-added middleware first: session outermost, then headers, then CSRF.
     app.add_middleware(CsrfMiddleware)
@@ -39,6 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.dev_auth:
         app.include_router(dev.router)
     app.include_router(me.router)
+    app.include_router(departments.router)
 
     @app.get("/healthz")
     async def healthz():

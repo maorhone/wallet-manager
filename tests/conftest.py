@@ -151,6 +151,37 @@ async def login(make_client):
     return _login
 
 
+@pytest.fixture
+def prov_settings(settings) -> Settings:
+    """Settings whose JWT issuer matches the fake LiteLLM's."""
+    return settings.model_copy(update={"jwt_issuer": "https://adfs.test"})
+
+
+@pytest_asyncio.fixture
+async def provisioned(seeded, prov_settings, litellm):
+    """Seed + Joiner provisioning enqueued and drained into the fake LiteLLM."""
+    from app.outbox.worker import drain
+
+    await seed(seeded, prov_settings.seed_file, settings=prov_settings)
+    result = await drain(seeded, litellm, prov_settings)
+    assert not result.failed and not result.stopped
+    return seeded
+
+
+@pytest.fixture
+def put_budget():
+    async def _put(client, dept_id=1, budget=1200000, reason="Q3 plan", **headers):
+        h = {"X-CSRF-Token": client.cookies["wm_csrf"], **headers}
+        if reason is not None:
+            h["X-Change-Reason"] = reason
+        return await client.put(
+            f"/departments/{dept_id}/budget", json={"budget": budget, "budget_period": "1mo"},
+            headers=h,
+        )  # fmt: skip
+
+    return _put
+
+
 @pytest_asyncio.fixture
 async def api(settings):
     app = create_app(settings)
