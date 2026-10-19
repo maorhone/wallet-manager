@@ -22,3 +22,4 @@ test-results/
 .turbo/
 pgdata/
 *.log
+frontend/.e2e-state.json

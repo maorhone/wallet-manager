@@ -3,7 +3,7 @@ Allocates model budgets, per-model allowances and concurrency down an org hierar
 
 ## Commands
 - Backend install: `uv sync` (or `python -m venv .venv && uv pip install -e ".[dev]"`)
-- Frontend install: `cd frontend && npm ci`
+- Frontend install: `npm ci` (repo root, npm workspaces)
 - Dev API: `uv run uvicorn app.main:app --host 0.0.0.0 --port 4101 --reload`
 - Dev UI: `cd frontend && npm run dev -- --port 4100 --host 0.0.0.0`
 - Fake LiteLLM: `uv run uvicorn fake_litellm.main:app --host 0.0.0.0 --port 4102`

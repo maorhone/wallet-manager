@@ -1,0 +1,21 @@
+{
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "lint": "eslint frontend && prettier --check frontend package.json .prettierrc eslint.config.js",
+    "typecheck": "npm run -w frontend typecheck",
+    "test": "npm run -w frontend test",
+    "e2e": "npm run -w frontend e2e"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-formatter-unix": "^9.0.1",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "prettier": "^3.0.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}

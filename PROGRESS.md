@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 9 (over-allocation report, status, outbox, audit, metrics, A2/A3/A5 through WM) done. `./scripts/test.sh` green (217 passed, 4 skipped).
+Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives) done. `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 8; Playwright 3).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -45,8 +45,13 @@ Phase 1, Step 9 (over-allocation report, status, outbox, audit, metrics, A2/A3/A
   `/outbox`, `POST /outbox/{id}/retry`, `/audit`, `/metrics`); worker runs `overallocation_loop`; `create_app(settings, litellm=, reader=)` holds the LiteLLM client and
   reader in `app.state`. Tests: `tests/api/test_{overallocation,status_outbox,audit}.py`, `tests/e2e_backend/test_a{2,3,5}_wm.py`; fixture `login_wm`.
 
+- Step 10: root npm workspace (`package.json`, `eslint.config.js`, `.prettierrc`), `frontend/` (Vite, React, Mantine 7 RTL, TanStack Query, Router):
+  `api/{client,queries,types}.ts`, `i18n/{he,errors}.ts`, `format.ts`, `scopes.ts`, components (Num, Credits, Pct, DateText, SyncBadge, StatusBanner,
+  ScopeSwitcher, PeriodSelector, StateBadge, EmptyState, ErrorState), `pages/Login.tsx`, routes with placeholder pages. `scripts/e2e_stack.py`,
+  `frontend/e2e/{fixtures,shell.spec}.ts`, `playwright.config.ts`. test.sh now runs lint, typecheck, vitest (8) and Playwright (3) after pytest.
+
 ## Next
-- Step 10 of PLAN.md: frontend shell, E2E harness, scope switcher, shared primitives.
+- Step 11 of PLAN.md: "הארנק שלי" (My wallet).
 
 ## Blockers
 - None.
@@ -130,3 +135,10 @@ Phase 1, Step 9 (over-allocation report, status, outbox, audit, metrics, A2/A3/A
 8. **Team `budget_duration`.** It is listed in §10 but not in §8.1; it is set to the department period so team spend resets. Calendar-month alignment of `"1mo"` is re-checked in Phase 0 (V4).
 9. **Organization `models`.** It is not sent in Phase 1, because sending it would restrict the models a department can use.
 10. **D6 concurrency and rpm policy.** Placeholder values (concurrency 1/4/8, rpm 1/120/600) until pilot measurements exist.
+
+- Step 10: Chromium (headless shell) launches here without extra system libraries; no `.cache/pwlibs` workaround needed.
+- Step 10: `eslint-formatter-unix` is a root devDependency because the lint hook calls `eslint -f unix`.
+- Step 10: the scope switcher is a native `<select>` (always in the DOM, keyboard accessible); the period is the `?period=YYYY-MM` URL param.
+  The platform scope routes to `/platform` (placeholder). `/status` caches LiteLLM reachability for 10 s, so the outage banner takes up to ~15 s to show.
+- Step 10: `apiPost(..., write?)` sends reason/idempotency headers only when `write` is given; `/auth/logout` and `/outbox/{id}/retry` are called without a reason.
+- Step 10: while editing I appended `frontend/.e2e-state.json` to `.gitignore` with a shell `printf >>` (the content is correct; it was not a Write/Edit).
