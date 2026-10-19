@@ -1,5 +1,3 @@
-The project's guard hook blocked writing the plan file, because the plan path is outside the project. As you asked, the full plan is below for you to save as PLAN.md.
-
 # PLAN.md: Wallet Manager for LiteLLM, Phase 1
 
 ## Context
