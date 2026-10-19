@@ -1,0 +1,98 @@
+erDiagram
+  LiteLLM_OrganizationTable }o--|| LiteLLM_BudgetTable : "budget_id"
+  LiteLLM_TeamMembership }o--|| LiteLLM_BudgetTable : "budget_id"
+  LiteLLM_TeamTable }o--|| LiteLLM_OrganizationTable : "organization_id"
+  LiteLLM_UserTable }o--|| LiteLLM_OrganizationTable : "organization_id"
+  LiteLLM_OrganizationMembership }o--|| LiteLLM_UserTable : "user_id"
+  LiteLLM_OrganizationMembership }o--|| LiteLLM_OrganizationTable : "organization_id"
+  LiteLLM_TeamMembership }o..|| LiteLLM_TeamTable : "team_id"
+  LiteLLM_TeamMembership }o..|| LiteLLM_UserTable : "user_id"
+  LiteLLM_VerificationToken }o..|| LiteLLM_TeamTable : "team_id"
+  LiteLLM_SpendLogs }o..|| LiteLLM_VerificationToken : "api_key"
+  LiteLLM_VerificationToken_TeamKey }o..|| LiteLLM_TeamTable : "team_id"
+  LiteLLM_SpendLogs }o..|| LiteLLM_ProxyModelTable : "model_group"
+  LiteLLM_VerificationToken ||..|| LiteLLM_UserTable : "user_id 1:1"
+  LiteLLM_JWTKeyMapping ||--|| LiteLLM_VerificationToken : "token 1:1"
+  LiteLLM_OrganizationTable {
+    field organization_id PK
+    field organization_alias  "שם המחלקה"
+    field budget_id FK "תקציב המחלקה"
+    field models  "מודלים מותרים"
+  }
+  LiteLLM_BudgetTable {
+    field budget_id PK
+    field max_budget  "תקרה"
+    field budget_duration  "איפוס, למשל 30d"
+    field model_max_budget  "תקרת X לעובד · במחלקה לא נאכף"
+    field temp_budget_increase  "תוספת פרויקט"
+    field temp_budget_expiry  "תפוגת התוספת"
+  }
+  LiteLLM_OrganizationMembership {
+    field user_id PK, FK
+    field organization_id PK, FK
+    field user_role  "org_admin"
+  }
+  LiteLLM_TeamTable {
+    field team_id PK "שם קבוצת ה-AD"
+    field organization_id FK "המחלקה"
+    field max_budget  "תקציב הקבוצה: בסיס + מענקי פרויקט"
+    field spend  "צריכת הקבוצה"
+    field budget_duration  "איפוס"
+    field model_max_budget  "קופת X של הקבוצה"
+    field tpm_limit  "עומס הקבוצה בזמן ריצה"
+    field max_parallel_requests  "קיים אבל לא נאכף"
+    field members_with_roles  "ראש הקבוצה כ-admin"
+    field metadata  "model_tpm_limit לקבוצה"
+  }
+  LiteLLM_TeamMembership {
+    field user_id PK
+    field team_id PK
+    field budget_id FK "מכסה אישית"
+    field spend  "צריכה בקבוצה"
+  }
+  LiteLLM_UserTable {
+    field user_id PK "upn של העובד"
+    field sso_user_id
+    field organization_id FK "ריק · המחלקה נגזרת מהקבוצה"
+    field teams  "קבוצה אחת"
+  }
+  LiteLLM_VerificationToken {
+    field token PK
+    field user_id  "1:1 עם המשתמש"
+    field team_id  "הקבוצה הנוכחית"
+    field max_parallel_requests  "המגבלה העיקרית · נספר ב-Redis"
+    field rpm_limit  "גבוה · רשת ביטחון ללולאות"
+    field metadata  "model_tpm_limit · קצב ל-X"
+    field model_max_budget  "להשאיר ריק · עוקף את קופת הקבוצה"
+    field organization_id FK "ריק, נגזר מהקבוצה"
+  }
+  LiteLLM_VerificationToken_TeamKey {
+    field token PK
+    field user_id  "ריק"
+    field team_id  "הקבוצה"
+    field max_budget  "תקרה משלו"
+    field max_parallel_requests  "מקביליות משלו"
+    field rpm_limit  "רשת ביטחון"
+  }
+  LiteLLM_JWTKeyMapping {
+    field id PK
+    field jwt_issuer  "ADFS"
+    field jwt_claim_name  "upn"
+    field jwt_claim_value  "הערך של העובד"
+    field token FK "המפתח"
+  }
+  LiteLLM_SpendLogs {
+    field request_id PK
+    field api_key  "hash של המפתח"
+    field user
+    field team_id
+    field organization_id
+    field model_group
+    field startTime_endTime  "למדידת חפיפה בפיילוט"
+    field spend
+  }
+  LiteLLM_ProxyModelTable {
+    field model_id PK "deployment"
+    field model_name  "קבוצת המודל"
+    field litellm_params  "מקביליות למודל · מחולק ב-workers"
+  }
