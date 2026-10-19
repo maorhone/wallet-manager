@@ -60,6 +60,7 @@ async def test_head_sees_consumers_and_actions(login, seeded, snapshot):
         "edit_defaults": True,
     }
     assert body["period"] == CURRENT and body["read_only"] is False
+    assert body["group"]["default_member_cap"] == 0  # prefill for the defaults dialog
 
 
 async def test_summary_hidden_outside_scope(login):

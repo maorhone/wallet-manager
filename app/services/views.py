@@ -290,6 +290,7 @@ async def members_list(
         rows.append(
             {
                 **r,
+                "model_tpm_limits": members[r["upn"]].model_tpm_limits or {},
                 "is_group_head": r["upn"] in heads,
                 "sync_status": syncs[r["upn"]],
                 "editable": editable,
@@ -343,7 +344,11 @@ async def group_summary(
     roles = principal.group_roles(group_id, group.department_id)
     return {
         **_envelope(pc, spend),
-        "group": {"id": group.id, "name": group.name},
+        "group": {
+            "id": group.id,
+            "name": group.name,
+            "default_member_cap": group.default_member_cap,
+        },  # fmt: skip
         "wallet": {k: g.card[k] for k in (*CARD, "base", "grants")},
         "pots": [
             {

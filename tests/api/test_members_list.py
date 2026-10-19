@@ -27,7 +27,8 @@ async def test_head_row_not_editable_names_rep(login, snapshot):
     )  # fmt: skip
     assert dani["state"] == "healthy" and dani["status"] == "active"
     assert dani["sync_status"] in ("applied", "pending", "failed")
-    assert {"display_name", "shares_total", "model_caps", "max_parallel", "rpm_limit"} <= set(dani)
+    wanted = {"display_name", "shares_total", "model_caps", "max_parallel", "rpm_limit"}
+    assert wanted | {"model_tpm_limits"} <= set(dani)  # the UI resends tpm limits unchanged
     assert r.json()["read_only"] is False
 
 

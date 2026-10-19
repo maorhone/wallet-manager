@@ -6,17 +6,7 @@ import { he } from '../i18n/he';
 import { Credits } from './Credits';
 import { DateText } from './DateText';
 import { Pct } from './Pct';
-import { StateBadge, type WalletState } from './StateBadge';
-
-const STATE: Record<ApiState, WalletState | null> = {
-  healthy: 'healthy',
-  near_limit: 'near',
-  blocked_own: 'blockedOwn',
-  blocked_group: 'blockedGroup',
-  blocked_department: 'blockedDept',
-  over_allocated: 'overAllocated',
-  muted: null,
-};
+import { API_STATE, StateBadge } from './StateBadge';
 
 export interface WalletCardProps {
   title: string;
@@ -47,7 +37,7 @@ const Stat = ({ label, children }: { label: string; children: ReactNode }) => (
 /** §12.3 wallet card; the same component at every level. */
 export function WalletCard(p: WalletCardProps) {
   const fill = Math.min(p.percent, 1) * 100;
-  const badge = p.state ? STATE[p.state] : null;
+  const badge = p.state ? API_STATE[p.state] : null;
   const over = p.allocated !== undefined && p.allocated > p.total;
   return (
     <Card withBorder data-testid="wallet-card">

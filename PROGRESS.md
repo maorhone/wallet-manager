@@ -54,8 +54,13 @@ Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives
   `useMyWallet`/`useMyUsage`, `he.wallet` strings. Tests: `WalletCard.test.tsx` (8), `e2e/wallet.spec.ts` (2, incl. U4).
   `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 16; Playwright 5).
 
+- Step 12: `frontend/src/components/{AllocationTable, ChangeSummaryDialog, HistoryTimeline, MemberSidePanel, MemberDefaultsDialog}.tsx`,
+  `pages/group/{GroupPage, Overview, Members, History}.tsx` (routes `/group/:id/{overview,members,history}`), `useGroupSummary|useGroupMembers|usePolicies|useGroupAudit|useGroupWrite`,
+  `he.groupPage|summary|history`. Backend: `/groups/{id}/members` rows carry `model_tpm_limits`, `/groups/{id}/summary` carries `group.default_member_cap`.
+  Tests: `AllocationTable.test.tsx` (5), `e2e/group.spec.ts` (6). `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 11).
+
 ## Next
-- Step 12 of PLAN.md: "הקבוצה" (Group): Overview, Members, History.
+- Step 13 of PLAN.md: "המחלקה" (Department): Overview and Split; viewer, multi-role and RTL acceptance; Phase 1 wrap-up.
 
 ## Blockers
 - None.
@@ -130,6 +135,12 @@ Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives
   `/status` caches `client.health()` for 10 s per app instance. `/metrics` is unauthenticated and refreshes outbox depth and snapshot age from the DB on each scrape; the
   `wm_overallocation_findings` gauge is set by the worker and by `/reports/overallocation` (the worker is a separate process, so its gauge is not on the API's `/metrics` until Phase 2/3 adds a worker scrape port).
   `wm_validation_rejections_total` counts 422 `ApiError`s by code.
+
+- Step 12: the Members table hides members who left (the server excludes them from sums too). The footer total is the group base; the overallocation factor is not
+  in the summary, so the client preview uses factor 1 (the server stays authoritative). The side panel's limits write resends the member's `model_tpm_limits` unchanged
+  because the endpoint replaces them. The defaults dialog only sets the cap: the stored default model caps cannot be read back, so saving sends `model_caps: {}`.
+  Row errors show a short label; the full Hebrew message with the server's numbers is in the change summary. Tabs Grants, Models and Service keys are Phase 2.
+ 
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

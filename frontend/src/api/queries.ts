@@ -1,6 +1,18 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { apiFetch, apiPost } from './client';
-import type { DevUser, Me, MyWallet, Status, UsagePoint, WriteResponse } from './types';
+import { apiFetch, apiPost, apiPut } from './client';
+import type {
+  AuditEntry,
+  DevUser,
+  GroupSummary,
+  Me,
+  Member,
+  MembersList,
+  MyWallet,
+  Policies,
+  Status,
+  UsagePoint,
+  WriteResponse,
+} from './types';
 
 export const keys = {
   me: ['me'] as const,
@@ -8,6 +20,10 @@ export const keys = {
   devUsers: ['dev-users'] as const,
   wallet: (period: string) => ['me-wallet', period] as const,
   usage: (from: string, to: string) => ['me-usage', from, to] as const,
+  groupSummary: (id: string, period: string) => ['group', id, 'summary', period] as const,
+  members: (id: string, period: string) => ['group', id, 'members', period] as const,
+  policies: ['policies'] as const,
+  audit: (entity: string, id: string) => ['audit', entity, id] as const,
 };
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => apiFetch<Me>('/me') });
@@ -57,6 +73,56 @@ export const useMyWallet = (period: string) =>
     enabled: period !== '',
     refetchInterval: 15000,
   });
+
+const hasPendingMembers = (d: MembersList) => d.members.some((m) => m.sync_status === 'pending');
+
+export const useGroupSummary = (id: string, period: string) =>
+  useQuery({
+    queryKey: keys.groupSummary(id, period),
+    queryFn: () => apiFetch<GroupSummary>(`/groups/${id}/summary?period=${period}`),
+    enabled: period !== '',
+    refetchInterval: (q) => (q.state.data?.pending_sync_count ? 2000 : 15000),
+  });
+
+export const useGroupMembers = (id: string, period: string, enabled = true) =>
+  useQuery({
+    queryKey: keys.members(id, period),
+    queryFn: () => apiFetch<MembersList>(`/groups/${id}/members?period=${period}`),
+    enabled: enabled && period !== '',
+    refetchInterval: pollWhilePending(hasPendingMembers),
+  });
+
+export const usePolicies = () =>
+  useQuery({ queryKey: keys.policies, queryFn: () => apiFetch<Policies>('/policies') });
+
+export const useGroupAudit = (id: string) =>
+  useQuery({
+    queryKey: keys.audit('group', id),
+    queryFn: () => apiFetch<AuditEntry[]>(`/audit?entity=group&id=${id}`),
+  });
+
+/**
+ * One PUT per confirm. The response is merged into the members cache (pending badges show at once,
+ * §12.10) and the group queries are refreshed; the Idempotency-Key is the caller's.
+ */
+export const useGroupWrite = (groupId: string, period: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { path: string; body: unknown; reason: string; key: string }) =>
+      apiPut<WriteResponse>(v.path, v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: (res) => {
+      applyWriteResponse<MembersList>(qc, keys.members(groupId, period), res, (old, r) => ({
+        ...old,
+        members: old.members.map((m) => {
+          const e = r.entities.find((x) => x.entity === 'employee' && x.id === m.upn);
+          return e ? { ...m, ...(e.values as Partial<Member>), sync_status: e.sync_status } : m;
+        }),
+      }));
+      qc.invalidateQueries({ queryKey: ['group', groupId] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};
 
 export const useMyUsage = (from: string, to: string) =>
   useQuery({

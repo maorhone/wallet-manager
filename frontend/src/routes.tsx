@@ -3,15 +3,11 @@ import { Navigate, createBrowserRouter, useParams } from 'react-router-dom';
 import { Shell } from './App';
 import { he } from './i18n/he';
 import Login from './pages/Login';
+import GroupPage from './pages/group/GroupPage';
 import MyWallet from './pages/MyWallet';
 
-// Page bodies arrive in Steps 11-13; the shell only owns the routes.
+// The department page arrives in Step 13.
 const Placeholder = ({ title }: { title: string }) => <Title order={3}>{title}</Title>;
-
-function GroupPage() {
-  const { id, tab } = useParams();
-  return <Placeholder title={`${he.group} ${id} / ${tab}`} />;
-}
 
 function DepartmentPage() {
   const { id, tab } = useParams();

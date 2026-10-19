@@ -1,8 +1,20 @@
 import { Badge } from '@mantine/core';
+import type { ApiState } from '../api/types';
 import { he } from '../i18n/he';
 
 export type WalletState =
   'healthy' | 'near' | 'blockedOwn' | 'blockedGroup' | 'blockedDept' | 'overAllocated' | 'pending';
+
+/** API state → badge; `muted` (left members) has none. */
+export const API_STATE: Record<ApiState, WalletState | null> = {
+  healthy: 'healthy',
+  near_limit: 'near',
+  blocked_own: 'blockedOwn',
+  blocked_group: 'blockedGroup',
+  blocked_department: 'blockedDept',
+  over_allocated: 'overAllocated',
+  muted: null,
+};
 
 const LOOK: Record<WalletState, { color: string; icon: string }> = {
   healthy: { color: 'gray', icon: '●' },
