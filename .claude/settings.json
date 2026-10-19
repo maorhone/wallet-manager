@@ -1,0 +1,9 @@
+{
+  "permissions": {"deny": ["Bash(sudo *)", "Bash(tailscale *)", "Bash(cloudflared *)", "Bash(git push --force *)", "Bash(git push -f *)", "Bash(gh repo delete *)", "Bash(gh issue create --repo *)"]},
+  "hooks": {
+    "PreToolUse": [{"matcher": "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep", "hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh", "timeout": 20, "onFailure": "block"}]}],
+    "PostToolUse": [{"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh", "timeout": 90}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-tests.sh", "timeout": 600}]}],
+    "StopFailure": [{"hooks": [{"type": "command", "command": "mkdir -p \"$CLAUDE_PROJECT_DIR\"/.claude/state && cat > \"$CLAUDE_PROJECT_DIR\"/.claude/state/last-stop-failure.json"}]}]
+  }
+}
