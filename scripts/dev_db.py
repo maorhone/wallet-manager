@@ -11,23 +11,21 @@ import time
 from pathlib import Path
 
 from pgembed import PostgresServer
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.db import create_database, to_asyncpg_url
+from fake_litellm.db import init_db
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-async def create_ro_role(uri: str) -> None:
-    import asyncpg
-    from sqlalchemy.engine import make_url
-
-    url = make_url(uri)
-    conn = await asyncpg.connect(user=url.username, host=url.query["host"], database="postgres")
+async def init_fake_litellm(url: str) -> None:
+    """Fake LiteLLM tables plus the read-only `litellm_ro` role with SELECT grants."""
+    engine = create_async_engine(url)
     try:
-        if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname='litellm_ro'"):
-            await conn.execute("CREATE ROLE litellm_ro LOGIN")
+        await init_db(engine)
     finally:
-        await conn.close()
+        await engine.dispose()
 
 
 def main() -> None:
@@ -35,9 +33,9 @@ def main() -> None:
     server = PostgresServer(ROOT / "pgdata", cleanup_mode="stop")
     for db in ("wm", "litellm_fake"):
         asyncio.run(create_database(server.get_uri(), db, if_missing=True))
-    asyncio.run(create_ro_role(server.get_uri()))
     wm = to_asyncpg_url(server.get_uri(), database="wm")
     fake = to_asyncpg_url(server.get_uri(), database="litellm_fake")
+    asyncio.run(init_fake_litellm(fake))
     env = {**os.environ, "DATABASE_URL": wm}
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT, env=env, check=True

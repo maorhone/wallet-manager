@@ -11,8 +11,13 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
   real `scripts/test.sh` (ruff check + format check + pytest), tests: schema vs §8.2, error envelope,
   advisory lock, healthz/readyz.
 
+- Step 2: `app/litellm_client/{models,client,readonly,errors}.py` (typed client, transient/permanent errors, no logging),
+  `fake_litellm/{db,state,controls,main}.py` (ERD tables, section-10 endpoints, `/_test/reset|outage`, `litellm_ro` role
+  via `init_db`, also used by `scripts/dev_db.py`), tests in `tests/litellm/`, fixtures `fake_app`/`litellm`/`ro_engine`.
+  `./scripts/test.sh` green (27 tests).
+
 ## Next
-- Step 2 of PLAN.md: LiteLLM client module (NFR3), fake management API, read-only DB reader.
+- Step 3 of PLAN.md: fake runtime enforcement (§3.1) and contract-test harness.
 
 ## Blockers
 - None.
@@ -24,11 +29,18 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
 - pgembed's bundled `psql` (`PostgresServer.psql`) segfaults in this sandbox; databases are created via
   asyncpg (`app.db.create_database`) instead.
 - `PostgresServer` needs a `Path`, not `str`, for pgdata.
-- `litellm_ro` role is created by `scripts/dev_db.py` but has no grants yet (tables arrive in Step 2).
+- `litellm_ro` role + SELECT grants are created by `fake_litellm.db.init_db` (called from `scripts/dev_db.py` and the test fixtures).
 - §8.2 gives no PK for `spend_snapshot` / `role_binding` (nullable `model` / `scope_id`): no DB PK, ORM maps the
   columns as identity. CHECK constraints only for statuses/kinds the spec enumerates (grp, employee, grant,
   grant_share); `sync_action`, `litellm_write`, `service_key` statuses are unconstrained until their steps.
 - ruff (format) also rewrote Python snippets inside *.md, which made `ruff format --check .` fail on a clean checkout; `*.md` is now excluded in pyproject.
+
+- Step 2: SPEC §10 also lists `/organization/member_add` (org_admin for department reps, §8.1); PLAN's method list omitted it,
+  so `organization_member_add` was added. Other §10 endpoints (member_update, user/update, service-account, jwt update/delete/list)
+  are left for the steps that need them.
+- Step 2: `KeyUpdate`/`KeyBlock` take `key` (token hash or plaintext; the fake accepts both). `/health/liveliness` is unauthenticated, as in LiteLLM.
+  `spend_rows` buckets days in UTC; the caller maps periods to `APP_TIMEZONE`.
+- Step 2: the fake does not yet enforce R14 (team budget <= org budget at allocation time); add it in Step 3 if the contract tests need it.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

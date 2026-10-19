@@ -10,11 +10,15 @@ import pytest
 import pytest_asyncio
 from pgembed import PostgresServer
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import Settings
 from app.db import create_database, to_asyncpg_url
+from app.litellm_client import LiteLLMClient
 from app.main import create_app
+from fake_litellm import db as fake_db
+from fake_litellm.main import create_app as create_fake_app
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -74,6 +78,37 @@ async def _clean_tables(engine):
         tables = ", ".join(f'"{n}"' for n in names)
         await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     yield
+
+
+@pytest_asyncio.fixture(scope="session")
+async def fake_engine(litellm_url):
+    eng = create_async_engine(litellm_url)
+    await fake_db.init_db(eng)  # tables + litellm_ro role/grants
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def fake_app(fake_engine):
+    await fake_db.reset_db(fake_engine)
+    return create_fake_app(fake_engine)
+
+
+@pytest_asyncio.fixture
+async def litellm(fake_app):
+    client = LiteLLMClient(
+        "http://fake", "FAKE_MASTER_KEY", transport=httpx.ASGITransport(app=fake_app)
+    )
+    yield client
+    await client.aclose()
+
+
+@pytest_asyncio.fixture(scope="session")
+async def ro_engine(fake_engine, litellm_url):
+    url = make_url(litellm_url).set(username="litellm_ro", password=None)
+    eng = create_async_engine(url)
+    yield eng
+    await eng.dispose()
 
 
 @pytest_asyncio.fixture
