@@ -1,13 +1,58 @@
-from datetime import datetime
+from datetime import date, datetime
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
+from sqlalchemy import func, select
 
 from app.auth.session import CurrentPrincipal, Db
-from app.models import Department, Employee, Grp
+from app.errors import invalid_request
+from app.models import Department, Employee, Grp, SpendSnapshot
 from app.schemas.me import MeOut, NamedRef, RoleOut, ScopeOut
+from app.services import views
 
 router = APIRouter()
+
+
+@router.get("/me/wallet")
+async def my_wallet(
+    request: Request, principal: CurrentPrincipal, db: Db, period: str | None = None
+):
+    return await views.me_wallet(
+        db, request.app.state.directory, request.app.state.settings, principal, period
+    )
+
+
+@router.get("/me/usage")
+async def my_usage(
+    request: Request,
+    principal: CurrentPrincipal,
+    db: Db,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    granularity: str = "day",
+):
+    """Own daily spend per model, from the day snapshots."""
+    if granularity != "day":
+        raise invalid_request("granularity must be 'day'")
+    today = datetime.now(ZoneInfo(request.app.state.settings.app_timezone)).date()
+    try:
+        start = date.fromisoformat(from_) if from_ else today.replace(day=1)
+        end = date.fromisoformat(to) if to else today
+    except ValueError:
+        raise invalid_request("from and to must be YYYY-MM-DD") from None
+    rows = await db.scalars(
+        select(SpendSnapshot)
+        .where(
+            SpendSnapshot.scope_kind == "employee",
+            SpendSnapshot.scope_id == principal.upn,
+            func.length(SpendSnapshot.period) == 10,
+            SpendSnapshot.period.between(start.isoformat(), end.isoformat()),
+            SpendSnapshot.model.is_not(None),
+        )
+        .order_by(SpendSnapshot.period, SpendSnapshot.model)
+    )
+    return [{"day": r.period, "model": r.model, "spend": r.spend} for r in rows]
 
 
 @router.get("/me", response_model=MeOut)

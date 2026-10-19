@@ -1,13 +1,25 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import select
 
 from app.auth.session import CurrentPrincipal, Db
 from app.models import Department
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services import departments
+from app.services import departments, views
 from app.writes import Write, write_response
 
 router = APIRouter()
+
+
+@router.get("/departments/{department_id}/summary")
+async def department_summary(
+    department_id: int,
+    request: Request,
+    principal: CurrentPrincipal,
+    db: Db,
+    period: str | None = None,
+):
+    settings = request.app.state.settings
+    return await views.department_summary(db, principal, settings, department_id, period)
 
 
 @router.get("/departments")

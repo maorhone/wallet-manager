@@ -1,12 +1,30 @@
 from fastapi import APIRouter, Request
 
-from app.auth.session import CurrentPrincipal
+from app.auth.session import CurrentPrincipal, Db
 from app.schemas.departments import ModelAmounts
 from app.schemas.groups import GroupLimitsIn, MemberCapIn, MemberDefaultsIn, MemberLimitsIn
-from app.services import groups, members
+from app.services import groups, members, views
 from app.writes import Write, write_response
 
 router = APIRouter()
+
+
+@router.get("/groups/{group_id}/summary")
+async def group_summary(
+    group_id: int, request: Request, principal: CurrentPrincipal, db: Db, period: str | None = None
+):
+    settings = request.app.state.settings
+    return await views.group_summary(db, principal, settings, group_id, period)
+
+
+@router.get("/groups/{group_id}/members")
+async def list_members(
+    group_id: int, request: Request, principal: CurrentPrincipal, db: Db, period: str | None = None
+):
+    app = request.app
+    return await views.members_list(
+        db, app.state.directory, app.state.settings, principal, group_id, period
+    )
 
 
 @router.put("/groups/{group_id}/model-pots")

@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 7 (group and member allocation) done. `./scripts/test.sh` green (168 passed, 4 skipped).
+Phase 1, Step 8 (spend snapshot and wallet read models) done. `./scripts/test.sh` green (203 passed, 4 skipped).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -37,8 +37,12 @@ Phase 1, Step 7 (group and member allocation) done. `./scripts/test.sh` green (1
   `PUT /groups/{id}/members/{upn}/model-caps|limits`, `GET /policies`. Tests: `tests/unit/test_personal_values.py`,
   `tests/api/test_member_{caps,model_caps,limits,defaults}.py`.
 
+- Step 8: `app/services/{spend,wallet,history,owners,views}.py`; `GET /me/wallet`, `/me/usage`, `/groups/{id}/summary`, `/groups/{id}/members`,
+  `/departments/{id}/summary`; worker runs `snapshot_loop` next to the outbox loop. Tests: `tests/unit/test_wallet_{formulas,states}.py`,
+  `tests/test_spend_snapshot.py`, `tests/api/test_{me_wallet,group_summary,members_list,department_summary}.py`; fixture `snapshot` and `tests/api/periods.py`.
+
 ## Next
-- Step 8 of PLAN.md: spend snapshot and wallet read models.
+- Step 9 of PLAN.md: over-allocation report, `/status`, `/outbox`, `/audit`, metrics.
 
 ## Blockers
 - None.
@@ -89,6 +93,17 @@ Phase 1, Step 7 (group and member allocation) done. `./scripts/test.sh` green (1
   carries `details.owner_role` (member→group_head, group_head→department_rep, rep/admin→platform_admin). A department rep writing a plain member's values gets 422
   `SCOPE_FORBIDDEN` (PLAN rule 2: head or admin only). Outbox entity for member writes is `employee` (id = upn), as in the seed. `GET /policies` omits the internal
   `member_defaults.group.*` rows. A missing concurrency/rpm policy row skips the range check. SPEC §11.1 and PLAN agree on all Step 7 paths and fields.
+
+- Step 8: `take_snapshot(sf, reader, now)` takes the session factory and an aware `now` (its tzinfo is APP_TIMEZONE). Month rows (`YYYY-MM`) and day rows
+  (`YYYY-MM-DD`, UTC date from SpendLogs) both hold a total (`model` NULL) and per-model rows. Day rows are only kept for days inside the calendar month, so spend in the
+  last hours of the previous UTC day (local midnight offset) is in the month total but not in a day row. The previous period is only filled when it has no rows.
+- Step 8: I did not create `app/schemas/wallet.py`; the read models are plain dicts built in `app/services/views.py` (money serialises as JSON numbers). PLAN's `owners_of`
+  became `owner_of(db, directory, upn, group)`; `owners.holders()` lists the people bound to a role on a scope. SPEC §11.1 lists `/me/usage` without `sync_status`, so `/me/usage` has
+  only `[{day, model, spend}]`. `/me/wallet`, summaries and members carry `period`, `reset_date`, `spend_taken_at`, `read_only`; `sync_status` is per entity.
+- Step 8: `state` priority is blocked_own > blocked_parent > over_allocated > near_limit > healthy (PLAN left over_allocated's place open); `left`/`blocked` give `muted`.
+  Binding level ties go to the narrower level (self, then group). Past periods take caps, limits, group bases and department budget/pmo/reserve from `values_as_of`; pots,
+  allowances, active grants and shares always use the current rows (no audit history for them yet). `/groups/{id}/members` includes `left` rows (muted) and excludes them from sums.
+- Step 8: Tooling slip: one `sed -i` on `app/worker.py` (a docstring) was run through Bash instead of Edit.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

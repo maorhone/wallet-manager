@@ -1,4 +1,26 @@
+from decimal import Decimal
+
 import pytest
+from periods import CURRENT
+
+from app.models import SpendSnapshot
+
+
+@pytest.fixture
+def snapshot(seeded):
+    """Insert spend_snapshot rows: ``(scope_kind, scope_id, model, spend)`` for a period."""
+
+    async def _snapshot(rows, period=CURRENT):
+        async with seeded() as s:
+            s.add_all(
+                SpendSnapshot(
+                    scope_kind=k, scope_id=str(i), period=period, model=m, spend=Decimal(str(v))
+                )
+                for k, i, m, v in rows
+            )
+            await s.commit()
+
+    return _snapshot
 
 
 @pytest.fixture
