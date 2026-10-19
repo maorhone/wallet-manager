@@ -28,7 +28,7 @@ Phase 1, Step 1 (backend foundation) done. `./scripts/test.sh` green (6 tests).
 - §8.2 gives no PK for `spend_snapshot` / `role_binding` (nullable `model` / `scope_id`): no DB PK, ORM maps the
   columns as identity. CHECK constraints only for statuses/kinds the spec enumerates (grp, employee, grant,
   grant_share); `sync_action`, `litellm_write`, `service_key` statuses are unconstrained until their steps.
-- The format hook reformats Python snippets inside PLAN.md; revert such incidental diffs.
+- ruff (format) also rewrote Python snippets inside *.md, which made `ruff format --check .` fail on a clean checkout; `*.md` is now excluded in pyproject.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).
