@@ -1,26 +1,27 @@
-You are planning Phase 1 of Wallet Manager for LiteLLM (SPEC.md). Explore minimally (do not deep-crawl the filesystem or the web). Do NOT call ExitPlanMode. Return the FULL plan as your final message in PLAN.md format below.
+You are re-planning the Wallet Manager for LiteLLM. Read SPEC.md (821 lines, v0.2, complete) and litellm_wallets_erd.mmd FULLY. Otherwise explore minimally: the repo only has scaffolding (CLAUDE.md, hooks, scripts/test.sh placeholder, an old PLAN.md which is SUPERSEDED — ignore its content). Do not use the web. Do NOT call ExitPlanMode and do not try to write any file; return the FULL plan as your final message in markdown starting with the line `# PLAN.md: Wallet Manager for LiteLLM`.
 
-# Important context about SPEC.md
-SPEC.md is INCOMPLETE: ~53k characters were truncated in relay between the start of section 3 and ~15.2. Recoverable parts: glossary, goals/non-goals, delivery plan (section 16), open decisions (17), credits (18), UI e2e tests U1–U8 (15.3). Missing: most of LiteLLM behavior (3), domain rules (4), architecture (5), functional requirements detail, LiteLLM write API (10), UI API (11), UI screens (12), NFRs, AD sync, etc. Plan Phase 1 from section 16 exit criteria + the builder decisions below. Put "Obtain complete SPEC.md from Maor" first under Questions for Maor. Still produce a concrete, implementable Phase 1 plan.
+# The plan must follow the spec exactly
+- Error codes and HTTP statuses exactly per 11.2 (incl. 422 where the spec says 422); over-allocation checks per 11.3.
+- Tables exactly per 8.2; LiteLLM-owned fields per 8.1; LiteLLM calls per section 10 and the ERD.
+- API paths exactly per 11.1 (e.g. /me, /me/wallet, /departments/{id}/split with pmo_pool + reserve). Use the spec's paths/prefixes verbatim; do not invent /api/admin variants unless 11.1 has them.
+- Write path per 5.3 and failure modes per 5.4 (pending/applied/failed states, idempotency key, required reason, advisory lock per parent), roles/permissions per 6 and 12.2.
+- Wallet formulas per 12.3, states/badges per 12.4, screens/flows/messages per 12.5–12.9, Hebrew RTL.
+- Stack per NFR2 (section 13) and 12.10. Quote section numbers in each step so the builder can check.
+- Phase 1 of section 16 in full detail, covering its exit criteria (FR-D, FR-G, FR-E, FR-V, FR-A; A2, A3, A5; U1, U2, U3, U4, U6, U7, U8). Phases 2–4 as a short outline only.
 
-# Builder decisions (Maor may override; treat as defaults)
-1. Target Phase 1 of section 16 first as a runnable vertical slice. Later phases (2–4) only as a short outline at the end.
-2. Real deploy target is airgapped OpenShift + LiteLLM Enterprise + ADFS — we do NOT have that here. Isolate the LiteLLM client in one module (NFR3 spirit) with typed models. For local/dev/tests: an in-repo fake LiteLLM management API (small FastAPI app) implementing only the management endpoints Phase 1 needs (org/team/user/membership/key/budget style from typical LiteLLM management API + whatever SPEC section 10 listed), with in-memory or DB state, so outbox/reconciliation are testable. Contract tests against a real LiteLLM are written but skipped unless LITELLM_BASE_URL is set. No Enterprise license; no paid services/API keys.
-3. Auth: implement real OIDC via configuration, plus DEV_AUTH=1 only for a seeded user/role picker. AD/LDAP sync is phase 3; seed data via a fixture script for now.
-4. PostgreSQL per SPEC. In this sandbox use `pgembed` (proven: Postgres 17.9, Python 3.13 wheel, unix-socket URI). Docker is unavailable. System postgres packages are not installed (do not apt-install).
-5. Backend: Python 3.13 (sandbox has 3.13.5; SPEC asked 3.12 — note the skew), FastAPI, SQLAlchemy async, Alembic, Pydantic v2, uv. Frontend: React+TS+Vite, RTL Hebrew, TanStack Query, Playwright. Public npm/PyPI OK here; airgapped mirrors are a deployment concern.
-6. Preview ports on 0.0.0.0: UI 4100, API 4101, fake LiteLLM 4102.
-7. Always use explicit models when invoking tools that would call Claude — N/A inside this plan. Hooks and CLAUDE.md already exist; do not edit `.claude/hooks/*` or `.claude/settings.json`.
-8. Known LiteLLM OSS vs Enterprise (from docs, quick check): Organizations / org_admin RBAC are Enterprise; Teams, virtual keys, team member `max_budget_in_team` are open-source. Fake server should still expose org-shaped endpoints so our client matches the Enterprise contract; real contract tests stay skipped without LITELLM_BASE_URL + license.
+# Builder decisions for the LOCAL environment only (everything else follows the spec)
+1. Real target is airgapped OpenShift + LiteLLM Enterprise + ADFS, unavailable here. For dev/tests build an in-repo fake LiteLLM management API server (FastAPI, port 4102) implementing only the section-10 endpoints Phase 1 uses, with behavior matching section 3 where tests depend on it, plus test-only controls (outage, set spend). The LiteLLM client is isolated in one module (NFR3) with typed Pydantic models.
+2. Contract tests for A-scenarios that need a real LiteLLM (15.2) are written but skipped unless LITELLM_BASE_URL is set. Where an A-scenario can also be exercised against the fake, do both.
+3. PostgreSQL via `pgembed` for dev/tests (verified here: Postgres 17.9, `from pgembed import PostgresServer; srv = PostgresServer(Path(dir), cleanup_mode="delete"); srv.get_uri()` returns a unix-socket URI like `postgresql://postgres:@/postgres?host=/tmp/...`). No Docker, no system Postgres. Production uses a real Postgres via DATABASE_URL.
+4. Auth: real ADFS OIDC (BFF) via configuration, plus a DEV_AUTH=1-only dev login (pick a seeded user). AD sync is phase 3; seed via a fixture script.
+5. Ports on 0.0.0.0: UI 4100, API 4101, fake LiteLLM 4102 (Playwright may use other ports in 4100–4199 to avoid clashing with dev servers).
+6. Sandbox: Python 3.13.5 (spec says 3.12: keep code 3.12-compatible), uv 0.13, Node 20.19 / npm 11. Public PyPI/npm OK here; airgapped mirrors are a deployment concern. No sudo; Playwright chromium may lack system libs — the plan should say what to do if so (record a blocker, do not skip).
+7. Never edit .claude/hooks/* or .claude/settings.json. `./scripts/test.sh` is the single test gate (the Stop hook runs it, 540 s timeout) and must stay fast; each step says what it adds to test.sh.
 
-# PLAN.md format (required)
-Bite-sized numbered steps for Phase 1. Each step:
-- Exact files to create/change
-- What to build (signatures / endpoints / tables as appropriate)
-- The test that proves it (and how `scripts/test.sh` will run it)
-- Sized for ONE Sonnet build session
-Follow DRY, YAGNI, TDD, frequent commits.
-Then a short "Later phases (outline only)" section.
-Then "Questions for Maor" — ONLY true blockers.
-
-Return the complete plan markdown as your final message. Do not write PLAN.md yourself (the builder will save your final message). Explore minimally.
+# PLAN.md format
+- Short context + global conventions (money type, error envelope from 11.2, etc.).
+- Numbered steps. Each: title, spec sections covered, exact files, what to build (signatures/endpoints/tables), the test(s) that prove it, what scripts/test.sh runs after it. Each step sized for ONE Sonnet session (~80 turns); prefer fewer, larger, coherent steps over many tiny ones (aim ~10–14), but never so large that a session can't finish it with tests green.
+- TDD, DRY, YAGNI, a commit per step.
+- An acceptance mapping table: each Phase 1 exit criterion → step and test name.
+- "Later phases (outline only)".
+- "Questions for Maor": ONLY true blockers to Phase 1 (if none, say none). Spec open decisions (17) use their stated defaults unless truly blocking.

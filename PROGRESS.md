@@ -1,21 +1,18 @@
 # Progress — Wallet Manager
 
 ## Status
-Plan complete. Build not started.
+Plan v2 complete (from full SPEC v0.2 + ERD). Build not started.
 
 ## Done
-- Project scaffold: SPEC.md (incomplete — truncated in relay), CLAUDE.md, hooks, settings, scripts/test.sh placeholder, .gitignore
-- Capability probe documented in builder notes
-- PLAN.md from opusplan (Phase 1 vertical slice)
-- Initial commit of scaffold + plan
+- Scaffold: CLAUDE.md, hooks, settings, scripts/test.sh placeholder, .gitignore
+- Full SPEC.md v0.2 + litellm_wallets_erd.mmd committed (661fee1)
+- PLAN.md v2 (opusplan, 13 Phase 1 steps). The first PLAN.md, written from a truncated spec, is SUPERSEDED and replaced entirely.
 
 ## Next
-- Step 1 of PLAN.md (build stage — not started; waiting for builder to kick off Sonnet sessions)
-- Prefer replacing SPEC.md with the full v0.2 text before or during early steps
+- Step 1 of PLAN.md (Sonnet build session) once the quota window allows.
 
-## Blockers / Questions for owner
-- Full SPEC.md (~53k chars missing between §3 and §15.2)
-- See PLAN.md "Questions for Maor"
+## Blockers
+- None for Step 1.
 
-## Quota note (after plan run)
-See builder report for five_hour / seven_day utilization and resets (Asia/Jerusalem).
+## Questions for owner
+- See PLAN.md section 5.
