@@ -1,11 +1,12 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Next = Step 2.8.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) done. Next = Step 2.9.
 Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 2.8: UI Group Grants tab with share create, change and close; U5 and U2 grant half (see Notes).
 - Step 2.7: UI PMO grant actions (extend, increase, close early) and Projects tab.
 - Step 2.6: UI PMO page with Pool and Grants tabs and the create-grant wizard (see Notes).
 - Step 2.5: FR-RC1–3 reconciliation, field-level drift log, repeated-drift alerts and metrics;
@@ -148,12 +149,16 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 2.8: UI Group Grants tab with share create, change and close.
+- Step 2.9: UI Department Group heads tab.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.8: `pages/group/Grants.tsx` (tab `grants` in `GroupPage`; grant list, per-grant shares panel with change/close, all gated by
+  server `actions.share`), `components/ShareDialog.tsx` (create and change modes; expiry defaults to and is capped at the grant's
+  expiry instant; remainder live; own row disabled with owner role), `useShareWrite`, `he.shares`. `SharesTable` and the wallet share
+  rows already existed (Step 2.2/Phase 1) and are unchanged. Vitest +3, Playwright +2. No spec/PLAN differences.
 - Review 2.7: all 7 majors fixed (read_only gating + editor closes on period change; idempotency key kept per payload; close preview
   amount-used-returned; /me timezone for dates; inline before/after + pool-effect table in `GrantEditDialog` instead of
   `ChangeSummaryDialog` (that one rotates its key on every error); 15 s refetch for project summary and shares; query-param summary route).

@@ -310,6 +310,32 @@ export const useGrantAction = () => {
   });
 };
 
+/** Create shares (list), change one (PATCH) or close one (POST close); grants, wallets and groups refresh. */
+export const useShareWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: {
+      grantId: number;
+      /** New shares; or `shareId` with `patch` to change one, without `patch` to close it. */
+      create?: { upn: string; amount: number; expires_at: string }[];
+      shareId?: number;
+      patch?: { amount: number; expires_at: string };
+      reason: string;
+      key: string;
+    }) => {
+      const write = { reason: v.reason, idempotencyKey: v.key };
+      const base = `/grants/${v.grantId}/shares`;
+      if (v.create) return apiPost<WriteResponse>(base, v.create, write);
+      if (v.patch) return apiPatch<WriteResponse>(`${base}/${v.shareId}`, v.patch, write);
+      return apiPost<WriteResponse>(`${base}/${v.shareId}/close`, { reason: v.reason }, write);
+    },
+    onSuccess: () => {
+      for (const k of ['grants', 'project', 'department', 'group', 'audit', 'me-wallet', 'pmo'])
+        qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+};
+
 export const useProjectSummary = (ref: string) =>
   useQuery({
     queryKey: ['project', ref],

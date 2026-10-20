@@ -4,13 +4,14 @@ import { useGroupSummary } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
+import Grants from './Grants';
 import History from './History';
 import Members from './Members';
 import Overview from './Overview';
 
-const TABS = ['overview', 'members', 'history'];
+const TABS = ['overview', 'members', 'grants', 'history'];
 
-/** "הקבוצה" (§12.5.2): Overview, Members and History; Grants, Models and Service keys are Phase 2. */
+/** "הקבוצה" (§12.5.2): Overview, Members, Grants and History; Models and Service keys come later. */
 export default function GroupPage() {
   const { id = '', tab = 'overview' } = useParams();
   const [search] = useSearchParams();
@@ -44,6 +45,7 @@ export default function GroupPage() {
       </Tabs>
       {tab === 'overview' && <Overview summary={s} />}
       {tab === 'members' && <Members groupId={id} period={period} summary={s} />}
+      {tab === 'grants' && <Grants groupId={id} period={period} summary={s} />}
       {tab === 'history' && <History groupId={id} />}
     </Stack>
   );
