@@ -98,9 +98,17 @@ class TeamMemberUpdate(_Req):
 
     @model_validator(mode="after")
     def _temp_fields_together(self):
-        if (self.temp_budget_increase is None) != (self.temp_budget_expiry is None):
+        """Both or neither; ``0`` with no expiry clears the increase (FR-P4)."""
+        increase, expiry = self.temp_budget_increase, self.temp_budget_expiry
+        if (increase is None) != (expiry is None) and (expiry is not None or increase != 0):
             raise ValueError("temp_budget_increase and temp_budget_expiry go together")
         return self
+
+    def payload(self) -> dict:
+        body = super().payload()
+        if self.temp_budget_increase is not None:
+            body["temp_budget_expiry"] = body.get("temp_budget_expiry")  # always both keys
+        return body
 
 
 class TeamMemberDelete(_Req):

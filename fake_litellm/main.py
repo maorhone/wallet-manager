@@ -278,7 +278,13 @@ def _team_router() -> APIRouter:
             return await _team_info(conn, body.team_id)
 
     @r.post("/team/member_update")
-    async def team_member_update(body: m.TeamMemberUpdate, request: Request):
+    async def team_member_update(request: Request):
+        raw = await request.json()
+        if ("temp_budget_increase" in raw) != ("temp_budget_expiry" in raw):
+            raise HTTPException(
+                400, detail={"error": "temp_budget_increase and temp_budget_expiry go together"}
+            )
+        body = m.TeamMemberUpdate.model_validate(raw)
         async with request.app.state.fake.engine.begin() as conn:
             row = await _one(conn, team, "team_id", body.team_id, "team")
             mem = await _membership(conn, body.team_id, body.user_id)

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
-from app.schemas.grants import GrantCloseIn, GrantIn, GrantPatchIn
-from app.services import grants
+from app.schemas.grants import GrantCloseIn, GrantIn, GrantPatchIn, ShareIn, SharePatchIn
+from app.services import grants, shares
 from app.writes import Write, write_response
 
 router = APIRouter()
@@ -27,7 +27,59 @@ async def close_grant(
     grant_id: int, request: Request, ctx: Write, principal: CurrentPrincipal,
     body: GrantCloseIn | None = None,
 ):  # fmt: skip
-    entities = await grants.close_grant(ctx, principal, request.app.state.clock, grant_id)
+    app = request.app
+    entities = await grants.close_grant(
+        ctx, principal, app.state.clock, grant_id, app.state.litellm, app.state.litellm_reader
+    )
+    return await write_response(ctx, entities)
+
+
+@router.get("/grants/{grant_id}/shares")
+async def list_shares(grant_id: int, request: Request, principal: CurrentPrincipal, db: Db):
+    app = request.app
+    return await shares.list_shares(
+        db, principal, app.state.clock, app.state.directory, app.state.settings, grant_id
+    )
+
+
+@router.post("/grants/{grant_id}/shares")
+async def post_shares(
+    grant_id: int, body: list[ShareIn], request: Request, ctx: Write, principal: CurrentPrincipal
+):
+    app = request.app
+    entities = await shares.create_shares(
+        ctx, principal, app.state.clock, app.state.directory, grant_id, body
+    )
+    return await write_response(ctx, entities)
+
+
+@router.patch("/grants/{grant_id}/shares/{share_id}")
+async def patch_share(
+    grant_id: int, share_id: int, body: SharePatchIn, request: Request, ctx: Write,
+    principal: CurrentPrincipal,
+):  # fmt: skip
+    app = request.app
+    entities = await shares.patch_share(
+        ctx, principal, app.state.clock, app.state.directory, grant_id, share_id, body
+    )
+    return await write_response(ctx, entities)
+
+
+@router.post("/grants/{grant_id}/shares/{share_id}/close")
+async def close_share(
+    grant_id: int, share_id: int, request: Request, ctx: Write, principal: CurrentPrincipal,
+    body: GrantCloseIn | None = None,
+):  # fmt: skip
+    app = request.app
+    entities = await shares.close_share(
+        ctx,
+        principal,
+        app.state.clock,
+        grant_id,
+        share_id,
+        app.state.litellm,
+        app.state.litellm_reader,
+    )
     return await write_response(ctx, entities)
 
 

@@ -31,6 +31,7 @@ from app.permissions import (
     can_view_grants,
 )
 from app.schemas.grants import GrantIn, GrantPatchIn
+from app.services import shares as shares_service
 from app.services import wallet
 from app.services.spend import month_bounds
 from app.services.views import period_ctx
@@ -108,7 +109,8 @@ async def _manageable(ctx: WriteContext, principal: Principal, grant_id: int) ->
     await can_view_grants(ctx.db, principal, g.department_id, g.group_id)
     role = can_manage_grants(principal, g.department_id)
     await ctx.lock(LockKind.PMO, g.department_id)
-    await ctx.db.refresh(g)
+    await ctx.lock(LockKind.GROUP, g.group_id)  # shares of this grant are written under it
+    await ctx.db.refresh(g, with_for_update=True)
     return g, role
 
 
@@ -186,12 +188,23 @@ async def patch_grant(
     return entities
 
 
-async def _close_grant(ctx: WriteContext, g: Grant, now: datetime, role: str, share_reason: str):
+async def _close_grant(
+    ctx: WriteContext, g: Grant, now: datetime, role: str, share_reason: str, client, reader
+):
     """Close ``g`` and return the unused money to the pool (FR-P6); returns the response entities.
 
-    ``share_reason`` is the reason recorded on shares closed with the grant (Step 2.2).
+    ``share_reason`` is the reason recorded on shares closed with the grant.
     """
     before, was_active = _values(g), g.status == "active"
+    open_shares = list(
+        await ctx.db.scalars(
+            select(GrantShare).where(GrantShare.grant_id == g.id, GrantShare.status == "active")
+        )
+    )
+    await shares_service.close_shares(
+        ctx, open_shares, now, share_reason, client, reader, role, team_update=False
+    )
+    await ctx.db.flush()
     used = (await _shares(ctx.db, [g.id])).get(g.id, (ZERO, ZERO))[1]
     g.status, g.closed_at, g.used, g.returned = "closed", now, used, g.amount - used
     entities = [_audit_grant(ctx, g, before, role)]
@@ -201,12 +214,12 @@ async def _close_grant(ctx: WriteContext, g: Grant, now: datetime, role: str, sh
 
 
 async def close_grant(
-    ctx: WriteContext, principal: Principal, clock: Clock, grant_id: int
+    ctx: WriteContext, principal: Principal, clock: Clock, grant_id: int, client, reader
 ) -> list[dict]:
     g, role = await _manageable(ctx, principal, grant_id)
     if g.status == "closed":
         raise invalid_request("The grant is already closed", {"status": g.status})
-    return await _close_grant(ctx, g, clock.now(), role, "manual")
+    return await _close_grant(ctx, g, clock.now(), role, "manual", client, reader)
 
 
 async def _visible(db: AsyncSession, principal: Principal, grants: list[Grant]) -> list[Grant]:

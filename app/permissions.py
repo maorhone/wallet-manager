@@ -141,6 +141,11 @@ async def can_edit_group_pots_limits(session, p: Principal, group_id: int) -> st
     return _pick(await _group_roles(session, p, group_id), (ADMIN, REP), _GROUP_VIEW)
 
 
+async def can_share(session, p: Principal, group_id: int) -> str:
+    """FR-P3: admin, the department's rep, or the group's head create and change shares."""
+    return _pick(await _group_roles(session, p, group_id), (ADMIN, REP, HEAD), _GROUP_VIEW)
+
+
 async def can_edit_member_defaults(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), (ADMIN, HEAD), _GROUP_VIEW)
 

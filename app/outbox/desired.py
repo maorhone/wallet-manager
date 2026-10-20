@@ -31,6 +31,7 @@ from app.models import (
     Employee,
     EmployeeModelCap,
     Grant,
+    GrantShare,
     GroupModelPot,
     Grp,
     Policy,
@@ -139,10 +140,21 @@ async def build(session: AsyncSession, settings: Settings, endpoint: str, entity
                     select(EmployeeModelCap).where(EmployeeModelCap.upn == e.upn)
                 )
             }
+            shares = await session.execute(
+                select(GrantShare.amount, GrantShare.expires_at, Grant.model)
+                .join(Grant, Grant.id == GrantShare.grant_id)
+                .where(GrantShare.upn == e.upn, GrantShare.status == "active")
+            )
+            increase, expiry = Decimal(0), None
+            for amount, expires_at, model in shares:  # FR-P4 / FR-P5
+                increase += amount
+                expiry = expires_at if expiry is None else min(expiry, expires_at)
+                if model:
+                    caps[model] = caps.get(model, Decimal(0)) + amount
             return TeamMemberUpdate(
                 team_id=g.litellm_team_id, user_id=e.upn, max_budget_in_team=float(e.base_cap),
-                budget_duration=d.budget_period,
-                model_max_budget=_models(caps, d.budget_period) or None,
+                budget_duration=d.budget_period, temp_budget_increase=float(increase),
+                temp_budget_expiry=expiry, model_max_budget=_models(caps, d.budget_period) or None,
             )  # fmt: skip
         case "/key/generate":
             e, g, _ = await _employee(session, entity_id)

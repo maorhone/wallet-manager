@@ -15,6 +15,7 @@ Allocates model budgets, per-model allowances and concurrency down an org hierar
 - Ports: UI 4100, API 4101, fake LiteLLM 4102 — bind 0.0.0.0. Never commit secrets; .env (gitignored) + .env.example.
 - Repo will be public: never commit secrets, tokens, real hostnames or internal corporate names; use placeholders (corp.example).
 - One PLAN.md step per session. Before stopping, update PROGRESS.md (done / next / blockers).
+- Update PRD.md whenever a step changes product functionality.
 - Small commits; push only to origin; never force-push.
 - Don't delete, skip, or weaken tests. Fix the root cause.
 - Write the least code that works; reuse what exists.

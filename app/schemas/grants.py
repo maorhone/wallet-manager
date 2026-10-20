@@ -30,3 +30,20 @@ class GrantPatchIn(BaseModel):
 
 class GrantCloseIn(BaseModel):
     reason: str | None = None
+
+
+class ShareIn(BaseModel):
+    upn: str = Field(min_length=1)
+    amount: PositiveMoney
+    expires_at: AwareDatetime
+
+
+class SharePatchIn(BaseModel):
+    amount: PositiveMoney | None = None
+    expires_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def _something(self):
+        if self.amount is None and self.expires_at is None:
+            raise ValueError("amount or expires_at is required")
+        return self

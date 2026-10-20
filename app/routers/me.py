@@ -19,8 +19,9 @@ async def my_wallet(
     request: Request, principal: CurrentPrincipal, db: Db, period: str | None = None
 ):
     return await views.me_wallet(
-        db, request.app.state.directory, request.app.state.settings, principal, period
-    )
+        db, request.app.state.directory, request.app.state.settings, principal, period,
+        request.app.state.clock.now(),
+    )  # fmt: skip
 
 
 @router.get("/me/usage")

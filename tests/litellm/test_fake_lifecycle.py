@@ -11,6 +11,7 @@ from app.litellm_client import (
     LiteLLMReader,
     LiteLLMTransientError,
     TeamMemberDelete,
+    TeamMemberUpdate,
     UserDelete,
 )
 from app.litellm_client.models import JwtKeyMappingUpdate
@@ -94,6 +95,23 @@ async def test_fail_injection_then_ok(fake_app, litellm, ro_engine):
     with pytest.raises(LiteLLMPermanentError):
         await litellm.key_unblock(KeyBlock(key=token))
     await litellm.key_unblock(KeyBlock(key=token))
+
+
+async def test_member_update_temp_fields_must_come_together(fake_app, litellm, ro_engine):
+    t = await _target(fake_app, litellm, ro_engine)
+    await seed_team(t, members={"u1": {}})
+    auth = {"Authorization": "Bearer FAKE_MASTER_KEY"}
+    base = {"team_id": "team-c", "user_id": "u1", "max_budget_in_team": 5, "budget_duration": "1mo"}
+    for extra in ({"temp_budget_increase": 0}, {"temp_budget_expiry": "2030-01-01T00:00:00Z"}):
+        r = await t.http.post("/team/member_update", json={**base, **extra}, headers=auth)
+        assert r.status_code == 400, extra
+    both = {**base, "temp_budget_increase": 0, "temp_budget_expiry": None}
+    r = await t.http.post("/team/member_update", json=both, headers=auth)
+    assert r.status_code == 200, r.text
+    # the client always sends both keys, also for the cleared state
+    cleared = TeamMemberUpdate(**base, temp_budget_increase=0)
+    assert cleared.payload()["temp_budget_expiry"] is None
+    await litellm.team_member_update(cleared)
 
 
 async def test_invariants_flags_key_without_membership(fake_app, litellm, ro_engine):

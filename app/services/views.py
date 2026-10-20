@@ -33,6 +33,7 @@ from app.permissions import (
     target_tier,
 )
 from app.services import wallet
+from app.services.attribution import displayed_used
 from app.services.history import values_as_of
 from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
@@ -194,8 +195,9 @@ class _Group:
 
 
 async def me_wallet(
-    db: AsyncSession, directory: Directory, settings: Settings, principal: Principal, raw
-) -> dict:
+    db: AsyncSession, directory: Directory, settings: Settings, principal: Principal, raw,
+    now: datetime,
+) -> dict:  # fmt: skip
     emp = await db.get(Employee, principal.upn)
     group = await db.get(Grp, emp.group_id) if emp and emp.group_id else None
     if group is None:
@@ -204,13 +206,21 @@ async def me_wallet(
     spend = await Spend.load(db, pc["period"])
     g = await _Group.load(db, group, spend, pc["at"], th)
     row = next(r for r in g.rows(spend, th) if r["upn"] == emp.upn)
-    share_rows = await db.scalars(
-        select(GrantShare).where(GrantShare.upn == emp.upn, GrantShare.status == "active")
+    share_rows = await db.execute(
+        select(GrantShare, Grant)
+        .join(Grant, Grant.id == GrantShare.grant_id)
+        .where(GrantShare.upn == emp.upn, GrantShare.status == "active")
+        .order_by(GrantShare.expires_at, GrantShare.id)
     )
+    share_used = await displayed_used(db, emp.upn, emp.base_cap, spend.used("employee", emp.upn))
     shares = [
-        {"id": s.id, "grant_id": s.grant_id, "amount": s.amount, "expires_at": s.expires_at}
-        for s in share_rows
-    ]
+        {
+            "id": s.id, "share_id": s.id, "grant_id": s.grant_id, "project_ref": g.project_ref,
+            "model": g.model, "amount": s.amount, "used": share_used[s.id],
+            "expires_at": s.expires_at, "days_left": max(0, (s.expires_at - now).days),
+        }
+        for s, g in share_rows
+    ]  # fmt: skip
     caps, used_by_model = row["model_caps"], spend.by_model("employee", emp.upn)
     models = [
         {

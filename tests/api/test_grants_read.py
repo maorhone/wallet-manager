@@ -52,7 +52,8 @@ async def test_pmo_pool_formula(login, provisioned):
     closed = await _make(pmo, A2, "PRJ-3", 20000)
     async with provisioned() as s:
         s.add(GrantShare(grant_id=closed, upn="avi@corp.example", amount=Decimal(8000),
-                         used=Decimal(5000)))  # fmt: skip
+                         used=Decimal(5000), returned=Decimal(3000), status="closed",
+                         closed_reason="manual"))  # fmt: skip
         await s.commit()
     assert (await send(pmo, "POST", f"/grants/{closed}/close", {})).status_code == 200
     body = (await pmo.get("/departments/1/pmo-pool")).json()

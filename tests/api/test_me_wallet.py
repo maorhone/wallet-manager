@@ -93,3 +93,27 @@ async def test_usage_series_per_day_and_model(login, seeded):
         {"day": "2026-03-02", "model": "claude", "spend": 1},
         {"day": "2026-03-02", "model": "gpt-4", "spend": 5},
     ]
+
+
+async def test_share_rows_have_project_used_expiry(login, provisioned, snapshot):
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import Grant, GrantShare
+
+    now = datetime.now(UTC)
+    async with provisioned() as s:
+        g = Grant(
+            department_id=1, group_id=1, amount=1000, model="gpt-4o", project_ref="PRJ-7",
+            purpose="x", starts_at=now - timedelta(days=1), expires_at=now + timedelta(days=30),
+            status="active",
+        )  # fmt: skip
+        s.add(g)
+        await s.flush()
+        s.add(GrantShare(grant_id=g.id, upn=DANI, amount=400, expires_at=now + timedelta(days=10)))
+        await s.commit()
+    await snapshot([("employee", DANI, None, 15150)])
+    rows = (await (await login("dani")).get("/me/wallet")).json()["shares"]
+    assert len(rows) == 1
+    assert (rows[0]["project_ref"], rows[0]["model"], rows[0]["amount"]) == ("PRJ-7", "gpt-4o", 400)
+    assert rows[0]["used"] == 150 and rows[0]["days_left"] in (9, 10)
+    assert {"share_id", "grant_id", "expires_at"} <= rows[0].keys()

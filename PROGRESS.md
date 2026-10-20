@@ -100,13 +100,24 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `GET /projects/{ref}/summary`), `can_manage_grants` / `can_view_grants`, effective amount (`amount − returned`) in `desired.py` and `views._grants_by_group`.
   Tests: `tests/api/test_grants*.py` (17), `tests/unit/test_clock.py`. `./scripts/test.sh`: pytest 363 passed, 4 skipped; vitest 24; Playwright 27.
 
+- Step 2.2: `app/services/{attribution,shares}.py`, `GET|POST /grants/{id}/shares`, `PATCH /grants/{id}/shares/{sid}`, `POST .../shares/{sid}/close`,
+  `can_share`, `ShareIn|SharePatchIn`, member_update desired values (FR-P4/P5, both temp keys always sent), `/me/wallet` share rows, `_close_grant` closes shares first,
+  fake `/team/member_update` 400 on one temp field. `PRD.md` created. Tests: `tests/unit/test_{attribution,desired_member}.py`, `tests/api/test_shares.py` (11),
+  `test_me_wallet` share rows, fake lifecycle temp-fields test. `./scripts/test.sh`: pytest 385 passed, 4 skipped.
+
 ## Next
-- Step 2.2: shares backend, attribution (7.3.1), FR-P4/P5 member values, share close (PLAN §2c).
+- Step 2.3: scheduler process, injectable clock, grant/share activation and expiry, share closing on move and delete (fill `lifecycle.close_member_shares`, which is still a stub; it should call `shares.close_shares`).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.2: DR9 (no grant shares to yourself, any role) wins over FR-P3's "the representative can"; a self share is always `SELF_ALLOCATION_FORBIDDEN`.
+  "Shared" for the grant ceiling is Σ amount of all shares (active and closed), since closed amount = used + returned. Attribution across periods treats a share as present in a month
+  overlapping `[grant.starts_at, share.expires_at]`; `/me/wallet` and the share list attribute from the current-period snapshot only (active shares). A share without expiry falls back to the grant's.
+  `test_grants_read::test_pmo_pool_formula` set up an *active* share with a stored `used`; close now recomputes usage, so the setup uses a closed share (same assertions).
+  Grant writes now take the PMO lock then the GROUP lock (shares take GROUP only). Tooling slip: one `sed -i` on a test file (fixed afterwards with Edit).
+  New routes live under `/grants`, already in the vite proxy regex.
 - Step 2.1: the group summary `grants` list and `/grants` rows show only what the spec needs; closing a pending grant enqueues no `/team/update` (LiteLLM never saw it).
   A closed grant's `used` is Σ of its shares' `used` (0 until Step 2.2). `/pmo-pool` for a past period uses live pending/active grants plus grants closed in that period.
   PMO of another department creating a grant gets 422 `SCOPE_FORBIDDEN`; a user with no PMO binding anywhere gets 403 (PLAN's wording). `/grants` and `/projects` were already in the vite proxy regex.
