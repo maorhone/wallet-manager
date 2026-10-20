@@ -112,6 +112,8 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   PMO of another department creating a grant gets 422 `SCOPE_FORBIDDEN`; a user with no PMO binding anywhere gets 403 (PLAN's wording). `/grants` and `/projects` were already in the vite proxy regex.
   Existing `datetime.now()` calls (period_ctx etc.) from Phase 1 are untouched; new grant code uses `app.state.clock` only.
   `uq_notification_dedupe` (Step 2.4) is in migration 0003 as PLAN says; the indexes are not declared on the SQLAlchemy models (migration is the source).
+- Step 2.1 flake: `e2e/member-actions.spec.ts` "U9 head kicks and restores a member" once timed out waiting for `sync-badge` = applied (stayed `pending` for 60 s) in a full run;
+  it passed on the next two full runs. Unrelated to grants (outbox drain timing in the E2E stack).
 - Step 11: `/me/shares` rows have no project name or per-share usage yet (Phase 1 has no grants), so `SharesTable` shows the grant id and `used` defaults to 0.
   The usage chart draws daily stacked bars (left axis) plus a running-total line against the cap line, since a monthly cap cannot be compared with a single day.
   The "contact" alert for group/department blocks names the group head from `owners.base_cap`.
