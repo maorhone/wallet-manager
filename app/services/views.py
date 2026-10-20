@@ -462,5 +462,6 @@ async def department_summary(
             "edit_split": bool(roles & {ADMIN, REP}),
             "edit_budget": ADMIN in roles,
             "edit_allowances": ADMIN in roles,
+            "place": bool(roles & {ADMIN, REP}),
         },
     }

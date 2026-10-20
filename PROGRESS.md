@@ -1,8 +1,8 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Step 1b.1–1b.4 done. Next = Step 1b.5.
-Latest `./scripts/test.sh`: pytest 346 passed, 4 skipped; vitest 24; Playwright 24; ~3.5 min.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Phase 2 (PLAN §4).
+Latest `./scripts/test.sh`: pytest 346 passed, 4 skipped; vitest 24; Playwright 27; ~3.3 min (1.4 pytest + 1.8 Playwright).
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -90,10 +90,14 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   muted rows + "מושעה" badge (`StateBadge` `suspended`, `AllocRow.muted`), `useMemberAction|useMoveTargets`, `he.memberActions`, new error codes
   (`MEMBER_STATE_CONFLICT`, `LIFECYCLE_IN_PROGRESS`, `DIRECTORY_UNAVAILABLE`), e2e `fakeFail`. Tests: `MemberActionDialog.test.tsx` (3), `e2e/member-actions.spec.ts` (6).
 
+- Step 1b.5: `components/PendingPlacementsTable.tsx` (reuses `MemberActionDialog` with action `place` and a group select), `pages/department/Pending.tsx`
+  (tab "ממתינים לשיבוץ" at `/department/:id/pending`, shown when `actions.place`), `pages/Platform.tsx` (pending section only), `usePendingPlacements|usePlace|useDepartmentGroups|useDepartmentIds`,
+  `he.pending`, department summary `actions.place` (admin or rep). Tests: `e2e/pending.spec.ts` (3, U12). Phase 1b acceptance table in PLAN §2b checked: every listed test exists and passes,
+  `test_repo_hygiene.py` passes. Questions D14–D25 are in "Questions for owner" (11, 12) and the notes above.
+
 ## Next
-- Phase 1b (PLAN §2b), one step per session, in order:
-  - Step 1b.5: UI pending placement lists; Phase 1b wrap-up.
-- Then Phase 2 (PLAN §4): grants and expiry (A1, A9 with a share, A11; U5).
+- Phase 1b is complete (Steps 1b.1–1b.5).
+- Phase 2 (PLAN §4): grants and expiry (A1, A9 with a share, A11; U5).
 
 ## Blockers
 - None.
@@ -184,6 +188,10 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 
 - Step 1b.4: the side panel closes after any member action; the row then shows the sync badge. A kicked member is `status: blocked` (muted row, "מושעה"); delete sets `left`,
   so the row disappears at once. `fakeFail(endpoint, times)` exists in `e2e/fixtures.ts` but no test needs it yet. The vitest file uses `@vitest-environment jsdom` (first jsdom test).
+
+- Step 1b.5: the placement group select offers every non-archived group of the department (admin with an unknown department: all departments), including the staff group;
+  the server stays authoritative on department scope. `tests/api/test_department_summary.py` expectations gained the new `place` key. A group head gets 404 on the
+  department pending list (no role on the department), so the tab is absent.
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

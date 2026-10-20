@@ -28,7 +28,12 @@ async def test_split_and_unallocated(login, seeded, snapshot):
     assert a1["sync_status"] in ("pending", "applied")
     assert body["split"]["pmo_reserve_sync_status"] in ("pending", "applied")
     assert body["allowances"] == [{"model": "gpt-4", "amount": 500000, "pots_sum": 150000}]
-    assert body["actions"] == {"edit_split": True, "edit_budget": False, "edit_allowances": False}
+    assert body["actions"] == {
+        "edit_split": True,
+        "edit_budget": False,
+        "edit_allowances": False,
+        "place": True,
+    }
     assert body["period"] and body["reset_date"] and body["read_only"] is False
 
 
@@ -38,7 +43,12 @@ async def test_over_allocated_state_and_admin_actions(login, seeded):
         await s.commit()
     body = (await (await login("admin")).get("/departments/1/summary")).json()
     assert body["wallet"]["state"] == "over_allocated" and body["wallet"]["unallocated"] == -100000
-    assert body["actions"] == {"edit_split": True, "edit_budget": True, "edit_allowances": True}
+    assert body["actions"] == {
+        "edit_split": True,
+        "edit_budget": True,
+        "edit_allowances": True,
+        "place": True,
+    }
 
 
 async def test_summary_scope(login):

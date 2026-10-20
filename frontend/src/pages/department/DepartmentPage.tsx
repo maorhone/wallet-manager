@@ -5,6 +5,7 @@ import { ErrorState } from '../../components/ErrorState';
 import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
 import Overview from './Overview';
+import Pending from './Pending';
 import Split from './Split';
 
 const TABS = ['overview', 'split'];
@@ -17,7 +18,9 @@ export default function DepartmentPage() {
   const { period } = usePeriod();
   const summary = useDepartmentSummary(id, period);
 
-  if (!TABS.includes(tab)) return <Navigate to={`/department/${id}/overview`} replace />;
+  const tabs = summary.data?.actions.place ? [...TABS, 'pending'] : TABS;
+  if (summary.data && !tabs.includes(tab))
+    return <Navigate to={`/department/${id}/overview`} replace />;
   if (summary.isPending) return <Loader aria-label={he.loading} />;
   if (summary.error || !summary.data)
     return <ErrorState error={summary.error} onRetry={summary.refetch} />;
@@ -34,7 +37,7 @@ export default function DepartmentPage() {
         }
       >
         <Tabs.List>
-          {TABS.map((k) => (
+          {tabs.map((k) => (
             <Tabs.Tab key={k} value={k} data-testid={`tab-${k}`}>
               {he.departmentPage.tabs[k]}
             </Tabs.Tab>
@@ -43,6 +46,7 @@ export default function DepartmentPage() {
       </Tabs>
       {tab === 'overview' && <Overview summary={s} />}
       {tab === 'split' && <Split summary={s} />}
+      {tab === 'pending' && <Pending summary={s} />}
     </Stack>
   );
 }

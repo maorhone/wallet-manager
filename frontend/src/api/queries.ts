@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { apiFetch, apiPost, apiPut } from './client';
 import type {
   AuditEntry,
@@ -11,6 +17,7 @@ import type {
   MembersList,
   MoveTarget,
   MyWallet,
+  PendingPlacement,
   Policies,
   Status,
   UsagePoint,
@@ -185,6 +192,64 @@ export const useMemberAction = (groupId: string, period: string) => {
     },
   });
 };
+
+/** Pending employees of one department, or everyone (admin) with 'all'. */
+export const usePendingPlacements = (deptId: string | 'all') =>
+  useQuery({
+    queryKey: ['pending-placements', deptId],
+    queryFn: () =>
+      apiFetch<PendingPlacement[]>(
+        deptId === 'all' ? '/pending-placements' : `/departments/${deptId}/pending-placements`,
+      ),
+    refetchInterval: 15000,
+  });
+
+export const useDepartmentIds = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['departments'],
+    queryFn: () => apiFetch<{ id: number }[]>('/departments'),
+    enabled,
+    select: (rows) => rows.map((d) => d.id),
+  });
+
+/** Place a pending employee into a group; the list and the department views refresh. */
+export const usePlace = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { upn: string; groupId: number; reason: string; key: string }) =>
+      apiPost<WriteResponse>(
+        `/pending-placements/${encodeURIComponent(v.upn)}/place`,
+        { group_id: v.groupId },
+        { reason: v.reason, idempotencyKey: v.key },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending-placements'] });
+      qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['group'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};
+
+/** Active groups a pending employee may be placed into: the department's, or all for admin. */
+export const useDepartmentGroups = (deptIds: number[], period: string) =>
+  useQueries({
+    queries: deptIds.map((id) => ({
+      queryKey: ['department', String(id), 'summary', period],
+      queryFn: () => apiFetch<DepartmentSummary>(`/departments/${id}/summary?period=${period}`),
+      enabled: period !== '',
+    })),
+    combine: (rs) => ({
+      groups: rs.flatMap((r) =>
+        (r.data?.groups ?? []).map((g) => ({
+          group_id: g.id,
+          name: g.name,
+          department_id: r.data!.department.id,
+          department_name: r.data!.department.name,
+        })),
+      ),
+    }),
+  });
 
 export const useMyUsage = (from: string, to: string) =>
   useQuery({

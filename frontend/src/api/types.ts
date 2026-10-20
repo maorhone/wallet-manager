@@ -188,7 +188,7 @@ export interface DepartmentSummary extends PeriodEnvelope {
     sync_status: SyncStatus;
   }[];
   allowances: { model: string; amount: number; pots_sum: number }[];
-  actions: { edit_split: boolean; edit_budget: boolean; edit_allowances: boolean };
+  actions: { edit_split: boolean; edit_budget: boolean; edit_allowances: boolean; place: boolean };
 }
 
 export interface Member extends MemberSlim {
@@ -204,6 +204,15 @@ export interface Member extends MemberSlim {
   editable: boolean;
   owner: Owner;
   actions: Record<MemberActionKind, boolean>;
+}
+
+export interface PendingPlacement {
+  upn: string;
+  display_name: string;
+  reason: string | null;
+  pending_since: string | null;
+  department_id: number | null;
+  department_name: string | null;
 }
 
 export type MemberActionKind = 'kick' | 'restore' | 'move' | 'delete';

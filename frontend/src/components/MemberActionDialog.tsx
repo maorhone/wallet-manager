@@ -19,9 +19,9 @@ export type { MoveTarget };
 
 interface Props {
   opened: boolean;
-  action: MemberActionKind;
+  action: MemberActionKind | 'place';
   member: { upn: string; display_name: string };
-  /** Move only: groups the actor may move the member to. */
+  /** Move and place: groups the actor may choose. */
   targets?: MoveTarget[];
   onClose: () => void;
   /** `extra` is the request body for move; the key stays the same while the user retries. */
@@ -43,20 +43,17 @@ export function MemberActionDialog({ opened, action, member, targets, onClose, o
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const picksGroup = action === 'move' || action === 'place';
   const ready =
     reason.trim() !== '' &&
-    (action !== 'move' || target !== null) &&
+    (!picksGroup || target !== null) &&
     (action !== 'delete' || typed === member.upn);
 
   const confirm = async () => {
     setBusy(true);
     setError(null);
     try {
-      await onConfirm(
-        reason.trim(),
-        key,
-        action === 'move' ? { to_group_id: Number(target) } : undefined,
-      );
+      await onConfirm(reason.trim(), key, picksGroup ? { to_group_id: Number(target) } : undefined);
       setReason('');
       setTarget(null);
       setTyped('');
@@ -74,7 +71,7 @@ export function MemberActionDialog({ opened, action, member, targets, onClose, o
     <Modal opened={opened} onClose={onClose} title={`${t[action]}: ${member.display_name}`}>
       <Stack data-testid="member-action-dialog">
         <Text size="sm">{t.descriptions[action]}</Text>
-        {action === 'move' && (
+        {picksGroup && (
           <Select
             label={t.target}
             data-testid="move-target"
