@@ -77,6 +77,13 @@ class TeamNew(_TeamFields):
 class TeamUpdate(_TeamFields):
     team_id: str
 
+    def payload(self) -> dict:
+        body = super().payload()
+        for name in ("tpm_limit", "team_member_model_max_budget"):
+            if name in self.model_fields_set:
+                body[name] = self.model_dump(mode="json")[name]
+        return body
+
 
 class TeamMemberAdd(_Req):
     team_id: str
@@ -139,6 +146,12 @@ class KeyUpdate(_Req):
     max_parallel_requests: int | None = None
     rpm_limit: int | None = None
     model_tpm_limit: dict[str, int] | None = None
+
+    def payload(self) -> dict:
+        body = super().payload()
+        if "model_tpm_limit" in self.model_fields_set:
+            body["model_tpm_limit"] = self.model_tpm_limit
+        return body
 
 
 class KeyBlock(_Req):
@@ -263,3 +276,8 @@ class JwtKeyMappingRecord(_Resp):
     jwt_claim_name: str
     jwt_claim_value: str
     token: str
+    is_active: bool = True
+
+
+class JwtKeyMappingList(_Resp):
+    mappings: list[JwtKeyMappingRecord]

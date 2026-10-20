@@ -167,7 +167,7 @@ _TEAM_META = ("team_member_budget", "team_member_budget_duration", "team_member_
 
 
 def _team_values(body: m._Req) -> tuple[dict, dict]:
-    data = body.model_dump(exclude_none=True)
+    data = body.payload()
     cols = {k: data[k] for k in _TEAM_COLS if k in data}
     meta = {**data.get("metadata", {}), **{k: data[k] for k in _TEAM_META if k in data}}
     return cols, meta
@@ -404,7 +404,7 @@ def _key_router() -> APIRouter:
         key, tpm = data.pop("key"), data.pop("model_tpm_limit", None)
         async with request.app.state.fake.engine.begin() as conn:
             tok = await _token_hash(conn, key)
-            if tpm:
+            if "model_tpm_limit" in body.model_fields_set:
                 row = await _one(conn, token, "token", tok, "key")
                 data["metadata"] = {**(row["metadata"] or {}), "model_tpm_limit": tpm}
             if data:
@@ -434,6 +434,12 @@ def _key_router() -> APIRouter:
                 )
             ).mappings()
             return m.KeyListResponse(keys=[m.KeyRecord(**row) for row in rows])
+
+    @r.get("/jwt/key/mapping/list")
+    async def jwt_mapping_list(request: Request):
+        async with request.app.state.fake.engine.connect() as conn:
+            rows = (await conn.execute(select(jwt_mapping))).mappings()
+            return {"mappings": [dict(row) for row in rows]}
 
     @r.post("/jwt/key/mapping/new")
     async def jwt_mapping_new(body: m.JwtKeyMappingNew, request: Request):

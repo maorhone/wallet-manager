@@ -39,6 +39,13 @@ SCHEDULER_LAST_SUCCESS = Gauge(
     registry=REGISTRY,
 )  # fmt: skip
 STATUSES = ("pending", "applied", "failed")
+RECONCILE_DRIFT = Counter(
+    "wm_reconcile_drift", "Detected drift", ["object", "field"], registry=REGISTRY
+)
+RECONCILE_ALERTS = Counter("wm_reconcile_alerts", "Repeated drift alerts", registry=REGISTRY)
+RECONCILE_LAST_RUN = Gauge(
+    "wm_reconcile_last_run_timestamp", "Last successful reconciliation", registry=REGISTRY
+)
 
 
 async def outbox_counts(db: AsyncSession) -> dict[str, int]:

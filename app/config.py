@@ -40,4 +40,6 @@ class Settings(BaseSettings):
     notify_email_from: str = "wallet-manager@corp.example"
     seed_grants: bool = False  # dev seed adds one active grant with a share (Step 2.4)
     reconcile_interval_min: float = 5  # used by Step 2.5
+    reconcile_drift_alert_count: int = 3
+    reconcile_drift_window_h: float = 24
     scheduler_lock_timeout_s: float = 300

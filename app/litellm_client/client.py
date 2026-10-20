@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from .errors import LiteLLMPermanentError, LiteLLMTransientError
 from .models import (
     JwtKeyMappingDelete,
+    JwtKeyMappingList,
     JwtKeyMappingNew,
     JwtKeyMappingRecord,
     JwtKeyMappingUpdate,
@@ -158,3 +159,6 @@ class LiteLLMClient:
 
     async def jwt_mapping_delete(self, body: JwtKeyMappingDelete) -> None:
         await self._call("POST", "/jwt/key/mapping/delete", None, body)
+
+    async def jwt_mapping_list(self) -> list[JwtKeyMappingRecord]:
+        return (await self._call("GET", "/jwt/key/mapping/list", JwtKeyMappingList)).mappings

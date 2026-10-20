@@ -44,6 +44,49 @@ class DesiredUnavailable(Exception):
     pass
 
 
+async def desired_fields(session, settings, object: str, id: str) -> dict:
+    endpoint = {
+        "organization": "/organization/update",
+        "team": "/team/update",
+        "employee": "/team/member_update",
+        "key": "/key/update",
+        "jwt_mapping": "/jwt/key/mapping/update",
+    }[object]
+    fields = (await build(session, settings, endpoint, id)).model_dump(mode="json")
+    excluded = (
+        {"organization_id", "organization_alias"}
+        if object == "organization"
+        else {
+            "team_alias",
+            "team_id",
+            "user_id",
+            "key",
+            "key_alias",
+            "role",
+            "jwt_issuer",
+            "jwt_claim_name",
+            "jwt_claim_value",
+            "tpm_limit",
+            "rpm_limit",
+        }
+        if object == "employee"
+        else {
+            "team_alias",
+            "team_id",
+            "key",
+            "key_alias",
+            "jwt_issuer",
+            "jwt_claim_name",
+            "jwt_claim_value",
+        }
+    )
+    if object == "key":
+        fields["metadata"] = {"model_tpm_limit": fields.pop("model_tpm_limit", None)}
+        fields["blocked"] = (await session.get(Employee, id)).status != "active"
+        excluded.discard("team_id")
+    return {k: v for k, v in fields.items() if k not in excluded}
+
+
 async def _get(session: AsyncSession, model, key):
     row = await session.get(model, key if model is Employee else int(key))
     if row is None:
@@ -102,7 +145,7 @@ async def _team_fields(session: AsyncSession, entity_id: str, timezone: str) -> 
         "max_budget": float(g.base_budget + grants), "budget_duration": period,
         "model_max_budget": _models({m: a for m, a in pots.items() if a}, period),
         "tpm_limit": g.tpm_limit,
-        "metadata": {"model_tpm_limit": g.model_tpm_limits} if g.model_tpm_limits else None,
+        "metadata": {"model_tpm_limit": g.model_tpm_limits or None},
         "team_member_budget": float(g.default_member_cap), "team_member_budget_duration": period,
         "team_member_model_max_budget": _models(
             {m: Decimal(str(a)) for m, a in (defaults or {}).get("model_caps", {}).items()}, period
@@ -170,7 +213,7 @@ async def build(session: AsyncSession, settings: Settings, endpoint: str, entity
             return TeamMemberUpdate(
                 team_id=g.litellm_team_id, user_id=e.upn, max_budget_in_team=float(e.base_cap),
                 budget_duration=d.budget_period, temp_budget_increase=float(increase),
-                temp_budget_expiry=expiry, model_max_budget=_models(caps, d.budget_period) or None,
+                temp_budget_expiry=expiry, model_max_budget=_models(caps, d.budget_period),
             )  # fmt: skip
         case "/key/generate":
             e, g, _ = await _employee(session, entity_id)

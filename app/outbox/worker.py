@@ -82,6 +82,10 @@ async def _apply(client: LiteLLMClient, session: AsyncSession, row: LitellmWrite
         # Only the hash is kept; the plaintext in the response is dropped (NFR5).
         (await session.get(Employee, row.entity_id)).key_token_hash = token
     else:
+        if row.entity == "key" and ep in {"/key/block", "/key/unblock"}:
+            # Reconciliation retries follow the current lifecycle status too.
+            employee = await session.get(Employee, row.entity_id)
+            ep = "/key/unblock" if employee.status == "active" else "/key/block"
         try:
             await getattr(client, _METHODS[ep])(body)
         except LiteLLMPermanentError as exc:

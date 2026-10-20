@@ -84,9 +84,12 @@ async def run_loop(
 
 
 def build_jobs(settings: Settings, session_factory, client, reader, directory, clock) -> list[Job]:
-    """Grants and notifications; reconciliation (Step 2.5) registers here later."""
+    """Independent jobs, with reconciliation delayed by its first interval."""
     timeout = settings.scheduler_lock_timeout_s
     return [
+        Job("reconcile", RECONCILE_LOCK, timedelta(minutes=settings.reconcile_interval_min),
+            lambda: jobs.run_reconcile(session_factory, client, clock, settings=settings),
+            False, timeout),
         Job(
             "grants", GRANTS_LOCK, timedelta(seconds=settings.scheduler_grants_interval_s),
             lambda: jobs.run_grants(

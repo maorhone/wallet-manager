@@ -1,11 +1,15 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Phase 2 (PLAN §4).
-Latest `./scripts/test.sh` (Codex review fixes for 2.1-2.4): green; pytest 435 passed (5 skipped real-target cases); vitest 24; Playwright 27; total 4m25s (pytest 2m23s, Playwright 1.8 min).
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done. Next = Step 2.6.
+Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 2.5: FR-RC1–3 reconciliation, field-level drift log, repeated-drift alerts and metrics;
+  delayed scheduler registration (lock 3), typed mapping list client/fake endpoint, and clearing
+  of owned limits through desired-state outbox updates. Fourteen new tests cover diff rules,
+  correction/drain/no-op, status flags, in-flight races, missing objects, outages and alerts.
 - Codex review fixes for 2.1-2.4: verified all thirteen MAJOR findings against the code and
   reproduced them with failing regression tests before fixing their shared paths.
   - M1: share close now checks self-targeting, target tier and current membership, just like share writes.
@@ -142,12 +146,20 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 2.5: reconciliation (FR-RC1-3, drift log, repeated-drift alert). Register its job in `scheduler.loop.build_jobs` (lock id 3, `RECONCILE_LOCK`); it raises `drift_repeated` through `services.notifications.notify` (kind and critical flag already in `KINDS`).
+- Step 2.6: UI PMO page, Pool and Grants tabs with the create wizard. Not started.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.5: reconciliation uses the existing desired builders, durable outbox, audit endpoint and
+  critical notifications. Delayed five-minute scheduler job uses lock id 3 and the injected clock.
+  Owned allocation/status fields are repaired; roles are excluded, missing objects are warned and
+  counted without recreation, and in-flight entities are skipped before and after live reads.
+  No new API prefix or frontend changes. PRD updated. All 14 new tests pass; final test.sh green
+  (counts/timing above). The final empty-member-model-map refinement also passed the focused
+  reconciliation/desired-member subset (14 tests). No spec/plan conflicts newly identified.
+  No commit or push: the builder owns the step commit because .git is read-only.
 - Review 2.1-2.4: m1 deferred as requested. Plan: insert an email-delivery outbox row in the
   notification transaction, with a stable notification delivery key; deliver only committed rows,
   retry separately, and test rollback/retry with email enabled.

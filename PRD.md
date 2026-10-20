@@ -87,11 +87,17 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 Separate process (`python -m app.scheduler`) with an injectable clock; one replica runs a job at a time (advisory lock) and a
 restart catches up on everything overdue. Grants job (every 60 s): activation, share and grant expiry, then one recompute of the
 member's temporary budget (earliest remaining expiry) per affected person. Metrics: `wm_scheduler_job_runs_total`,
-`wm_scheduler_job_last_success_timestamp`. A notifications job (Step 2.4, 4.7) runs next to it; reconciliation (Step 2.5) joins later.
+`wm_scheduler_job_last_success_timestamp`. Notifications and reconciliation jobs run alongside grants.
 
-### 4.6 Reconciliation (FR-RC) - Phase 2: Planned (Step 2.5)
+### 4.6 Reconciliation (FR-RC) - Phase 2: Done (Step 2.5)
 
-Periodic compare of desired vs live LiteLLM state, drift log, repeated-drift alert.
+Every five minutes, compare owned organization, team, membership, personal key and mapping fields
+against live LiteLLM values. Repairs use the durable outbox and its retries; admins can read the
+correction log through `GET /audit?actor=system:reconcile`. Three corrections of the same field
+within 24 hours trigger a critical administrator notification, deduplicated per field and UTC day.
+Role fields are excluded; there is no AD sync. Pending/failed writes and writes arriving during
+the live read suppress corrections. Archived groups and left/pending-placement employees are
+excluded. Missing objects are counted and warned about, never recreated automatically.
 
 ### 4.7 Notifications (FR-N) - Phase 2: Backend Done (Step 2.4); UI Planned (Step 2.10)
 

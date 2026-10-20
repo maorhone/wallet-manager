@@ -20,6 +20,7 @@ from app.models import AuditLog, Grant, GrantShare
 from app.services import grants as grants_service
 from app.services import notify_scan
 from app.services import shares as shares_service
+from app.services.reconcile import run_reconcile  # noqa: F401
 from app.writes import WriteContext
 
 ACTOR, ROLE = "system:scheduler", "scheduler"
