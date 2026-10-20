@@ -1,7 +1,8 @@
 """Throw-away full stack for Playwright: ``uv run python scripts/e2e_stack.py``.
 
-pgembed in a temp dir, migrations, fake LiteLLM (4112), seed, API (4111, DEV_AUTH=1) and the
-worker. Writes frontend/.e2e-state.json (URLs + env) and runs until SIGTERM/SIGINT.
+pgembed in a temp dir, migrations, fake LiteLLM (E2E_FAKE_PORT, default 4112), seed, API
+(E2E_API_PORT, default 4111, DEV_AUTH=1) and the worker. Writes E2E_STATE_FILE (default
+frontend/.e2e-state.json: URLs + env) and runs until SIGTERM/SIGINT.
 """
 
 import asyncio
@@ -22,8 +23,10 @@ from app.db import create_database, to_asyncpg_url
 from fake_litellm.db import init_db
 
 ROOT = Path(__file__).resolve().parent.parent
-STATE_FILE = ROOT / "frontend" / ".e2e-state.json"
-API_PORT, FAKE_PORT = 4111, 4112
+# Ports/state file are overridable so scripts/test.sh can run next to a live preview stack.
+STATE_FILE = Path(os.environ.get("E2E_STATE_FILE", ROOT / "frontend" / ".e2e-state.json"))
+API_PORT = int(os.environ.get("E2E_API_PORT", "4111"))
+FAKE_PORT = int(os.environ.get("E2E_FAKE_PORT", "4112"))
 
 
 async def create_databases(uri: str, fake_url: str) -> None:

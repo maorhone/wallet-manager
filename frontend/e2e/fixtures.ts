@@ -6,7 +6,8 @@ import { test as base, expect, type Page } from '@playwright/test';
 const ROOT = resolve(import.meta.dirname, '../..');
 
 function state(): { api: string; fake: string; env: Record<string, string> } {
-  return JSON.parse(readFileSync(resolve(import.meta.dirname, '../.e2e-state.json'), 'utf8'));
+  const file = process.env.E2E_STATE_FILE ?? resolve(import.meta.dirname, '../.e2e-state.json');
+  return JSON.parse(readFileSync(file, 'utf8'));
 }
 
 /** Dev login through the real login page UI path is covered separately; this uses the API. */
