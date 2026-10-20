@@ -155,6 +155,11 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Flaky, unrelated to 2.8 (frontend only): `tests/api/test_grants_concurrency.py::test_a11_concurrent_grants_one_pool_insufficient`
+  hit the 60s pytest-timeout in fixture setup (`fake_litellm/main.py` `key_generate`, inside SQLAlchemy cache-key generation, pure CPU)
+  while the sandbox was starved; it passes alone in 2s and in the earlier full green run (458 passed).
+  Later reruns: `tests/api/test_split.py::test_split_over_budget_422_with_numbers` hit the same 60s fixture timeout, and a run with
+  pytest 458 passed / vitest 38 failed only Playwright `wallet.spec.ts` U4 (known snapshot-timing flake, see Step 2.6 notes; 31 of 32 passed).
 - Step 2.8: `pages/group/Grants.tsx` (tab `grants` in `GroupPage`; grant list, per-grant shares panel with change/close, all gated by
   server `actions.share`), `components/ShareDialog.tsx` (create and change modes; expiry defaults to and is capped at the grant's
   expiry instant; remainder live; own row disabled with owner role), `useShareWrite`, `he.shares`. `SharesTable` and the wallet share
