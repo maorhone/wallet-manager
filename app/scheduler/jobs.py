@@ -15,8 +15,10 @@ from sqlalchemy import select
 from app.clock import Clock
 from app.config import Settings
 from app.db import LockKind
+from app.directory import Directory
 from app.models import AuditLog, Employee, Grant, GrantShare
 from app.services import grants as grants_service
+from app.services import notify_scan
 from app.services import shares as shares_service
 from app.writes import WriteContext
 
@@ -169,3 +171,18 @@ async def run_grants(sf, client, clock: Clock, *, reader, settings: Settings) ->
     for upn in sorted(touched):
         out.members_recomputed += await _recompute(sf, settings, upn, now)
     return out
+
+
+@dataclass
+class NotifyResult:
+    created: dict[str, int]
+
+
+async def run_notifications(
+    sf, client, clock: Clock, *, settings: Settings, directory: Directory
+) -> NotifyResult:
+    """FR-N1 threshold kinds; the dedupe keys make a rerun in the same period a no-op."""
+    async with sf() as db:
+        created = await notify_scan.scan(db, directory, settings, clock.now())
+        await db.commit()
+    return NotifyResult(dict(created))

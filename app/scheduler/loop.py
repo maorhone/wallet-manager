@@ -84,13 +84,20 @@ async def run_loop(
 
 
 def build_jobs(settings: Settings, session_factory, client, reader, directory, clock) -> list[Job]:
-    """Grants now; notifications (Step 2.4) and reconciliation (Step 2.5) register here later."""
+    """Grants and notifications; reconciliation (Step 2.5) registers here later."""
     timeout = settings.scheduler_lock_timeout_s
     return [
         Job(
             "grants", GRANTS_LOCK, timedelta(seconds=settings.scheduler_grants_interval_s),
             lambda: jobs.run_grants(
                 session_factory, client, clock, reader=reader, settings=settings
+            ),
+            True, timeout,
+        ),
+        Job(
+            "notifications", NOTIFY_LOCK, timedelta(seconds=settings.scheduler_notify_interval_s),
+            lambda: jobs.run_notifications(
+                session_factory, client, clock, settings=settings, directory=directory
             ),
             True, timeout,
         ),

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     spend_snapshot_interval_s: float = 300
     overalloc_interval_s: float = 300
     scheduler_grants_interval_s: float = 60
-    scheduler_notify_interval_s: float = 900  # used by Step 2.4
+    scheduler_notify_interval_s: float = 900
+    notify_email_enabled: bool = False
+    smtp_host: str = "smtp.corp.example"
+    smtp_port: int = 25
+    notify_email_from: str = "wallet-manager@corp.example"
+    seed_grants: bool = False  # dev seed adds one active grant with a share (Step 2.4)
     reconcile_interval_min: float = 5  # used by Step 2.5
     scheduler_lock_timeout_s: float = 300

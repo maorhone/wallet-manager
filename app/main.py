@@ -22,6 +22,7 @@ from app.routers import (
     groups,
     me,
     members,
+    notifications,
     onboarding,
     placements,
     platform,
@@ -101,6 +102,7 @@ def create_app(
     app.include_router(grants.router)
     app.include_router(groups.router)
     app.include_router(members.router)
+    app.include_router(notifications.router)
     app.include_router(onboarding.router)
     app.include_router(placements.router)
     app.include_router(policies.router)

@@ -200,3 +200,14 @@ role_bindings:
       scope_kind: department,
       scope: D1,
     }
+
+# Applied only with SEED_GRANTS=1 (live preview); tests and the test.sh stack keep Phase 1 numbers.
+grants:
+  - {
+      project_ref: PRJ-ATLAS,
+      purpose: Atlas pilot,
+      group: A2,
+      amount: 30000,
+      expires_in_days: 60,
+      shares: [{ upn: avi@corp.example, amount: 5000, expires_in_days: 30 }],
+    }

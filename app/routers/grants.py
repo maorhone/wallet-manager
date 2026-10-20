@@ -10,7 +10,8 @@ router = APIRouter()
 
 @router.post("/grants")
 async def post_grant(body: GrantIn, request: Request, ctx: Write, principal: CurrentPrincipal):
-    entities = await grants.create_grant(ctx, principal, request.app.state.clock, body)
+    app = request.app
+    entities = await grants.create_grant(ctx, principal, app.state.directory, app.state.clock, body)
     return await write_response(ctx, entities)
 
 

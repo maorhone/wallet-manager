@@ -42,6 +42,7 @@ from app.permissions import (
     can_move,
     target_tier,
 )
+from app.services import notifications
 from app.services.personal_values import OWNER_ROLE
 from app.writes import WriteContext
 
@@ -217,6 +218,13 @@ async def move(
     frozen = TeamMemberDelete(team_id=old.litellm_team_id, user_id=upn).payload()
     await ctx.enqueue("employee", upn, "/team/member_delete", payload=frozen, chain=True)
     after = {"group_id": new.id, "base_cap": new.default_member_cap, "model_caps": {}}
+    await notifications.notify(
+        ctx.db, await notifications.heads_of(ctx.db, directory, new.id), "member_moved_in",
+        "group", new.id,
+        {"upn": upn, "display_name": emp.display_name, "from_group_id": old.id,
+         "group_id": new.id, "group_name": new.name},
+        f"moved:{upn}:{ctx.request_id}", settings=ctx.settings,
+    )  # fmt: skip
     return _done(ctx, role, new, emp, "move", before, {**after, "from_group_id": old.id})
 
 

@@ -80,15 +80,22 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 Separate process (`python -m app.scheduler`) with an injectable clock; one replica runs a job at a time (advisory lock) and a
 restart catches up on everything overdue. Grants job (every 60 s): activation, share and grant expiry, then one recompute of the
 member's temporary budget (earliest remaining expiry) per affected person. Metrics: `wm_scheduler_job_runs_total`,
-`wm_scheduler_job_last_success_timestamp`. Notification dispatch (Step 2.4) and reconciliation (Step 2.5) join later.
+`wm_scheduler_job_last_success_timestamp`. A notifications job (Step 2.4, 4.7) runs next to it; reconciliation (Step 2.5) joins later.
 
 ### 4.6 Reconciliation (FR-RC) - Phase 2: Planned (Step 2.5)
 
 Periodic compare of desired vs live LiteLLM state, drift log, repeated-drift alert.
 
-### 4.7 Notifications (FR-N) - Phase 2: Planned (Step 2.4, UI 2.10)
+### 4.7 Notifications (FR-N) - Phase 2: Backend Done (Step 2.4); UI Planned (Step 2.10)
 
-Triggers for thresholds and grant events, per-user mute, `/me/notifications*`, bell and preferences in the UI.
+In-app notifications, deduplicated per person and event. Written by the scheduler job (every 15 min): employee at 80% / 100%
+of their total (the employee), group at 80% / 100% (group heads), grant expiring in 7 days and grant under 20% used with 7 days
+left (group heads and the department's PMO), failed outbox rows (platform admins). Written with the action itself: a user left
+pending placement (the department's representatives, or platform admins when the department is unknown), a member moved into a
+group (the new group head), a grant created (the group heads). 100% and outbox-failure kinds are critical and cannot be muted;
+the others can (`PUT /me/notification-prefs`). API: `GET /me/notifications?unread=`, `POST /me/notifications/{id}/read`.
+Optional email copy (`NOTIFY_EMAIL_ENABLED`, off by default, needs an internal relay). Bell and preferences UI: Step 2.10.
+The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 
 ### 4.8 UI screens - Phase 1/1b: Done; Phase 2: Planned
 

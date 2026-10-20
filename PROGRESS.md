@@ -2,7 +2,7 @@
 
 ## Status
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Phase 2 (PLAN §4).
-Latest `./scripts/test.sh` (Step 2.3): green; pytest 405 collected (5 skipped real-target cases); vitest 24; Playwright 27; Playwright 1.8 min.
+Latest `./scripts/test.sh` (Step 2.4): green; pytest 417 passed (5 skipped real-target cases); vitest 24; Playwright 27; Playwright 2.0 min.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -111,13 +111,27 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   fixtures `fake_clock` / `run_job`, helpers `tests/helpers/grants.py`. Tests: `tests/scheduler/test_{loop,grants_job}.py` (4 + 6), move/delete share tests (3, the hook test was replaced),
   `tests/contract/test_a1_temp_increase.py` (`[fake]`; `[real]` skipped), `tests/e2e_backend/test_a1_wm.py`, A9 with a share.
 
+- Step 2.4: `app/services/notifications.py` (`KINDS` with critical flags, `notify` with mute check, `ON CONFLICT DO NOTHING` dedupe and optional email, `heads_of`, `reps_or_admins`, /me helpers),
+  `app/services/notify_scan.py` (employee/group 80/100, grant expiring/underused, outbox failed), `app/notify_email.py`, `app/routers|schemas/notifications.py`
+  (`GET /me/notifications?unread=`, `POST /me/notifications/{id}/read`, `PUT /me/notification-prefs`), `jobs.run_notifications` -> `NotifyResult` (registered, lock 2, 900 s),
+  event hooks in `onboard` (pending), `move`, `create_grant` (now takes `directory`), settings `notify_email_enabled|smtp_host|smtp_port|notify_email_from|seed_grants` + `.env.example`,
+  seed `grants:` (PRJ-ATLAS, A2, 30,000, 60 d, share 5,000 to avi) applied only with `SEED_GRANTS=1`; `e2e_stack.py` sets it only when the API port is the default 4111.
+  Tests: `tests/api/test_notifications.py` (5), `test_notification_events.py` (3), `tests/scheduler/test_notifications_job.py` (6), `tests/unit/test_notify_email.py` (2), `tests/test_seed_grants.py` (1).
+  `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
+
 ## Next
-- Step 2.4: notifications backend (FR-N1 triggers, FR-N2 mute, `/me/notifications*`). Register its job in `scheduler.loop.build_jobs` (lock id 2, `NOTIFY_LOCK`); reconcile is lock 3.
+- Step 2.5: reconciliation (FR-RC1-3, drift log, repeated-drift alert). Register its job in `scheduler.loop.build_jobs` (lock id 3, `RECONCILE_LOCK`); it raises `drift_repeated` through `services.notifications.notify` (kind and critical flag already in `KINDS`).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.4: `pending_placement` is written only by onboarding (`place` always resolves a pending user, it never leaves one pending). Scans use the snapshot (`Spend`) and the wallet views
+  (`_Group`), so a notification appears after the next spend snapshot; dedupe keys are `emp:<period>:80|100` (per person and kind), `grp:<id>:<period>:80|100`, `grant:<id>:expiring|underused|received`,
+  `pending:<upn>:<since>`, `moved:<upn>:<request_id>`, `outbox:<write_id>`. A grant is "underused" when Σ shares' attributed/stored used < 20% of the amount (no shares = 0). Notification
+  payloads carry their `key`. `notify_scan` is split from `notifications` so grants/lifecycle/onboarding can import the latter without a cycle through `views`. Endpoints write no audit row
+  (personal UI state). Email is sent through `asyncio.to_thread` inside the request transaction; a failure only logs. Tooling slip: one scratch file written via Bash `printf` to `/tmp`
+  (outside the repo, unused afterwards).
 - Step 2.3: `WriteContext.enqueue` now sets the chain predecessor only from `chain=True` rows (before, any earlier row of the context became the predecessor), otherwise the share-return
   `/team/update` queued before the move chain would have held the move up. `build_jobs` registers only the grants job for now. `Job` has an extra `timeout_s` field (from `scheduler_lock_timeout_s`).
   Phases 2-3 close with `member_update=False` and phase 4 enqueues the single `/team/member_update` per touched member; a crash between a phase commit and phase 4 loses that recompute

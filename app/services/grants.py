@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import Clock
 from app.config import Settings
 from app.db import LockKind
+from app.directory import Directory
 from app.errors import (
     ApiError,
     grant_below_shared,
@@ -31,8 +32,8 @@ from app.permissions import (
     can_view_grants,
 )
 from app.schemas.grants import GrantIn, GrantPatchIn
+from app.services import notifications, wallet
 from app.services import shares as shares_service
-from app.services import wallet
 from app.services.spend import month_bounds
 from app.services.views import period_ctx
 from app.writes import WriteContext, sync_status
@@ -115,7 +116,7 @@ async def _manageable(ctx: WriteContext, principal: Principal, grant_id: int) ->
 
 
 async def create_grant(
-    ctx: WriteContext, principal: Principal, clock: Clock, body: GrantIn
+    ctx: WriteContext, principal: Principal, directory: Directory, clock: Clock, body: GrantIn
 ) -> list[dict]:
     group = await ctx.db.get(Grp, body.group_id)
     if group is None:
@@ -149,6 +150,13 @@ async def create_grant(
     entities = [_audit_grant(ctx, g, {}, role)]
     if active:
         await _team_update(ctx, g, role, entities)
+    await notifications.notify(
+        ctx.db, await notifications.heads_of(ctx.db, directory, group.id), "grant_received",
+        "grant", g.id,
+        {"grant_id": g.id, "group_id": group.id, "amount": g.amount, "project_ref": g.project_ref,
+         "expires_at": g.expires_at.isoformat()},
+        f"grant:{g.id}:received", settings=ctx.settings,
+    )  # fmt: skip
     return entities
 
 

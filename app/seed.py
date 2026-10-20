@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -7,7 +7,16 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.models import Department, Employee, Grp, LitellmWrite, Policy, RoleBinding
+from app.models import (
+    Department,
+    Employee,
+    Grant,
+    GrantShare,
+    Grp,
+    LitellmWrite,
+    Policy,
+    RoleBinding,
+)
 from app.services.lifecycle import JOINER
 from app.writes import WriteContext
 
@@ -48,6 +57,39 @@ async def _provision(session: AsyncSession, settings: Settings) -> None:
             continue
         ctx.audit(entity, entity_id, None, {"enqueue": endpoint}, "sync_service")
         await ctx.enqueue(entity, entity_id, endpoint)
+
+
+async def _seed_grants(
+    session: AsyncSession, settings: Settings, rows: list[dict], group_ids, dept_ids
+) -> None:
+    """Dev grants (active now) with their shares; skipped when the project already exists."""
+    ctx = WriteContext(session, settings, "seed", str(uuid.uuid4()), "dev grants")
+    now = datetime.now(UTC)
+    for row in rows:
+        group = await session.get(Grp, group_ids[row["group"]])
+        if await session.scalar(
+            select(Grant.id).where(
+                Grant.group_id == group.id, Grant.project_ref == row["project_ref"]
+            )
+        ):
+            continue
+        grant = Grant(
+            department_id=group.department_id, group_id=group.id, amount=row["amount"],
+            project_ref=row["project_ref"], purpose=row.get("purpose"), status="active",
+            starts_at=now, expires_at=now + timedelta(days=row["expires_in_days"]),
+            created_by="seed",
+        )  # fmt: skip
+        session.add(grant)
+        await session.flush()
+        await ctx.enqueue("group", group.id, "/team/update")
+        for s in row.get("shares", []):
+            session.add(
+                GrantShare(
+                    grant_id=grant.id, upn=s["upn"], amount=s["amount"],
+                    expires_at=now + timedelta(days=s["expires_in_days"]),
+                )
+            )  # fmt: skip
+            await ctx.enqueue("employee", s["upn"], "/team/member_update")
 
 
 async def seed(
@@ -129,3 +171,5 @@ async def seed(
             )
         if settings is not None:
             await _provision(session, settings)
+            if settings.seed_grants:
+                await _seed_grants(session, settings, data.get("grants", []), group_ids, dept_ids)

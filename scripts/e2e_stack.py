@@ -77,6 +77,8 @@ def main() -> None:
         "SCHEDULER_GRANTS_INTERVAL_S": "2",
         "SCHEDULER_NOTIFY_INTERVAL_S": "2",
         "SEED_FILE": str(ROOT / "seed" / "dev.yaml"),
+        # the live preview (default ports) shows a grant; the test.sh stack keeps Phase 1 numbers
+        "SEED_GRANTS": "1" if API_PORT == 4111 else "0",
     }
     env = {**os.environ, **overrides}
     state = {

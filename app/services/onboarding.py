@@ -13,6 +13,7 @@ from app.directory import Directory, DirectoryUnavailable
 from app.errors import ApiError, directory_unavailable, member_state_conflict, scope_forbidden
 from app.models import Department, Employee, Grp
 from app.permissions import ADMIN, Principal, can_place, target_tier
+from app.services import notifications
 from app.services.lifecycle import check_target, guard_idle, provision, unapplied
 from app.writes import WriteContext
 
@@ -109,6 +110,13 @@ async def onboard(
         await ctx.db.flush()
         if found.group_id is not None:
             await provision(ctx, emp)
+        else:
+            await notifications.notify(
+                ctx.db, await notifications.reps_or_admins(ctx.db, directory, found.department_id),
+                "pending_placement", "department", found.department_id,
+                {"upn": upn, "display_name": name, "reason": found.reason},
+                f"pending:{upn}:{emp.pending_since.isoformat()}", settings=ctx.settings,
+            )  # fmt: skip
         ctx.audit(
             "employee", upn, None,
             {"status": emp.status, "group_id": emp.group_id, "reason": found.reason},
