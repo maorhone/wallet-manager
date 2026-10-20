@@ -43,6 +43,8 @@ test('PMO creates a grant through the wizard and pool available drops', async ({
   await page.getByTestId('change-reason').fill('פיילוט');
   await page.getByTestId('confirm-change').click();
   await expect(page.getByTestId('grant-list')).toContainText('PRJ-E2E');
+  // The summary and wizard modals close with a transition; their overlay swallows clicks until gone.
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   await page.getByTestId('tab-pool').click();
   await expect.poll(() => available(page)).toBe(before - 1000);
