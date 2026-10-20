@@ -56,6 +56,9 @@ export async function apiFetch<T>(
 export const apiPut = <T>(path: string, body: unknown, write: WriteOptions) =>
   apiFetch<T>(path, { method: 'PUT', body: JSON.stringify(body), write });
 
+export const apiPatch = <T>(path: string, body: unknown, write: WriteOptions) =>
+  apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body), write });
+
 export const apiPost = <T>(path: string, body: unknown, write?: WriteOptions) =>
   apiFetch<T>(path, {
     method: 'POST',

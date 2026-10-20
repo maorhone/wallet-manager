@@ -1,11 +1,12 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) done. Next = Step 2.7.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Next = Step 2.8.
 Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 2.7: UI PMO grant actions (extend, increase, close early) and Projects tab.
 - Step 2.6: UI PMO page with Pool and Grants tabs and the create-grant wizard (see Notes).
 - Step 2.5: FR-RC1–3 reconciliation, field-level drift log, repeated-drift alerts and metrics;
   delayed scheduler registration (lock 3), typed mapping list client/fake endpoint, and clearing
@@ -147,12 +148,17 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 2.7: UI PMO grant actions (extend, increase, close early) and Projects tab.
+- Step 2.8: UI Group Grants tab with share create, change and close.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.7: `GrantEditDialog` (extend|increase|close with reason), PMO `Grants` actions column from server
+  `actions`, `Projects` tab (rows aggregated client-side from `GET /grants?department=`; drill-down via
+  `GET /projects/{ref}/summary` and `GET /grants/{id}/shares`), `apiPatch`, `useGrantAction/useProjectSummary/useGrantShares`.
+  Playwright +1 (28). No vitest added. No spec/PLAN differences. One small process slip: a `sed -i` was used once
+  for an import edit in `queries.ts` (formatter/lint passed afterwards).
 - Step 2.6: PMO page (`/pmo/:id/:tab`, pool|grants), `GrantList` (shared, optional `actions` column for 2.7),
   `GrantWizard` (the final summary step reuses `ChangeSummaryDialog`), `usePmoPool/useGrants/useGrantWrite`,
   `apiAs` e2e helper. A department scope with role `pmo` routes to `/pmo/<dept>/pool`. Vitest +2, Playwright +2.

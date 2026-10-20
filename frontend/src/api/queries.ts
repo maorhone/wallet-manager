@@ -5,13 +5,15 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { apiFetch, apiPost, apiPut } from './client';
+import { apiFetch, apiPatch, apiPost, apiPut } from './client';
 import type {
   AuditEntry,
   DepartmentSummary,
   DevUser,
   Grant,
   GrantIn,
+  GrantShare,
+  ProjectSummary,
   GroupSummary,
   Me,
   Member,
@@ -285,6 +287,42 @@ export const useGrantWrite = () => {
     },
   });
 };
+
+/** Extend, increase (PATCH) or close early (POST close) one grant. */
+export const useGrantAction = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: {
+      id: number;
+      patch?: { amount?: number; expires_at?: string };
+      reason: string;
+      key: string;
+    }) => {
+      const write = { reason: v.reason, idempotencyKey: v.key };
+      return v.patch
+        ? apiPatch<WriteResponse>(`/grants/${v.id}`, v.patch, write)
+        : apiPost<WriteResponse>(`/grants/${v.id}/close`, { reason: v.reason }, write);
+    },
+    onSuccess: () => {
+      for (const k of ['pmo', 'grants', 'project', 'department', 'group', 'audit'])
+        qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+};
+
+export const useProjectSummary = (ref: string) =>
+  useQuery({
+    queryKey: ['project', ref],
+    queryFn: () => apiFetch<ProjectSummary>(`/projects/${encodeURIComponent(ref)}/summary`),
+    enabled: ref !== '',
+  });
+
+export const useGrantShares = (grantId: number, enabled = true) =>
+  useQuery({
+    queryKey: ['project', 'shares', grantId],
+    queryFn: () => apiFetch<GrantShare[]>(`/grants/${grantId}/shares`),
+    enabled,
+  });
 
 export const useMyUsage = (from: string, to: string) =>
   useQuery({

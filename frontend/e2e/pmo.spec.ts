@@ -48,6 +48,46 @@ test('PMO creates a grant through the wizard and pool available drops', async ({
   await expect.poll(() => available(page)).toBe(before - 1000);
 });
 
+test('PMO extends then closes a grant early and the projects tab shows used and returned', async ({
+  page,
+}) => {
+  await loginAs(page, PMO);
+  const dept = await departmentId(page);
+  const api = await apiAs(PMO);
+  const summary = await (await api.get(`/departments/${dept}/summary`)).json();
+  const created = await api.post('/grants', {
+    group_id: summary.groups[0].id,
+    amount: 500,
+    starts_at: new Date(Date.now() - 60_000).toISOString(),
+    expires_at: new Date(Date.now() + 10 * 86_400_000).toISOString(),
+    project_ref: 'PRJ-ACT',
+    purpose: 'actions',
+  });
+  expect(created.ok()).toBeTruthy();
+  await api.dispose();
+
+  await page.goto(`/pmo/${dept}/grants`);
+  const row = page.locator('[data-project="PRJ-ACT"]');
+  const id = await row.getAttribute('data-testid').then((v) => v!.replace('grant-row-', ''));
+  await page.getByTestId(`extend-${id}`).click();
+  await page.getByTestId('grant-edit-expiry').fill(inDays(40));
+  await page.getByTestId('grant-edit-reason').fill('הארכה');
+  await page.getByTestId('grant-edit-confirm').click();
+  await expect(page.getByTestId('grant-edit')).toHaveCount(0);
+  await expect(row).toContainText(new Date(Date.now() + 40 * 86_400_000).getFullYear().toString());
+
+  await page.getByTestId(`close-${id}`).click();
+  await page.getByTestId('grant-edit-reason').fill('סיום מוקדם');
+  await page.getByTestId('grant-edit-confirm').click();
+  await expect(row).toContainText('סגור');
+
+  await page.getByTestId('tab-projects').click();
+  await expect(page.getByTestId('project-used-PRJ-ACT')).toBeVisible();
+  await expect(page.getByTestId('project-returned-PRJ-ACT')).toContainText('500');
+  await page.getByTestId('project-open-PRJ-ACT').click();
+  await expect(page.getByTestId(`project-grant-${id}`)).toBeVisible();
+});
+
 test('A11 PMO amount above pool is blocked and the race returns PMO_POOL_INSUFFICIENT', async ({
   page,
 }) => {

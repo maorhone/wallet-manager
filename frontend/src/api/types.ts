@@ -289,4 +289,22 @@ export interface GrantIn {
   purpose: string;
 }
 
+export interface ProjectSummary {
+  project_ref: string;
+  totals: { amount: number; shared: number; used: number; returned: number };
+  grants: Grant[];
+}
+
+export interface GrantShare {
+  id: number;
+  upn: string;
+  display_name: string;
+  amount: number;
+  expires_at: string;
+  status: string;
+  used: number;
+  returned: number;
+  closed_reason: string | null;
+}
+
 export type Policies = Record<string, { min?: number; default?: number; max?: number }>;

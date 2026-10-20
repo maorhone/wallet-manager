@@ -6,10 +6,11 @@ import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
 import Grants from './Grants';
 import Pool from './Pool';
+import Projects from './Projects';
 
-const TABS = ['pool', 'grants'];
+const TABS = ['pool', 'grants', 'projects'];
 
-/** "גוף פרויקטים" (§12.5.3): Pool and Grants; Projects is Step 2.7. */
+/** "גוף פרויקטים" (§12.5.3): Pool, Grants and Projects. */
 export default function PmoPage() {
   const { id = '', tab = 'pool' } = useParams();
   const [search] = useSearchParams();
@@ -41,6 +42,7 @@ export default function PmoPage() {
       </Tabs>
       {tab === 'pool' && <Pool summary={s} period={period} />}
       {tab === 'grants' && <Grants summary={s} period={period} />}
+      {tab === 'projects' && <Projects summary={s} />}
     </Stack>
   );
 }
