@@ -104,6 +104,26 @@ export const he = {
     save: 'שמירה',
     cancel: 'ביטול',
   },
+  memberActions: {
+    section: 'פעולות',
+    kick: 'השעיה',
+    restore: 'החזרה',
+    move: 'העברה לקבוצה אחרת',
+    delete: 'מחיקה',
+    kicked: 'מושעה',
+    reason: 'סיבה',
+    target: 'קבוצת יעד',
+    noTargets: 'אין קבוצות יעד זמינות',
+    confirmUpn: 'להקלדת מזהה העובד לאישור המחיקה',
+    deleteWarning: 'המחיקה מסירה את המפתח, החברות והמשתמש ב-LiteLLM. ההיסטוריה נשמרת',
+    confirm: 'אישור',
+    descriptions: {
+      kick: 'המפתח של העובד ייחסם עד להחזרה',
+      restore: 'המפתח של העובד ישוחרר',
+      move: 'העובד יועבר לקבוצה החדשה עם מכסת ברירת המחדל שלה. מכסות המודלים האישיות יתאפסו',
+      delete: 'העובד יוסר מהמערכת',
+    } as Record<string, string>,
+  },
   departmentPage: {
     tabs: { overview: 'סקירה', split: 'חלוקה' } as Record<string, string>,
     budget: 'תקציב המחלקה',
@@ -144,5 +164,6 @@ export const he = {
     blockedDept: 'חסום: תקציב המחלקה נוצל',
     overAllocated: 'הוקצה מעבר לתקציב',
     pending: 'ממתין לסנכרון',
+    suspended: 'מושעה',
   },
 };

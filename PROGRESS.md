@@ -1,8 +1,8 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Step 1b.1, 1b.2 and 1b.3 done. Next = Step 1b.4.
-Latest `./scripts/test.sh`: pytest 346 passed, 4 skipped; vitest 21; Playwright 18; ~2.8 min.
+Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Step 1b.1–1b.4 done. Next = Step 1b.5.
+Latest `./scripts/test.sh`: pytest 346 passed, 4 skipped; vitest 24; Playwright 24; ~3.5 min.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -86,9 +86,12 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   seed users (newbie, drifter, twin directory-only; pazit, lost pending), `scripts/dev_onboard.py`, e2e stack generates the portal settings. Vite proxy has `onboarding|pending-placements`.
   Tests: `tests/api/test_onboarding.py` (15), `tests/auth/test_portal_jwt.py` (14), `tests/api/test_placement.py` (14), `tests/e2e_backend/test_onboarding_wm.py` (A15, A10); `tests/helpers/jwt.py`, fixtures `make_portal`/`portal`.
 
+- Step 1b.4: `components/MemberActionDialog.tsx` (reason, move target select, typed-upn confirm), side panel "פעולות" section driven by `Member.actions`,
+  muted rows + "מושעה" badge (`StateBadge` `suspended`, `AllocRow.muted`), `useMemberAction|useMoveTargets`, `he.memberActions`, new error codes
+  (`MEMBER_STATE_CONFLICT`, `LIFECYCLE_IN_PROGRESS`, `DIRECTORY_UNAVAILABLE`), e2e `fakeFail`. Tests: `MemberActionDialog.test.tsx` (3), `e2e/member-actions.spec.ts` (6).
+
 ## Next
 - Phase 1b (PLAN §2b), one step per session, in order:
-  - Step 1b.4: UI member actions in Group Members and the side panel.
   - Step 1b.5: UI pending placement lists; Phase 1b wrap-up.
 - Then Phase 2 (PLAN §4): grants and expiry (A1, A9 with a share, A11; U5).
 
@@ -178,6 +181,9 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   (the banner depends on the 10 s `/status` cache + 5 s poll); it passed on rerun. `wallet.spec.ts` U4 (30 s wait on the 2 s snapshot loop + 15 s wallet refetch) failed once too and then passed in two reruns. Both are timing flakes in
   Step 10–11 tests; consider shortening the UI refetch interval in the E2E stack.
  
+
+- Step 1b.4: the side panel closes after any member action; the row then shows the sync badge. A kicked member is `status: blocked` (muted row, "מושעה"); delete sets `left`,
+  so the row disappears at once. `fakeFail(endpoint, times)` exists in `e2e/fixtures.ts` but no test needs it yet. The vitest file uses `@vitest-environment jsdom` (first jsdom test).
 
 ## Questions for owner
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).

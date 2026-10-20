@@ -203,6 +203,16 @@ export interface Member extends MemberSlim {
   sync_status: SyncStatus;
   editable: boolean;
   owner: Owner;
+  actions: Record<MemberActionKind, boolean>;
+}
+
+export type MemberActionKind = 'kick' | 'restore' | 'move' | 'delete';
+
+export interface MoveTarget {
+  group_id: number;
+  name: string;
+  department_id: number;
+  department_name: string;
 }
 
 export interface MembersList extends PeriodEnvelope {

@@ -38,5 +38,9 @@ export async function fake(path: string, body?: unknown) {
   return res.json();
 }
 
+/** Make the next `times` calls of a fake LiteLLM endpoint fail with a 500. */
+export const fakeFail = (endpoint: string, times: number, status = 500) =>
+  fake('/_test/fail', { endpoint, status, times });
+
 export const test = base;
 export { expect };

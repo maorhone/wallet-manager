@@ -7,7 +7,9 @@ import type {
   GroupSummary,
   Me,
   Member,
+  MemberActionKind,
   MembersList,
+  MoveTarget,
   MyWallet,
   Policies,
   Status,
@@ -145,6 +147,40 @@ export const useGroupWrite = (groupId: string, period: string) => {
         }),
       }));
       qc.invalidateQueries({ queryKey: ['group', groupId] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};
+
+/** Target groups the actor may move this member to (loaded only while the move dialog is open). */
+export const useMoveTargets = (groupId: string, upn: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ['group', groupId, 'move-targets', upn],
+    queryFn: () =>
+      apiFetch<MoveTarget[]>(`/groups/${groupId}/members/${encodeURIComponent(upn)}/move-targets`),
+    enabled,
+  });
+
+/** Kick, restore, move or delete one member; refreshes the group's members and summary. */
+export const useMemberAction = (groupId: string, period: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: {
+      action: MemberActionKind;
+      upn: string;
+      body?: unknown;
+      reason: string;
+      key: string;
+    }) =>
+      apiPost<WriteResponse>(
+        `/groups/${groupId}/members/${encodeURIComponent(v.upn)}/${v.action}`,
+        v.body ?? {},
+        { reason: v.reason, idempotencyKey: v.key },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.members(groupId, period) });
+      qc.invalidateQueries({ queryKey: keys.groupSummary(groupId, period) });
+      qc.invalidateQueries({ queryKey: ['department'] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });

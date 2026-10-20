@@ -1,11 +1,14 @@
 import { Button, Drawer, Group, NumberInput, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useState } from 'react';
-import { useGroupWrite } from '../api/queries';
-import type { Member, Policies } from '../api/types';
+import { useGroupWrite, useMemberAction, useMoveTargets } from '../api/queries';
+import type { Member, MemberActionKind, Policies } from '../api/types';
 import { he } from '../i18n/he';
 import { ChangeSummaryDialog, type SummaryRow } from './ChangeSummaryDialog';
 import { Credits } from './Credits';
+import { MemberActionDialog } from './MemberActionDialog';
 import { Num } from './Num';
+
+const ACTIONS: MemberActionKind[] = ['kick', 'restore', 'move', 'delete'];
 
 interface Props {
   member: Member | null;
@@ -50,6 +53,10 @@ function PanelBody({ member, groupId, period, policies, onClose }: Props & { mem
   const [newModel, setNewModel] = useState('');
   const [open, setOpen] = useState(false);
   const write = useGroupWrite(groupId, period);
+  const act = useMemberAction(groupId, period);
+  const [action, setAction] = useState<MemberActionKind | null>(null);
+  const targets = useMoveTargets(groupId, member.upn, action === 'move');
+  const available = ACTIONS.filter((a) => member.actions?.[a]);
 
   const base = `/groups/${groupId}/members/${encodeURIComponent(member.upn)}`;
   const capsChanged = JSON.stringify(caps) !== JSON.stringify(member.model_caps);
@@ -155,6 +162,39 @@ function PanelBody({ member, groupId, period, policies, onClose }: Props & { mem
       <Button disabled={rows.length === 0} onClick={() => setOpen(true)} data-testid="panel-review">
         {he.groupPage.review}
       </Button>
+      {available.length > 0 && (
+        <Stack data-testid="member-actions">
+          <Title order={6}>{he.memberActions.section}</Title>
+          <Group>
+            {available.map((a) => (
+              <Button
+                key={a}
+                variant="default"
+                color={a === 'delete' ? 'red' : undefined}
+                data-testid={`action-${a}`}
+                onClick={() => setAction(a)}
+              >
+                {he.memberActions[a]}
+              </Button>
+            ))}
+          </Group>
+        </Stack>
+      )}
+      {action && (
+        <MemberActionDialog
+          opened
+          action={action}
+          member={member}
+          targets={targets.data}
+          onClose={() => setAction(null)}
+          onConfirm={async (reason, key, body) => {
+            // The dialog only enables Delete once the typed text equals the upn.
+            const payload = action === 'delete' ? { confirm_upn: member.upn } : body;
+            await act.mutateAsync({ action, upn: member.upn, body: payload, reason, key });
+            onClose();
+          }}
+        />
+      )}
       <ChangeSummaryDialog
         opened={open}
         rows={rows}

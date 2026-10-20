@@ -1,0 +1,1 @@
+scripts/test.sh is failing after your Step 1b.3 work (output tail in .claude/state/last-red.txt). Find the root cause and fix it; do not skip, delete or weaken tests. Use Write/Edit only. Then commit locally (no push). Final message: one short paragraph.

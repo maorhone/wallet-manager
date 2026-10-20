@@ -48,7 +48,7 @@ export default function Members({ groupId, period, summary }: Props) {
   const [edits, setEdits] = useState<Edits>({});
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [review, setReview] = useState(false);
-  const [panel, setPanel] = useState<Member | null>(null);
+  const [panel, setPanel] = useState<string | null>(null);
   const [defaults, setDefaults] = useState(false);
   const [copyMsg, setCopyMsg] = useState('');
 
@@ -69,17 +69,26 @@ export default function Members({ groupId, period, summary }: Props) {
     value: m.base_cap,
     editable: m.editable && !readOnly,
     owner: m.editable ? undefined : ownerLabel(m),
+    muted: m.status === 'blocked',
     cells: [
       <Credits key="s" value={m.shares_total} />,
       <Credits key="t" value={m.total} />,
       <Credits key="u" value={m.used} />,
       <Pct key="p" value={m.percent * 100} />,
-      <Button key="mc" size="compact-xs" variant="subtle" onClick={() => setPanel(m)}>
+      <Button
+        key="mc"
+        size="compact-xs"
+        variant="subtle"
+        data-testid="open-panel"
+        onClick={() => setPanel(m.upn)}
+      >
         <Num>{Object.keys(m.model_caps).length}</Num> {t.edit}
       </Button>,
       <Num key="c">{m.max_parallel ?? '–'}</Num>,
       <Num key="r">{m.rpm_limit ?? '–'}</Num>,
-      API_STATE[m.state] ? (
+      m.status === 'blocked' ? (
+        <StateBadge key="st" state="suspended" />
+      ) : API_STATE[m.state] ? (
         <StateBadge key="st" state={API_STATE[m.state]!} />
       ) : (
         <Badge>{t.left}</Badge>
@@ -199,7 +208,7 @@ export default function Members({ groupId, period, summary }: Props) {
         }}
       />
       <MemberSidePanel
-        member={panel}
+        member={members.data.members.find((m) => m.upn === panel) ?? null}
         groupId={groupId}
         period={period}
         policies={policies.data}

@@ -3,7 +3,14 @@ import type { ApiState } from '../api/types';
 import { he } from '../i18n/he';
 
 export type WalletState =
-  'healthy' | 'near' | 'blockedOwn' | 'blockedGroup' | 'blockedDept' | 'overAllocated' | 'pending';
+  | 'healthy'
+  | 'near'
+  | 'blockedOwn'
+  | 'blockedGroup'
+  | 'blockedDept'
+  | 'overAllocated'
+  | 'pending'
+  | 'suspended';
 
 /** API state → badge; `muted` (left members) has none. */
 export const API_STATE: Record<ApiState, WalletState | null> = {
@@ -24,6 +31,7 @@ const LOOK: Record<WalletState, { color: string; icon: string }> = {
   blockedDept: { color: 'red', icon: '■' },
   overAllocated: { color: 'yellow', icon: '▲' },
   pending: { color: 'blue', icon: '⏳' },
+  suspended: { color: 'gray', icon: '⏸' },
 };
 
 /** §12.4 badge: label plus icon, so color is never the only signal. */

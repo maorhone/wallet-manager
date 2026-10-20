@@ -11,6 +11,8 @@ export interface AllocRow {
   editable: boolean;
   /** For read-only rows: who can change the value (§12.1). */
   owner?: string;
+  /** Shown dimmed (e.g. suspended members). */
+  muted?: boolean;
   /** Extra cells after the value column. */
   cells?: ReactNode[];
 }
@@ -73,7 +75,12 @@ export function AllocationTable(p: AllocationTableProps) {
           {p.rows.map((r) => {
             const error = p.rowErrors?.[r.key];
             return (
-              <Table.Tr key={r.key} data-row={r.key}>
+              <Table.Tr
+                key={r.key}
+                data-row={r.key}
+                data-muted={r.muted ? 'true' : undefined}
+                style={r.muted ? { opacity: 0.6 } : undefined}
+              >
                 <Table.Td>{r.label}</Table.Td>
                 <Table.Td>
                   {r.editable && !p.readOnly ? (
