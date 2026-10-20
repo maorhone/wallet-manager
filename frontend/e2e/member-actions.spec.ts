@@ -97,7 +97,7 @@ test('U11 admin delete requires typed upn', async ({ page }) => {
   await page.getByTestId('action-reason').fill('סגירת משתמש');
   const confirm = page.getByTestId('confirm-action');
   await expect(confirm).toBeDisabled();
-  await page.getByTestId('confirm-upn').fill('dani@corp.exampl');
+  await page.getByTestId('confirm-upn').fill('dan@corp.example');
   await expect(confirm).toBeDisabled();
   await page.getByTestId('confirm-upn').fill(DANI);
   await expect(confirm).toBeEnabled();

@@ -64,7 +64,7 @@ describe('MemberActionDialog', () => {
     open('delete');
     type('action-reason', 'סגירת משתמש');
     expect(confirmBtn().disabled).toBe(true);
-    type('confirm-upn', 'dani@corp.exampl');
+    type('confirm-upn', 'dan@corp.example');
     expect(confirmBtn().disabled).toBe(true);
     type('confirm-upn', 'DANI@corp.example');
     expect(confirmBtn().disabled).toBe(true);
