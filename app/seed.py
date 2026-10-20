@@ -7,6 +7,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
+from app.db import truncate_with_retry
 from app.models import (
     Department,
     Employee,
@@ -103,8 +104,9 @@ async def seed(
     With ``settings`` it also enqueues the LiteLLM provisioning (once per object).
     """
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    async with factory() as session, session.begin():
-        if reset:
+    if reset:
+        async with factory() as session:
+            engine = session.bind
             names = (
                 await session.execute(
                     text(
@@ -114,7 +116,10 @@ async def seed(
                 )
             ).scalars()
             tables = ", ".join(f'"{n}"' for n in names)
-            await session.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        # Own transaction with lock_timeout + retry: the dev stack's API/worker/scheduler keep
+        # reading these tables, and a plain TRUNCATE can deadlock with them (seen in e2e).
+        await truncate_with_retry(engine, f"TRUNCATE {tables} RESTART IDENTITY CASCADE")
+    async with factory() as session, session.begin():
         for key, value in data.get("policies", {}).items():
             await session.merge(Policy(key=key, value=value))
 

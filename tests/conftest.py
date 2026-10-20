@@ -10,13 +10,14 @@ import httpx
 import pytest
 import pytest_asyncio
 from helpers import jwt as portal_jwt
+from helpers.db import drop_leaked_sessions
 from pgembed import PostgresServer
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import Settings
-from app.db import create_database, to_asyncpg_url
+from app.db import create_database, to_asyncpg_url, truncate_with_retry
 from app.litellm_client import LiteLLMClient
 from app.main import close_app, create_app
 from app.seed import seed
@@ -69,7 +70,7 @@ async def engine(wm_url):
 
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_tables(engine):
-    async with engine.begin() as conn:
+    async with engine.connect() as conn:
         names = (
             await conn.execute(
                 text(
@@ -79,7 +80,9 @@ async def _clean_tables(engine):
             )
         ).scalars()
         tables = ", ".join(f'"{n}"' for n in names)
-        await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+    await truncate_with_retry(
+        engine, f"TRUNCATE {tables} RESTART IDENTITY CASCADE", on_conflict=drop_leaked_sessions
+    )
     yield
 
 
@@ -93,7 +96,7 @@ async def fake_engine(litellm_url):
 
 @pytest_asyncio.fixture
 async def fake_app(fake_engine):
-    await fake_db.reset_db(fake_engine)
+    await fake_db.reset_db(fake_engine, on_conflict=drop_leaked_sessions)
     return create_fake_app(fake_engine)
 
 

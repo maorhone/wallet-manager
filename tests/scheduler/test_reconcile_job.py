@@ -220,9 +220,7 @@ async def test_mapping_pointing_at_other_token_repaired(run, provisioned, litell
     assert (await run()).corrected == 0
 
 
-async def test_key_and_mapping_corrections_block_lifecycle_and_show_sync(
-    run, provisioned, litellm
-):
+async def test_key_and_mapping_corrections_block_lifecycle_and_show_sync(run, provisioned, litellm):
     from app.litellm_client import KeyUpdate
     from app.services.lifecycle import unapplied
     from app.writes import sync_status
@@ -285,8 +283,11 @@ async def test_missing_objects_alert_admins_deduped_not_recreated(run, provision
         token = (await db.get(Employee, dani)).key_token_hash
     await litellm.team_member_delete(TeamMemberDelete(team_id="A1", user_id=dani))
     await litellm.jwt_mapping_delete(
-        JwtKeyMappingDelete(jwt_issuer=(await litellm.jwt_mapping_list())[0].jwt_issuer,
-                            jwt_claim_name="upn", jwt_claim_value=dani)
+        JwtKeyMappingDelete(
+            jwt_issuer=(await litellm.jwt_mapping_list())[0].jwt_issuer,
+            jwt_claim_name="upn",
+            jwt_claim_value=dani,
+        )
     )
     await litellm.key_delete(KeyDelete(keys=[token]))
     first = await run()
@@ -298,4 +299,6 @@ async def test_missing_objects_alert_admins_deduped_not_recreated(run, provision
             await db.scalars(select(Notification).where(Notification.kind == "reconcile_missing"))
         )
         assert len(rows) == 3 and {r.upn for r in rows} == {"admin@corp.example"}
-        assert not list(await db.scalars(select(LitellmWrite).where(LitellmWrite.status == "pending")))
+        assert not list(
+            await db.scalars(select(LitellmWrite).where(LitellmWrite.status == "pending"))
+        )

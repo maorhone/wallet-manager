@@ -1,5 +1,7 @@
 """Fake LiteLLM storage: Core tables with the ERD names/columns (quoted identifiers)."""
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy import (
     ARRAY,
     Boolean,
@@ -15,6 +17,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.db import truncate_with_retry
 
 metadata = MetaData()
 
@@ -140,7 +144,8 @@ async def init_db(engine: AsyncEngine, ro_role: str = "litellm_ro") -> None:
         )
 
 
-async def reset_db(engine: AsyncEngine) -> None:
+async def reset_db(
+    engine: AsyncEngine, on_conflict: Callable[[AsyncEngine], Awaitable[None]] | None = None
+) -> None:
     names = ", ".join(f'"{t.name}"' for t in metadata.sorted_tables)
-    async with engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY"))
+    await truncate_with_retry(engine, f"TRUNCATE {names} RESTART IDENTITY", on_conflict=on_conflict)
