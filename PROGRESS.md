@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives) done. `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 8; Playwright 3).
+Phase 1 (Steps 1–13) done. `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -59,8 +59,14 @@ Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives
   `he.groupPage|summary|history`. Backend: `/groups/{id}/members` rows carry `model_tpm_limits`, `/groups/{id}/summary` carries `group.default_member_cap`.
   Tests: `AllocationTable.test.tsx` (5), `e2e/group.spec.ts` (6). `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 11).
 
+- Step 13: `frontend/src/pages/department/{DepartmentPage,Overview,Split}.tsx` (routes `/department/:id/{overview,split}`), `components/SplitChart.tsx`,
+  `useDepartmentSummary|useDepartmentWrite`, `he.departmentPage`. Split reuses `AllocationTable` + `ChangeSummaryDialog`; admins also get inline budget editing.
+  Group page hides the Members tab when `actions.edit_members` is false (viewer, PMO; D11). Backend: `/departments/{id}/summary` rows carry `sync_status`
+  (+ `split.pmo_reserve_sync_status`). E2E: `department.spec.ts` (4), `viewer.spec.ts` (U7), `roles.spec.ts` (U6), `rtl.spec.ts` (U8).
+  Phase 1 acceptance table in PLAN §3 checked: every listed test exists and passes.
+
 ## Next
-- Step 13 of PLAN.md: "המחלקה" (Department): Overview and Split; viewer, multi-role and RTL acceptance; Phase 1 wrap-up.
+- Phase 2 (PLAN §4): grants and expiry (A1, A9 manual move, A11; U5). Start with its first step.
 
 ## Blockers
 - None.
@@ -140,6 +146,13 @@ Phase 1, Step 10 (frontend shell, E2E harness, scope switcher, shared primitives
   in the summary, so the client preview uses factor 1 (the server stays authoritative). The side panel's limits write resends the member's `model_tpm_limits` unchanged
   because the endpoint replaces them. The defaults dialog only sets the cap: the stored default model caps cannot be read back, so saving sends `model_caps: {}`.
   Row errors show a short label; the full Hebrew message with the server's numbers is in the change summary. Tabs Grants, Models and Service keys are Phase 2.
+
+- Step 13: PMO pool and reserve are WM-only (no LiteLLM call), so their sync badge is always "applied"; the pending badge shows on group rows (team budget).
+  The drill-down to a group has no separate "read mode": the rep's edit rights come from the server (`editable` per row), so ordinary members show read-only with their owner.
+  Split sends `budget_period: "1mo"` with a budget edit because the summary does not return it. The Department page has only Overview and Split; Models, PMO and Settings are later phases.
+  PLAN's rtl test wording ("first column x greater than last") is checked on the groups table in RTL. Flaky once: `group.spec.ts` U3 banner wait timed out in one full run
+  (the banner depends on the 10 s `/status` cache + 5 s poll); it passed on rerun. `wallet.spec.ts` U4 (30 s wait on the 2 s snapshot loop + 15 s wallet refetch) failed once too and then passed in two reruns. Both are timing flakes in
+  Step 10–11 tests; consider shortening the UI refetch interval in the E2E stack.
  
 
 ## Questions for owner

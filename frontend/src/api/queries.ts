@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { apiFetch, apiPost, apiPut } from './client';
 import type {
   AuditEntry,
+  DepartmentSummary,
   DevUser,
   GroupSummary,
   Me,
@@ -83,6 +84,31 @@ export const useGroupSummary = (id: string, period: string) =>
     enabled: period !== '',
     refetchInterval: (q) => (q.state.data?.pending_sync_count ? 2000 : 15000),
   });
+
+const hasPendingDepartment = (d: DepartmentSummary) =>
+  d.split.pmo_reserve_sync_status === 'pending' ||
+  d.groups.some((g) => g.sync_status === 'pending');
+
+export const useDepartmentSummary = (id: string, period: string) =>
+  useQuery({
+    queryKey: ['department', id, 'summary', period],
+    queryFn: () => apiFetch<DepartmentSummary>(`/departments/${id}/summary?period=${period}`),
+    enabled: period !== '',
+    refetchInterval: (q) => (q.state.data && hasPendingDepartment(q.state.data) ? 1000 : 15000),
+  });
+
+/** One department write (split or budget) per confirm; refreshes the department queries. */
+export const useDepartmentWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { path: string; body: unknown; reason: string; key: string }) =>
+      apiPut<WriteResponse>(v.path, v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};
 
 export const useGroupMembers = (id: string, period: string, enabled = true) =>
   useQuery({

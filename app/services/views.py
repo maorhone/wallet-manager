@@ -404,6 +404,8 @@ async def department_summary(
     for group_id, _, amount in await _shares(db, ids):
         shares[group_id] += amount
 
+    group_sync = await sync_status(db, "group", [str(i) for i in ids])
+    dept_sync = (await sync_status(db, "department", [str(department_id)]))[str(department_id)]
     table = []
     for g in d["groups"]:
         base, gr, used = d["bases"][g.id], grants.get(g.id, ZERO), spend.used("group", g.id)
@@ -419,6 +421,7 @@ async def department_summary(
                 "total": w["total"],
                 "used": used,
                 "percent": w["percent"],
+                "sync_status": group_sync[str(g.id)],
                 "state": wallet.state(
                     w["total"], used, w["remaining"], parents, w["allocated"], **th
                 ),
@@ -445,6 +448,7 @@ async def department_summary(
             "pmo_pool": d["values"]["pmo_pool"],
             "reserve": d["values"]["reserve"],
             "unallocated": card["unallocated"],
+            "pmo_reserve_sync_status": dept_sync,
         },
         "groups": table,
         "allowances": [

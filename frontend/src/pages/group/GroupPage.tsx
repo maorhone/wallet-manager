@@ -18,11 +18,13 @@ export default function GroupPage() {
   const { period } = usePeriod();
   const summary = useGroupSummary(id, period);
 
-  if (!TABS.includes(tab)) return <Navigate to={`/group/${id}/overview`} replace />;
   if (summary.isPending) return <Loader aria-label={he.loading} />;
   if (summary.error || !summary.data)
     return <ErrorState error={summary.error} onRetry={summary.refetch} />;
   const s = summary.data;
+  // D11: PMO and viewers do not see the Members tab (same roles as `edit_members`).
+  const tabs = s.actions.edit_members ? TABS : TABS.filter((k) => k !== 'members');
+  if (!tabs.includes(tab)) return <Navigate to={`/group/${id}/overview`} replace />;
   return (
     <Stack>
       <Title order={3}>
@@ -33,7 +35,7 @@ export default function GroupPage() {
         onChange={(v) => navigate({ pathname: `/group/${id}/${v}`, search: search.toString() })}
       >
         <Tabs.List>
-          {TABS.map((k) => (
+          {tabs.map((k) => (
             <Tabs.Tab key={k} value={k} data-testid={`tab-${k}`}>
               {he.groupPage.tabs[k]}
             </Tabs.Tab>

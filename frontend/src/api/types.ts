@@ -157,6 +157,40 @@ export interface GroupSummary extends PeriodEnvelope {
   actions: { edit_members: boolean; edit_pots_limits: boolean; edit_defaults: boolean };
 }
 
+export interface DepartmentSummary extends PeriodEnvelope {
+  department: { id: number; name: string };
+  wallet: {
+    total: number;
+    allocated: number;
+    unallocated: number;
+    used: number;
+    remaining: number;
+    percent: number;
+    state: ApiState;
+  };
+  split: {
+    groups: { id: number; name: string; kind: string; base: number }[];
+    pmo_pool: number;
+    reserve: number;
+    unallocated: number;
+    pmo_reserve_sync_status: SyncStatus;
+  };
+  groups: {
+    id: number;
+    name: string;
+    kind: string;
+    base: number;
+    grants: number;
+    total: number;
+    used: number;
+    percent: number;
+    state: ApiState;
+    sync_status: SyncStatus;
+  }[];
+  allowances: { model: string; amount: number; pots_sum: number }[];
+  actions: { edit_split: boolean; edit_budget: boolean; edit_allowances: boolean };
+}
+
 export interface Member extends MemberSlim {
   base_cap: number;
   shares_total: number;

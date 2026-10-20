@@ -25,6 +25,8 @@ async def test_split_and_unallocated(login, seeded, snapshot):
         250000, 0, 250000, 100000, 0.4,
     )  # fmt: skip
     assert a1["state"] == "healthy"
+    assert a1["sync_status"] in ("pending", "applied")
+    assert body["split"]["pmo_reserve_sync_status"] in ("pending", "applied")
     assert body["allowances"] == [{"model": "gpt-4", "amount": 500000, "pots_sum": 150000}]
     assert body["actions"] == {"edit_split": True, "edit_budget": False, "edit_allowances": False}
     assert body["period"] and body["reset_date"] and body["read_only"] is False

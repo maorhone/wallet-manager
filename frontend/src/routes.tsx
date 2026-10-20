@@ -1,18 +1,14 @@
 import { Title } from '@mantine/core';
-import { Navigate, createBrowserRouter, useParams } from 'react-router-dom';
+import { Navigate, createBrowserRouter } from 'react-router-dom';
+import DepartmentPage from './pages/department/DepartmentPage';
 import { Shell } from './App';
 import { he } from './i18n/he';
 import Login from './pages/Login';
 import GroupPage from './pages/group/GroupPage';
 import MyWallet from './pages/MyWallet';
 
-// The department page arrives in Step 13.
+// The platform page arrives in Phase 3.
 const Placeholder = ({ title }: { title: string }) => <Title order={3}>{title}</Title>;
-
-function DepartmentPage() {
-  const { id, tab } = useParams();
-  return <Placeholder title={`${he.department} ${id} / ${tab}`} />;
-}
 
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
