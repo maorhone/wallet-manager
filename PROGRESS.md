@@ -1,7 +1,8 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Step 1b.1 and 1b.2 done. Next = Step 1b.3.
+Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Step 1b.1, 1b.2 and 1b.3 done. Next = Step 1b.4.
+Latest `./scripts/test.sh`: pytest 346 passed, 4 skipped; vitest 21; Playwright 18; ~2.8 min.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -78,9 +79,15 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `member_state_conflict`/`lifecycle_in_progress` errors, `/groups/{id}/members` rows carry `actions` (deleted employees are no longer listed), metrics `wm_lifecycle_actions_total{action}`, `wm_outbox_held`.
   Tests: `tests/api/test_member_{kick,move,delete}.py`, `test_lifecycle_permissions.py` (matrix 48 + 3), `tests/e2e_backend/test_move_invariant.py` (A12 x3, A9), `test_kick_wm.py` (A14).
 
+- Step 1b.3: `app/auth/portal_jwt.py` (`verify_portal|verify_user|PortalAuth`, RS256 via JWKS, HS256 only with `DEV_AUTH`), `app/services/onboarding.py`
+  (`find_placement`, `onboard`, `onboarding_status`, `place`, `pending_list`), `app/routers/{onboarding,placements}.py` (`POST|GET /onboarding`,
+  `GET /departments/{id}/pending-placements`, `GET /pending-placements?department=`, `POST /pending-placements/{upn}/place`), `can_place|can_view_pending`,
+  `DirectoryUnavailable` + 503 `DIRECTORY_UNAVAILABLE`, settings + `.env.example`, CSRF exempts `/onboarding`, `make_request_id` in `app/writes.py`, metric `wm_onboarding_calls{status}`,
+  seed users (newbie, drifter, twin directory-only; pazit, lost pending), `scripts/dev_onboard.py`, e2e stack generates the portal settings. Vite proxy has `onboarding|pending-placements`.
+  Tests: `tests/api/test_onboarding.py` (15), `tests/auth/test_portal_jwt.py` (14), `tests/api/test_placement.py` (14), `tests/e2e_backend/test_onboarding_wm.py` (A15, A10); `tests/helpers/jwt.py`, fixtures `make_portal`/`portal`.
+
 ## Next
 - Phase 1b (PLAN §2b), one step per session, in order:
-  - Step 1b.3: onboarding API, pending placement, place (backend).
   - Step 1b.4: UI member actions in Group Members and the side panel.
   - Step 1b.5: UI pending placement lists; Phase 1b wrap-up.
 - Then Phase 2 (PLAN §4): grants and expiry (A1, A9 with a share, A11; U5).
@@ -205,6 +212,13 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `CONFIRMATION_MISMATCH` is checked after the role and tier checks. Self errors carry `details {action, owner_role}`. Delete keeps `group_id` (history), sets `status=left`, `left_at`, clears model caps
   and `key_token_hash`, and skips the `/key/delete` row when the employee has no key hash. A moved employee gets the target group's `default_member_cap`; if that is 0 the fake rejects their requests (budget), as in LiteLLM.
   `/groups/{id}/members` no longer lists `left` employees (F10). No new path prefix (`/groups` is already proxied). `provision()` is not called yet (Step 1b.3 uses it); the seed still queues the Joiner steps per endpoint.
+- Step 1b.3: `provision()` is now used by onboarding and place. SPEC wins over PLAN: the portal token's client id claim is `appid`, else `client_id`, else `azp` (§9.2; PLAN names none); a portal
+  token carrying `upn` gives 401. `install` is omitted (not null) unless `ready`; its `ANTHROPIC_AUTH_TOKEN` is a text placeholder. Replays of `POST /onboarding` find the existing employee
+  and return 200 with the same `request_id` (uuid5 of upn + key), not the audit-replay shape. Empty `ONBOARDING_USER_AUDIENCES` makes both endpoints 404. Directory is only read for unknown upns
+  (existing employees never get a 503). Missing `ADFS_JWKS_URL` falls back to the `jwks_uri` of the OIDC discovery document. `place` check order: employee 404 → role (`can_place`: rep needs a known
+  department, else 404) → self/tier → state 409 (admin may also place `left`) → `LIFECYCLE_IN_PROGRESS` → group 404 → rep's group must be in the employee's pending department (422 `SCOPE_FORBIDDEN`).
+  The pending lists carry `department_id|name` besides SPEC's four fields; the platform list is admin only (403 for others). Seeded pending users are created with `pending_since` = seed time.
+  A15 sets B1's `default_member_cap` in the test because the seed leaves it 0 (the fake rejects a 0-budget member). `/status` does not show the pending count yet.
 - Step 10: Chromium (headless shell) launches here without extra system libraries; no `.cache/pwlibs` workaround needed.
 - Step 10: `eslint-formatter-unix` is a root devDependency because the lint hook calls `eslint -f unix`.
 - Step 10: the scope switcher is a native `<select>` (always in the DOM, keyboard accessible); the period is the `?period=YYYY-MM` URL param.

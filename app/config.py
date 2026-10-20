@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     oidc_name_claim: str = "name"
     oidc_groups_claim: str = "groups"
     jwt_issuer: str = ""
+    # Onboarding portal (SPEC §9.2); empty user audiences disable the endpoints.
+    adfs_jwks_url: str = ""
+    adfs_issuer: str = ""
+    onboarding_audience: str = ""
+    onboarding_client_ids: list[str] = []
+    onboarding_user_audiences: list[str] = []
+    dev_jwt_secret: str = ""  # HS256 for local tests; refused unless DEV_AUTH=1
+    litellm_public_url: str = "https://litellm.corp.example"
     outbox_poll_s: float = 1
     spend_snapshot_interval_s: float = 300
     overalloc_interval_s: float = 300

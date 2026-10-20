@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -93,14 +94,25 @@ async def seed(
                 group_by_dn[g["ad_group_dn"]] = grp.id
 
         for u in data.get("users", []):
+            if u.get("provision") is False:
+                continue  # directory-only user, onboarded through the API
             group_id = next((group_by_dn[dn] for dn in u["groups"] if dn in group_by_dn), None)
+            pending = {}
+            if u.get("pending"):
+                pending = {
+                    "status": "pending_placement",
+                    "pending_department_id": dept_ids.get(u.get("pending_department")),
+                    "pending_reason": u["pending_reason"],
+                    "pending_since": datetime.now(UTC),
+                }
             await session.merge(
                 Employee(
                     upn=u["upn"],
                     litellm_user_id=u["upn"],
                     display_name=u["display_name"],
-                    group_id=group_id,
+                    group_id=None if pending else group_id,
                     base_cap=u.get("base_cap", 0),
+                    **pending,
                 )  # fmt: skip
             )
 

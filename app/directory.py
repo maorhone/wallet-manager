@@ -4,6 +4,10 @@ from typing import Protocol
 import yaml
 
 
+class DirectoryUnavailable(Exception):
+    """The directory could not be read (SPEC §5.4); onboarding answers 503 and writes nothing."""
+
+
 class Directory(Protocol):
     def groups_of(self, upn: str) -> list[str]: ...
 

@@ -8,6 +8,7 @@ frontend/.e2e-state.json: URLs + env) and runs until SIGTERM/SIGINT.
 import asyncio
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -64,6 +65,13 @@ def main() -> None:
         "LITELLM_MASTER_KEY": "sk-e2e-master",
         "FAKE_MASTER_KEY": "sk-e2e-master",
         "DEV_AUTH": "1",
+        # Onboarding portal (generated per run): dev HS256 tokens, see scripts/dev_onboard.py
+        "DEV_JWT_SECRET": secrets.token_urlsafe(32),
+        "ADFS_ISSUER": "https://adfs.corp.example/adfs",
+        "ONBOARDING_AUDIENCE": "wm-api-e2e",
+        "ONBOARDING_CLIENT_IDS": '["portal-e2e"]',
+        "ONBOARDING_USER_AUDIENCES": '["onboarding-portal-e2e"]',
+        "LITELLM_PUBLIC_URL": f"http://127.0.0.1:{FAKE_PORT}",
         "SPEND_SNAPSHOT_INTERVAL_S": "2",
         "OUTBOX_POLL_S": "0.5",
         "SEED_FILE": str(ROOT / "seed" / "dev.yaml"),

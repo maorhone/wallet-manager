@@ -108,6 +108,10 @@ def lifecycle_in_progress(pending: int, failed: int) -> ApiError:
     )  # fmt: skip
 
 
+def directory_unavailable() -> ApiError:
+    return ApiError(503, "DIRECTORY_UNAVAILABLE", "The directory could not be read; retry later")
+
+
 def invalid_request(message: str, details: dict | None = None) -> ApiError:
     return ApiError(422, "INVALID_REQUEST", message, details=details)
 

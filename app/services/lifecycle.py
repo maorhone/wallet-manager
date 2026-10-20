@@ -73,8 +73,8 @@ def check_target(role: str, actor_upn: str, upn: str, tier: str, action: str = "
         raise scope_forbidden("You may not act on this person")
 
 
-async def guard_idle(db, upn: str) -> None:
-    """D23: move and delete wait until the employee's earlier outbox rows are applied."""
+async def unapplied(db, upn: str) -> tuple[int, int]:
+    """(pending, failed) outbox rows of the employee."""
     rows = dict(
         (
             await db.execute(
@@ -84,8 +84,14 @@ async def guard_idle(db, upn: str) -> None:
             )
         ).all()
     )
-    if rows.get("pending") or rows.get("failed"):
-        raise lifecycle_in_progress(rows.get("pending", 0), rows.get("failed", 0))
+    return rows.get("pending", 0), rows.get("failed", 0)
+
+
+async def guard_idle(db, upn: str) -> None:
+    """D23: move, delete and place wait until the employee's earlier outbox rows are applied."""
+    pending, failed = await unapplied(db, upn)
+    if pending or failed:
+        raise lifecycle_in_progress(pending, failed)
 
 
 def row_actions(principal: Principal, group: Grp, emp: Employee, tier: str) -> dict[str, bool]:

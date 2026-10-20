@@ -21,7 +21,8 @@ def set_csrf_cookie(response: Response, secure: bool) -> None:
 
 class CsrfMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method in _UNSAFE and not request.url.path.startswith("/auth/"):
+        path = request.url.path  # /onboarding takes bearer tokens only, no cookies (SPEC §9.2)
+        if request.method in _UNSAFE and not path.startswith("/auth/") and path != "/onboarding":
             cookie, header = request.cookies.get(COOKIE), request.headers.get(HEADER)
             if not cookie or not header or not secrets.compare_digest(cookie, header):
                 return _envelope(request, 403, "CSRF_FAILED", "CSRF token mismatch")

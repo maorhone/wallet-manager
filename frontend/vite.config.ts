@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const API_PREFIXES =
-  '^/(me|departments|groups|grants|projects|service-keys|production|policies|sync|outbox|status|reports|audit|auth|healthz)(/|$|\\?)';
+  '^/(me|departments|groups|grants|projects|service-keys|production|policies|sync|outbox|status|reports|audit|auth|healthz|onboarding|pending-placements)(/|$|\\?)';
 
 export default defineConfig(() => {
   const target = process.env.API_ORIGIN ?? 'http://127.0.0.1:4101';

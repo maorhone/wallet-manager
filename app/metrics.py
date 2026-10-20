@@ -23,6 +23,10 @@ OVERALLOCATION = Gauge(
 LIFECYCLE_ACTIONS = Counter(
     "wm_lifecycle_actions", "Member lifecycle actions by kind", ["action"], registry=REGISTRY
 )
+ONBOARDING_CALLS = Counter(
+    "wm_onboarding_calls", "POST /onboarding calls by resulting status", ["status"],
+    registry=REGISTRY,
+)  # fmt: skip
 OUTBOX_HELD = Gauge(
     "wm_outbox_held", "Pending outbox rows waiting for a row they depend on", registry=REGISTRY
 )

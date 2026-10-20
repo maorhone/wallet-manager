@@ -144,6 +144,24 @@ async def can_delete_member(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), DELETE_ROLES, _GROUP_VIEW)
 
 
+async def can_place(session, p: Principal, department_id: int | None) -> str:
+    """§9.4: admin always (also unknown department); a rep only when the department is known."""
+    if p.is_admin:
+        return ADMIN
+    if department_id is None:
+        raise _not_found("Employee")
+    return _pick(await _dept_roles(session, p, department_id), (ADMIN, REP), _DEPT_VIEW)
+
+
+async def can_view_pending(session, p: Principal, department_id: int | None) -> str:
+    """§9.5: the platform list (``None``) is admin only; a department list is rep or admin."""
+    if department_id is None:
+        if p.is_admin:
+            return ADMIN
+        raise _forbidden()
+    return await can_place(session, p, department_id)
+
+
 async def target_tier(session: AsyncSession, directory: Directory, upn: str) -> str:
     """Highest role the target holds, from directory groups ∩ role_binding (DR9)."""
     roles = {b.role for b in await load_bindings(session, directory.groups_of(upn))}

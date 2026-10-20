@@ -75,10 +75,14 @@ class WriteContext:
         return self._last
 
 
+def make_request_id(actor_upn: str, key: str | None) -> str:
+    """Stable per (actor, Idempotency-Key); random without a key."""
+    return str(uuid.uuid5(_NS, f"{actor_upn}:{key}") if key else uuid.uuid4())
+
+
 async def write_context(request: Request, principal: CurrentPrincipal, db: Db) -> WriteContext:
     reason = unquote(request.headers.get("X-Change-Reason", "")).strip()
-    key = request.headers.get("Idempotency-Key")
-    rid = str(uuid.uuid5(_NS, f"{principal.upn}:{key}") if key else uuid.uuid4())
+    rid = make_request_id(principal.upn, request.headers.get("Idempotency-Key"))
     request.state.request_id = rid
     if not reason:
         raise invalid_request("X-Change-Reason header is required")

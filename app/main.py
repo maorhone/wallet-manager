@@ -12,7 +12,18 @@ from app.db import make_engine, make_session_factory
 from app.directory import FixtureDirectory
 from app.errors import ApiError, install_error_handlers
 from app.litellm_client import LiteLLMClient, LiteLLMReader
-from app.routers import audit, departments, groups, me, members, platform, policies, reports
+from app.routers import (
+    audit,
+    departments,
+    groups,
+    me,
+    members,
+    onboarding,
+    placements,
+    platform,
+    policies,
+    reports,
+)
 from app.security_headers import SecurityHeadersMiddleware
 from app.writes import install_replay_handler
 
@@ -24,6 +35,8 @@ def create_app(
 ) -> FastAPI:
     """``litellm`` and ``reader`` are injected by tests; by default they come from settings."""
     settings = settings or Settings()
+    if settings.dev_jwt_secret and not settings.dev_auth:
+        raise RuntimeError("DEV_JWT_SECRET is set but DEV_AUTH is off; refusing to start")
     app = FastAPI(title="Wallet Manager")
     app.state.settings = settings
     app.state.litellm = litellm or LiteLLMClient(
@@ -59,6 +72,8 @@ def create_app(
     app.include_router(departments.router)
     app.include_router(groups.router)
     app.include_router(members.router)
+    app.include_router(onboarding.router)
+    app.include_router(placements.router)
     app.include_router(policies.router)
     app.include_router(reports.router)
     app.include_router(platform.router)

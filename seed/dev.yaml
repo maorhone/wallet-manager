@@ -1,9 +1,9 @@
 # Dev fixture: WM rows plus the fixture directory (users -> AD group DNs). Step 4.
 policies:
-  concurrency: {min: 1, default: 4, max: 8}
-  rpm: {min: 1, default: 120, max: 600}
+  concurrency: { min: 1, default: 4, max: 8 }
+  rpm: { min: 1, default: 120, max: 600 }
   overalloc_factor_default: 1.0
-  thresholds: {near: 0.8, full: 1.0}
+  thresholds: { near: 0.8, full: 1.0 }
 
 departments:
   - key: D1
@@ -13,34 +13,190 @@ departments:
     pmo_pool: 180000
     reserve: 50000
     groups:
-      - {key: A1, name: Group A1, ad_group_dn: "CN=grp-a1,OU=Groups,DC=corp,DC=example", base_budget: 250000}
-      - {key: A2, name: Group A2, ad_group_dn: "CN=grp-a2,OU=Groups,DC=corp,DC=example", base_budget: 150000}
-      - {key: B1, name: Group B1, ad_group_dn: "CN=grp-b1,OU=Groups,DC=corp,DC=example", base_budget: 350000}
-      - {key: D1-staff, name: D1 staff, kind: department_staff, ad_group_dn: "CN=grp-d1-staff,OU=Groups,DC=corp,DC=example", base_budget: 20000}
+      - {
+          key: A1,
+          name: Group A1,
+          ad_group_dn: 'CN=grp-a1,OU=Groups,DC=corp,DC=example',
+          base_budget: 250000,
+        }
+      - {
+          key: A2,
+          name: Group A2,
+          ad_group_dn: 'CN=grp-a2,OU=Groups,DC=corp,DC=example',
+          base_budget: 150000,
+        }
+      - {
+          key: B1,
+          name: Group B1,
+          ad_group_dn: 'CN=grp-b1,OU=Groups,DC=corp,DC=example',
+          base_budget: 350000,
+        }
+      - {
+          key: D1-staff,
+          name: D1 staff,
+          kind: department_staff,
+          ad_group_dn: 'CN=grp-d1-staff,OU=Groups,DC=corp,DC=example',
+          base_budget: 20000,
+        }
   - key: D2
     name: Department D2
     ad_group_dn: CN=dept-d2,OU=Groups,DC=corp,DC=example
     budget: 500000
     groups:
-      - {key: C1, name: Group C1, ad_group_dn: "CN=grp-c1,OU=Groups,DC=corp,DC=example", base_budget: 300000}
-      - {key: D2-staff, name: D2 staff, kind: department_staff, ad_group_dn: "CN=grp-d2-staff,OU=Groups,DC=corp,DC=example", base_budget: 20000}
+      - {
+          key: C1,
+          name: Group C1,
+          ad_group_dn: 'CN=grp-c1,OU=Groups,DC=corp,DC=example',
+          base_budget: 300000,
+        }
+      - {
+          key: D2-staff,
+          name: D2 staff,
+          kind: department_staff,
+          ad_group_dn: 'CN=grp-d2-staff,OU=Groups,DC=corp,DC=example',
+          base_budget: 20000,
+        }
 
 # Fixture directory. Employees get their group from the group DN that matches a group above.
 users:
-  - {upn: admin@corp.example, display_name: Admin, base_cap: 10000, groups: ["CN=grp-d1-staff,OU=Groups,DC=corp,DC=example", "CN=wm-admins,OU=Groups,DC=corp,DC=example"]}
-  - {upn: rep@corp.example, display_name: Rina Rep, base_cap: 10000, groups: ["CN=grp-d1-staff,OU=Groups,DC=corp,DC=example", "CN=wm-rep-d1,OU=Groups,DC=corp,DC=example"]}
-  - {upn: pmo@corp.example, display_name: Pnina PMO, base_cap: 10000, groups: ["CN=grp-d1-staff,OU=Groups,DC=corp,DC=example", "CN=wm-pmo-d1,OU=Groups,DC=corp,DC=example"]}
-  - {upn: dana@corp.example, display_name: Dana Levi, base_cap: 15000, groups: ["CN=grp-a1,OU=Groups,DC=corp,DC=example", "CN=wm-head-a1,OU=Groups,DC=corp,DC=example"]}
-  - {upn: dani@corp.example, display_name: Dani Cohen, base_cap: 15000, groups: ["CN=grp-a1,OU=Groups,DC=corp,DC=example"]}
-  - {upn: yael@corp.example, display_name: Yael Mizrahi, base_cap: 15000, groups: ["CN=grp-a1,OU=Groups,DC=corp,DC=example"]}
-  - {upn: noa@corp.example, display_name: Noa Katz, base_cap: 15000, groups: ["CN=grp-a2,OU=Groups,DC=corp,DC=example", "CN=wm-head-a2,OU=Groups,DC=corp,DC=example", "CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example"]}
-  - {upn: avi@corp.example, display_name: Avi Ben-David, base_cap: 15000, groups: ["CN=grp-a2,OU=Groups,DC=corp,DC=example"]}
-  - {upn: viewer@corp.example, display_name: Vered Viewer, base_cap: 10000, groups: ["CN=grp-c1,OU=Groups,DC=corp,DC=example", "CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example"]}
+  - {
+      upn: admin@corp.example,
+      display_name: Admin,
+      base_cap: 10000,
+      groups:
+        [
+          'CN=grp-d1-staff,OU=Groups,DC=corp,DC=example',
+          'CN=wm-admins,OU=Groups,DC=corp,DC=example',
+        ],
+    }
+  - {
+      upn: rep@corp.example,
+      display_name: Rina Rep,
+      base_cap: 10000,
+      groups:
+        [
+          'CN=grp-d1-staff,OU=Groups,DC=corp,DC=example',
+          'CN=wm-rep-d1,OU=Groups,DC=corp,DC=example',
+        ],
+    }
+  - {
+      upn: pmo@corp.example,
+      display_name: Pnina PMO,
+      base_cap: 10000,
+      groups:
+        [
+          'CN=grp-d1-staff,OU=Groups,DC=corp,DC=example',
+          'CN=wm-pmo-d1,OU=Groups,DC=corp,DC=example',
+        ],
+    }
+  - {
+      upn: dana@corp.example,
+      display_name: Dana Levi,
+      base_cap: 15000,
+      groups:
+        ['CN=grp-a1,OU=Groups,DC=corp,DC=example', 'CN=wm-head-a1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: dani@corp.example,
+      display_name: Dani Cohen,
+      base_cap: 15000,
+      groups: ['CN=grp-a1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: yael@corp.example,
+      display_name: Yael Mizrahi,
+      base_cap: 15000,
+      groups: ['CN=grp-a1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: noa@corp.example,
+      display_name: Noa Katz,
+      base_cap: 15000,
+      groups:
+        [
+          'CN=grp-a2,OU=Groups,DC=corp,DC=example',
+          'CN=wm-head-a2,OU=Groups,DC=corp,DC=example',
+          'CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example',
+        ],
+    }
+  - {
+      upn: avi@corp.example,
+      display_name: Avi Ben-David,
+      base_cap: 15000,
+      groups: ['CN=grp-a2,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: viewer@corp.example,
+      display_name: Vered Viewer,
+      base_cap: 10000,
+      groups:
+        ['CN=grp-c1,OU=Groups,DC=corp,DC=example', 'CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example'],
+    }
+  # Onboarding fixtures (Step 1b.3). `provision: false` = in the directory only, no employee row;
+  # `pending: true` = already onboarded and waiting for placement.
+  - {
+      upn: newbie@corp.example,
+      display_name: Newbie Nadav,
+      provision: false,
+      groups: ['CN=grp-b1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: drifter@corp.example,
+      display_name: Drifter Dror,
+      provision: false,
+      groups: ['CN=dept-d1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: twin@corp.example,
+      display_name: Twin Tal,
+      provision: false,
+      groups: ['CN=grp-a1,OU=Groups,DC=corp,DC=example', 'CN=grp-b1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: pazit@corp.example,
+      display_name: Pazit Peretz,
+      pending: true,
+      pending_department: D1,
+      pending_reason: no_budget_group,
+      groups: ['CN=dept-d1,OU=Groups,DC=corp,DC=example'],
+    }
+  - {
+      upn: lost@corp.example,
+      display_name: Lior Lost,
+      pending: true,
+      pending_reason: not_in_directory,
+      groups: [],
+    }
 
 role_bindings:
-  - {group: "CN=wm-admins,OU=Groups,DC=corp,DC=example", role: platform_admin, scope_kind: global}
-  - {group: "CN=wm-rep-d1,OU=Groups,DC=corp,DC=example", role: department_rep, scope_kind: department, scope: D1}
-  - {group: "CN=wm-pmo-d1,OU=Groups,DC=corp,DC=example", role: pmo, scope_kind: department, scope: D1}
-  - {group: "CN=wm-head-a1,OU=Groups,DC=corp,DC=example", role: group_head, scope_kind: group, scope: A1}
-  - {group: "CN=wm-head-a2,OU=Groups,DC=corp,DC=example", role: group_head, scope_kind: group, scope: A2}
-  - {group: "CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example", role: viewer, scope_kind: department, scope: D1}
+  - { group: 'CN=wm-admins,OU=Groups,DC=corp,DC=example', role: platform_admin, scope_kind: global }
+  - {
+      group: 'CN=wm-rep-d1,OU=Groups,DC=corp,DC=example',
+      role: department_rep,
+      scope_kind: department,
+      scope: D1,
+    }
+  - {
+      group: 'CN=wm-pmo-d1,OU=Groups,DC=corp,DC=example',
+      role: pmo,
+      scope_kind: department,
+      scope: D1,
+    }
+  - {
+      group: 'CN=wm-head-a1,OU=Groups,DC=corp,DC=example',
+      role: group_head,
+      scope_kind: group,
+      scope: A1,
+    }
+  - {
+      group: 'CN=wm-head-a2,OU=Groups,DC=corp,DC=example',
+      role: group_head,
+      scope_kind: group,
+      scope: A2,
+    }
+  - {
+      group: 'CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example',
+      role: viewer,
+      scope_kind: department,
+      scope: D1,
+    }

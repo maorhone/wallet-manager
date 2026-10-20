@@ -1,5 +1,6 @@
 import asyncio
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+from helpers import jwt as portal_jwt
 from pgembed import PostgresServer
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -205,6 +207,59 @@ def put_budget():
         )  # fmt: skip
 
     return _put
+
+
+class Portal:
+    """An app with the onboarding endpoints on, plus a client that sends the two ADFS tokens."""
+
+    def __init__(self, app, client, secret: str):
+        self.app, self.client, self.secret = app, client, secret
+
+    def headers(self, upn: str, key: str | None = "", **extra) -> dict:
+        h = {
+            "Authorization": f"Bearer {portal_jwt.portal_token(self.secret)}",
+            "X-User-Assertion": portal_jwt.user_token(self.secret, upn),
+        }
+        if key is not None:
+            h["Idempotency-Key"] = key or secrets.token_hex(8)
+        return {**h, **extra}
+
+    async def post(self, upn: str, key: str | None = "", **extra) -> httpx.Response:
+        return await self.client.post(
+            "/onboarding", json={}, headers=self.headers(upn, key, **extra)
+        )
+
+    async def get(self, upn: str) -> httpx.Response:
+        return await self.client.get("/onboarding", headers=self.headers(upn, None))
+
+
+@pytest_asyncio.fixture
+async def make_portal(prov_settings, seeded, litellm):
+    made = []
+
+    async def _make(**overrides) -> Portal:
+        secret = secrets.token_urlsafe(32)
+        fields = {
+            "dev_auth": True, "dev_jwt_secret": secret, "adfs_issuer": portal_jwt.ISSUER,
+            "onboarding_audience": portal_jwt.PORTAL_AUD,
+            "onboarding_client_ids": [portal_jwt.CLIENT_ID],
+            "onboarding_user_audiences": [portal_jwt.USER_AUD],
+            "litellm_public_url": "https://litellm.corp.example",
+        }  # fmt: skip
+        app = create_app(prov_settings.model_copy(update={**fields, **overrides}), litellm=litellm)
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        made.append((client, app))
+        return Portal(app, client, secret)
+
+    yield _make
+    for client, app in made:
+        await client.aclose()
+        await app.state.engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def portal(make_portal):
+    return await make_portal()
 
 
 @pytest_asyncio.fixture
