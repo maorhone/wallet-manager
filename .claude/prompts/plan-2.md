@@ -1,0 +1,25 @@
+You are planning "Phase 2: Grants and expiry" of the Wallet Manager for LiteLLM. Phase 1 (PLAN.md Steps 1–13) and Phase 1b (Steps 1b.1–1b.5) are built, green and pushed. The owner approved all 21 questions in PLAN.md §5 on 20/10/2026 (their defaults are now decisions).
+
+Read: CLAUDE.md, PROGRESS.md, PLAN.md §0, §1 (global conventions), §2b (Phase 1b steps, as a format example), §4 (Phase 2 outline) and §5, and in SPEC.md: §4, §5 + §5.1, §6, §7.3 + §7.3.1, §7.7, §7.9, §8.1, §8.2, §9.3, §10, §11.1 (PMO and grants, notifications), §11.2, §12.2, §12.5.1–12.5.4, §12.6, §12.7, §13, §15 (A1, A9, A11, U2, U5), §16 Phase 2 row. SPEC.md is the source of truth. Explore code minimally and only to name exact files: app/main.py, app/models.py, alembic/versions/, app/writes.py, app/outbox/* (especially desired.py and worker.py), app/lifecycle*.py, app/permissions.py, app/routers/, app/litellm_client/, fake_litellm/*, seed/dev.yaml, tests/conftest.py, scripts/test.sh, scripts/e2e_stack.py, frontend/src (routes, Group tabs, Department tabs, wallet page), frontend/e2e/fixtures.ts. Do not use the web. Do NOT call ExitPlanMode and do not write files: return everything as your final message.
+
+# Owner requirements for Phase 2 (Maor, 20/10/2026)
+1. The scheduler is a SEPARATE LONG-RUNNING PROCESS (`python -m app.scheduler`, its own OpenShift Deployment from the worker image, SPEC §5.1), NOT a Kubernetes CronJob. It runs jobs at fixed intervals: grant/share activation and expiry (close and return per FR-P6 and §7.3.1), FR-P4 recomputation of temp_budget_increase/temp_budget_expiry (both fields together), reconciliation every N minutes (default 5, configurable) with a drift log and an alert when the same field drifts repeatedly (FR-RC1/2), and notification evaluation (FR-N1). All writes go through the existing outbox (idempotent, retried). Jobs must be safe to run twice and safe across restarts (DB state + advisory locks / SKIP LOCKED so two scheduler replicas never double-close).
+2. The scheduler and every job take an INJECTABLE CLOCK (a small Clock protocol with a real and a fake implementation) so tests move time instead of sleeping. Each job is a plain async function `run_<job>(session_factory, client, clock) -> <JobResult>` callable directly from tests; the loop only schedules them.
+3. No automatic AD sync anywhere (owner decision of 20/10/2026 stands).
+4. Notifications are in-app (`/me/notifications*`, FR-N2 mute). Email only behind a disabled-by-default setting; no mail relay in tests.
+5. Fill in share closing on move and delete (FR-P6, `reason move|manual`), and A9 with an active share.
+6. The repo is PUBLIC: placeholders only, never secrets or internal names (test_repo_hygiene.py enforces it).
+
+# Environment (unchanged)
+Fake LiteLLM, pgembed, DEV_AUTH dev login, FixtureDirectory from seed/dev.yaml (add seed data for a PMO user, a project pool, grants and shares as needed). scripts/test.sh is the single gate; it currently takes ~4 minutes; Phase 2 may add at most ~60 s of pytest and ~8 Playwright tests total. Do not change the e2e ports (4120–4122). A live preview (UI 4100, API 4111, fake 4112) runs from this working tree via scripts/e2e_stack.py with default ports; it must keep working (decide whether e2e_stack.py also starts the scheduler with a short interval, and say so).
+
+# Sizing rules (important; learned in Phase 1/1b)
+- Each step = ONE Sonnet session of at most ~80 turns. Backend steps may be medium; UI steps MUST be small (one screen or tab per step) because frontend steps used 70–80 turns.
+- The scheduler loop + clock + grant/share expiry job get their own backend step; reconciliation gets its own backend step; notifications backend its own step.
+- Backend steps first, then UI steps. Expect roughly 6–9 steps in total.
+
+# Output (markdown, exactly these two top-level parts)
+## Part A — PLAN.md section
+A section titled exactly `## 2c. Steps (Phase 2: grants, scheduler, reconciliation, notifications)` with a short intro of rules (like §2b's), then steps numbered `### Step 2.1: <title>`, `### Step 2.2: ...` etc. (titles must not contain double quotes). Each step has: **Spec:** sections; **Files:** exact paths; **Build:** migrations (next number after the existing ones), signatures, endpoints (exact verb + path, bodies, error codes from §11.2), fake LiteLLM changes; **Tests:** test file and test names that prove it; **test.sh after:** what changes. End the section with `### Phase 2 acceptance mapping` — a table Criterion | Step | Test(s) covering every FR-P1..P8, §7.3.1, FR-RC1..RC3, FR-N1 (each trigger) and FR-N2, A1, A9 (with a share), A11, U2 (grant half), U5, and the scheduler/clock requirements above.
+## Part B — Checks
+A short list: the number of steps, the number of new endpoints with their list, the number of new tables/columns, and for each count the exact SPEC.md place it comes from (so the builder can verify the counts against the spec). Plus any NEW questions for the owner (with the safe default you chose); keep them few.
