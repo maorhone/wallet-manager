@@ -1,6 +1,6 @@
 import { Button, Group, Loader, Stack } from '@mantine/core';
-import { useState } from 'react';
-import { useGrantAction, useGrantWrite, useGrants, usePmoPool } from '../../api/queries';
+import { useEffect, useState } from 'react';
+import { useGrantAction, useGrantWrite, useGrants, useMe, usePmoPool } from '../../api/queries';
 import type { DepartmentSummary, Grant } from '../../api/types';
 import { ErrorState } from '../../components/ErrorState';
 import { GrantEditDialog, type GrantEditMode } from '../../components/GrantEditDialog';
@@ -23,12 +23,15 @@ export default function Grants({
   const act = useGrantAction();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<{ g: Grant; mode: GrantEditMode } | null>(null);
+  const { data: me } = useMe();
+  const canCreate = !!pool.data?.actions.create_grant && !summary.read_only;
+  useEffect(() => setOpen(false), [period]);
   if (grants.isPending) return <Loader aria-label={he.loading} />;
   if (grants.error || !grants.data)
     return <ErrorState error={grants.error} onRetry={grants.refetch} />;
   return (
     <Stack>
-      {pool.data?.actions.create_grant && (
+      {canCreate && (
         <Group>
           <Button data-testid="create-grant" onClick={() => setOpen(true)}>
             {he.pmo.create}
@@ -80,12 +83,13 @@ export default function Grants({
           onConfirm={(patch, reason, key) => act.mutateAsync({ id: edit.g.id, patch, reason, key })}
         />
       )}
-      {pool.data && (
+      {pool.data && canCreate && (
         <GrantWizard
           opened={open}
           available={pool.data.available}
           groups={summary.groups.map((g) => ({ ...g, total: g.total }))}
           models={summary.allowances.map((a) => a.model)}
+          timezone={me?.timezone ?? 'Asia/Jerusalem'}
           onClose={() => setOpen(false)}
           onSubmit={(body, reason, key) => write.mutateAsync({ body, reason, key })}
         />

@@ -1,6 +1,7 @@
 import { Button, Group, Modal, NativeSelect, Stack, Stepper, Text, TextInput } from '@mantine/core';
 import { useState } from 'react';
 import type { ApiState, GrantIn } from '../api/types';
+import { todayIn, zonedInstant } from '../format';
 import { he } from '../i18n/he';
 import { ChangeSummaryDialog } from './ChangeSummaryDialog';
 import { Credits } from './Credits';
@@ -27,17 +28,27 @@ interface Props {
   groups: WizardGroup[];
   /** Models of the department allowances, for the optional model. */
   models: string[];
+  /** Application timezone (from /me); dates are calendar days in it. */
+  timezone: string;
   onClose: () => void;
   onSubmit: (body: GrantIn, reason: string, key: string) => Promise<unknown>;
 }
 
-const today = () => new Date().toLocaleDateString('en-CA');
-/** Local start of day / end of day as an aware ISO instant. */
-const startIso = (d: string) => new Date(`${d}T00:00:00`).toISOString();
-const endIso = (d: string) => new Date(`${d}T23:59:59`).toISOString();
+/** Start / end of the calendar day in the application timezone as an aware ISO instant. */
+const startIso = (d: string, tz: string) => zonedInstant(d, '00:00:00', tz);
+const endIso = (d: string, tz: string) => zonedInstant(d, '23:59:59', tz);
 
 /** §12.5.3 create wizard: project → group → amount and model → dates → summary with the reason. */
-export function GrantWizard({ opened, available, groups, models, onClose, onSubmit }: Props) {
+export function GrantWizard({
+  opened,
+  available,
+  groups,
+  models,
+  timezone,
+  onClose,
+  onSubmit,
+}: Props) {
+  const today = () => todayIn(timezone);
   const [step, setStep] = useState(0);
   const [project, setProject] = useState('');
   const [purpose, setPurpose] = useState('');
@@ -76,8 +87,8 @@ export function GrantWizard({ opened, available, groups, models, onClose, onSubm
     group_id: Number(groupId),
     amount: value,
     model: model || null,
-    starts_at: startIso(start),
-    expires_at: endIso(expiry),
+    starts_at: startIso(start, timezone),
+    expires_at: endIso(expiry, timezone),
     project_ref: project.trim(),
     purpose: purpose.trim(),
   });

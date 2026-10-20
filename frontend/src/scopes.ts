@@ -1,7 +1,12 @@
 import type { Me, Scope } from './api/types';
 import { he } from './i18n/he';
 
-export const scopeKey = (s: Scope): string => (s.id != null ? `${s.kind}:${s.id}` : s.kind);
+export const scopeKey = (s: Scope): string =>
+  s.kind === 'department' && s.role === 'pmo'
+    ? `pmo:${s.id}`
+    : s.id != null
+      ? `${s.kind}:${s.id}`
+      : s.kind;
 
 export const scopePath = (s: Scope): string => {
   switch (s.kind) {
@@ -33,12 +38,7 @@ export function scopeLabel(s: Scope): string {
 /** Which scope the current URL belongs to (undefined on /login and unknown paths). */
 export function scopeFromPath(pathname: string, scopes: Scope[]): Scope | undefined {
   const [, first, id] = pathname.split('/');
-  const key =
-    first === 'wallet'
-      ? 'self'
-      : first === 'platform'
-        ? 'platform'
-        : `${first === 'pmo' ? 'department' : first}:${id}`;
+  const key = first === 'wallet' ? 'self' : first === 'platform' ? 'platform' : `${first}:${id}`;
   return scopes.find((s) => scopeKey(s) === key);
 }
 

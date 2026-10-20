@@ -360,3 +360,4 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   The platform scope routes to `/platform` (placeholder). `/status` caches LiteLLM reachability for 10 s, so the outage banner takes up to ~15 s to show.
 - Step 10: `apiPost(..., write?)` sends reason/idempotency headers only when `write` is given; `/auth/logout` and `/outbox/{id}/retry` are called without a reason.
 - Step 10: while editing I appended `frontend/.e2e-state.json` to `.gitignore` with a shell `printf >>` (the content is correct; it was not a Write/Edit).
+- Review 2.6 fixes: past-period grant creation blocked in the UI (read_only), wizard dates use the /me timezone, pool card remaining = available, PMO and representative scopes have distinct keys (`pmo:<id>`). Behavior is described by the existing PRD text, so no PRD change. No MINOR findings.

@@ -3,6 +3,7 @@ import { MantineProvider } from '@mantine/core';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { zonedInstant } from '../format';
 import { GrantWizard } from './GrantWizard';
 
 // Mantine needs these in jsdom.
@@ -40,6 +41,7 @@ function open() {
         available: 5000,
         groups,
         models: [],
+        timezone: 'Asia/Jerusalem',
         onClose: () => {},
         onSubmit: vi.fn(),
       }),
@@ -83,5 +85,18 @@ describe('GrantWizard', () => {
     expect(screen.getByTestId('wizard-dates-error')).toBeTruthy();
     type('wizard-expiry', '2099-05-11');
     expect(next().disabled).toBe(false);
+  });
+
+  it('converts calendar days in the application timezone, not the browser one', () => {
+    // Asia/Jerusalem is UTC+3 on 20/10/2026 (DST ended 25/10).
+    expect(zonedInstant('2026-10-20', '23:59:59', 'Asia/Jerusalem')).toBe(
+      '2026-10-20T20:59:59.000Z',
+    );
+    expect(zonedInstant('2026-10-20', '00:00:00', 'Asia/Jerusalem')).toBe(
+      '2026-10-19T21:00:00.000Z',
+    );
+    expect(zonedInstant('2026-12-01', '00:00:00', 'Asia/Jerusalem')).toBe(
+      '2026-11-30T22:00:00.000Z',
+    );
   });
 });

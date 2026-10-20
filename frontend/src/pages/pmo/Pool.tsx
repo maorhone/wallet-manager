@@ -19,7 +19,7 @@ export default function Pool({ summary, period }: { summary: DepartmentSummary; 
         title={he.pmo.pool}
         total={p.pool}
         used={p.used}
-        remaining={p.pool - p.used}
+        remaining={p.available}
         percent={p.pool > 0 ? p.used / p.pool : 0}
         resetDate={summary.reset_date}
         takenAt={summary.spend_taken_at}
