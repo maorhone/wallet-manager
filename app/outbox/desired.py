@@ -84,6 +84,10 @@ async def desired_fields(session, settings, object: str, id: str) -> dict:
         fields["metadata"] = {"model_tpm_limit": fields.pop("model_tpm_limit", None)}
         fields["blocked"] = (await session.get(Employee, id)).status != "active"
         excluded.discard("team_id")
+    if object == "jwt_mapping":  # the mapping must point at this employee's own key
+        token = (await session.get(Employee, id)).key_token_hash
+        if token:
+            fields["token"] = token
     return {k: v for k, v in fields.items() if k not in excluded}
 
 

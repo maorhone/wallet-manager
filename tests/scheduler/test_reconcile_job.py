@@ -196,3 +196,106 @@ async def test_clear_owned_limits_preserves_other_metadata(
             .order_by(LitellmWrite.id.desc())
         )
         assert row.payload["model_max_budget"] == {}
+
+
+async def test_mapping_pointing_at_other_token_repaired(run, provisioned, litellm, prov_settings):
+    from app.litellm_client import JwtKeyMappingDelete, JwtKeyMappingNew
+
+    dani = "dani@corp.example"
+    async with provisioned() as db:
+        other = await db.scalar(
+            select(Employee.key_token_hash).where(
+                Employee.upn != dani, Employee.key_token_hash.is_not(None)
+            )
+        )
+        mine = (await db.get(Employee, dani)).key_token_hash
+    ident = dict(jwt_issuer=prov_settings.jwt_issuer, jwt_claim_name="upn", jwt_claim_value=dani)
+    await litellm.jwt_mapping_delete(JwtKeyMappingDelete(**ident))
+    await litellm.jwt_mapping_new(JwtKeyMappingNew(**ident, token=other))
+    assert (await run()).corrected == 1
+    await drain(provisioned, litellm, prov_settings)
+    mapping = next(m for m in await litellm.jwt_mapping_list() if m.jwt_claim_value == dani)
+    assert mapping.token == mine and mapping.is_active
+    assert len((await litellm.key_list(dani)).keys) == 1
+    assert (await run()).corrected == 0
+
+
+async def test_key_and_mapping_corrections_block_lifecycle_and_show_sync(
+    run, provisioned, litellm
+):
+    from app.litellm_client import KeyUpdate
+    from app.services.lifecycle import unapplied
+    from app.writes import sync_status
+
+    dani = "dani@corp.example"
+    token = (await litellm.key_list(dani)).keys[0].token
+    await litellm.key_update(KeyUpdate(key=token, model_tpm_limit={"extra": 9}))
+    assert (await run()).corrected == 1
+    async with provisioned() as db:
+        rows = list(await db.scalars(select(LitellmWrite).where(LitellmWrite.entity_id == dani)))
+        assert rows[-1].entity == "employee" and rows[-1].endpoint == "/key/update"
+        assert (await unapplied(db, dani))[0] >= 1
+        assert (await sync_status(db, "employee", [dani]))[dani] == "pending"
+
+
+async def test_employee_left_during_scan_gets_no_correction(run, provisioned, litellm, monkeypatch):
+    original = litellm.team_info
+
+    async def read(team_id):
+        info = await original(team_id)
+        async with provisioned() as db:
+            e = await db.get(Employee, "dani@corp.example")
+            e.status, e.key_token_hash = "left", None
+            await db.commit()
+        return info
+
+    await litellm.team_member_update(
+        TeamMemberUpdate(
+            team_id="A1", user_id="dani@corp.example", max_budget_in_team=1, budget_duration="1mo"
+        )
+    )
+    monkeypatch.setattr(litellm, "team_info", read)
+    await run()
+    async with provisioned() as db:
+        assert (
+            await db.scalar(
+                select(LitellmWrite.id).where(LitellmWrite.entity_id == "dani@corp.example")
+            )
+        ) is None or all(
+            r.status == "applied"
+            for r in await db.scalars(
+                select(LitellmWrite).where(LitellmWrite.entity_id == "dani@corp.example")
+            )
+        )
+        assert not list(
+            await db.scalars(
+                select(AuditLog).where(
+                    AuditLog.actor_upn == "system:reconcile",
+                    AuditLog.entity_id == "dani@corp.example",
+                )
+            )
+        )
+
+
+async def test_missing_objects_alert_admins_deduped_not_recreated(run, provisioned, litellm):
+    from app.litellm_client import JwtKeyMappingDelete, KeyDelete
+
+    dani = "dani@corp.example"
+    async with provisioned() as db:
+        token = (await db.get(Employee, dani)).key_token_hash
+    await litellm.team_member_delete(TeamMemberDelete(team_id="A1", user_id=dani))
+    await litellm.jwt_mapping_delete(
+        JwtKeyMappingDelete(jwt_issuer=(await litellm.jwt_mapping_list())[0].jwt_issuer,
+                            jwt_claim_name="upn", jwt_claim_value=dani)
+    )
+    await litellm.key_delete(KeyDelete(keys=[token]))
+    first = await run()
+    assert first.missing == 3 and first.corrected == 0 and first.alerts == 3
+    second = await run()
+    assert second.alerts == 0
+    async with provisioned() as db:
+        rows = list(
+            await db.scalars(select(Notification).where(Notification.kind == "reconcile_missing"))
+        )
+        assert len(rows) == 3 and {r.upn for r in rows} == {"admin@corp.example"}
+        assert not list(await db.scalars(select(LitellmWrite).where(LitellmWrite.status == "pending")))

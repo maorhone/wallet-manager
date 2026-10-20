@@ -97,7 +97,11 @@ correction log through `GET /audit?actor=system:reconcile`. Three corrections of
 within 24 hours trigger a critical administrator notification, deduplicated per field and UTC day.
 Role fields are excluded; there is no AD sync. Pending/failed writes and writes arriving during
 the live read suppress corrections. Archived groups and left/pending-placement employees are
-excluded. Missing objects are counted and warned about, never recreated automatically.
+excluded. Missing objects (membership, key, mapping) are never recreated automatically; each raises a
+critical administrator notification (`reconcile_missing`), deduplicated per object and UTC day.
+A mapping that points at another employee's key is re-pointed to the employee's own key (delete +
+new, no new key). Corrections are queued under the employee/group/department outbox entities, so
+they block move/delete/place until applied, and run under the same locks as those actions.
 
 ### 4.7 Notifications (FR-N) - Phase 2: Backend Done (Step 2.4); UI Planned (Step 2.10)
 

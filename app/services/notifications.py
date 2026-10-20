@@ -26,7 +26,7 @@ KINDS: dict[str, bool] = {
     "employee_80": False, "employee_100": True, "group_80": False, "group_100": True,
     "grant_expiring": False, "grant_underused": False, "pending_placement": False,
     "member_moved_in": False, "outbox_failed": True, "grant_received": False,
-    "drift_repeated": True,
+    "drift_repeated": True, "reconcile_missing": True,
 }  # fmt: skip
 
 

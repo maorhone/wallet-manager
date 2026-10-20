@@ -9,10 +9,11 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import func, or_, select
 
 from app import metrics
+from app.db import LockKind, employee_lock_id, lock_parent
 from app.directory import FixtureDirectory
-from app.litellm_client import LiteLLMPermanentError
+from app.litellm_client import JwtKeyMappingDelete, LiteLLMPermanentError
 from app.models import AuditLog, Department, Employee, Grp, LitellmWrite
-from app.outbox.desired import desired_fields
+from app.outbox.desired import DesiredUnavailable, desired_fields
 from app.services.notifications import notify, reps_or_admins
 from app.writes import WriteContext
 
@@ -85,16 +86,15 @@ async def run_reconcile(session_factory, client, clock, *, settings) -> Reconcil
             await db.scalars(select(Employee).where(Employee.status.in_(["active", "blocked"])))
         )
 
+    def outbox_entity(obj):  # the domain names the other writers and lifecycle guards use
+        return {"organization": "department", "team": "group"}.get(obj, "employee")
+
     async def busy(db, obj, id, after=False):
-        entity = {"organization": "department", "team": "group"}.get(obj, "employee")
-        aliases = {entity, obj}
-        if entity == "employee":
-            aliases.update({"key", "jwt_mapping"})
         return (
             await db.scalar(
                 select(LitellmWrite.id)
                 .where(
-                    LitellmWrite.entity.in_(aliases),
+                    LitellmWrite.entity == outbox_entity(obj),
                     LitellmWrite.entity_id == id,
                     func.split_part(LitellmWrite.idempotency_key, ":", 1).not_in(own_requests)
                     | LitellmWrite.idempotency_key.is_(None),
@@ -115,6 +115,7 @@ async def run_reconcile(session_factory, client, clock, *, settings) -> Reconcil
         if e.group_id in groups
         for obj in ("employee", "key", "jwt_mapping")
     ]
+    groups_of = {e.upn: e.group_id for e in employees}
     # Finish reads before committing any correction: an outage cannot leave a partial scan's writes.
     for obj, id, row in targets:
         async with session_factory() as db:
@@ -124,7 +125,11 @@ async def run_reconcile(session_factory, client, clock, *, settings) -> Reconcil
             if obj == "key" and not row.key_token_hash:
                 observations.append((obj, id, {}, None))
                 continue
-            desired = await desired_fields(db, settings, obj, id)
+            try:
+                desired = await desired_fields(db, settings, obj, id)
+            except DesiredUnavailable:  # the employee left or lost the key mid-scan
+                result.skipped_in_flight += 1
+                continue
         live = None
         try:
             if obj == "organization":
@@ -181,6 +186,24 @@ async def run_reconcile(session_factory, client, clock, *, settings) -> Reconcil
 
     for obj, id, desired, live in observations:
         async with session_factory() as db:
+            # Same locks and order as the lifecycle actions; held through the commit below.
+            if obj == "organization":
+                await lock_parent(db, LockKind.DEPARTMENT, int(id))
+            elif obj == "team":
+                await lock_parent(db, LockKind.GROUP, int(id))
+            else:
+                emp = await db.get(Employee, id)
+                await lock_parent(db, LockKind.EMPLOYEE, employee_lock_id(id))
+                if emp.group_id is not None:
+                    await lock_parent(db, LockKind.GROUP, emp.group_id)
+                await db.refresh(emp)
+                if (
+                    emp.status not in ("active", "blocked")
+                    or emp.group_id != groups_of[id]
+                    or (obj == "key" and not emp.key_token_hash)
+                ):
+                    result.skipped_in_flight += 1
+                    continue
             if await busy(db, obj, id, True):
                 result.skipped_in_flight += 1
                 continue
@@ -188,6 +211,20 @@ async def run_reconcile(session_factory, client, clock, *, settings) -> Reconcil
             if live is None:
                 result.missing += 1
                 log.warning("Missing reconciliation object %s %s; not recreated", obj, id)
+                created = await notify(
+                    db,
+                    await reps_or_admins(db, FixtureDirectory(settings.seed_file), None),
+                    "reconcile_missing",
+                    None,
+                    None,
+                    {"object": obj, "id": id},
+                    f"missing:{obj}:{id}:{now.date()}",
+                    settings=settings,
+                )
+                await db.commit()
+                if created:
+                    result.alerts += 1
+                    metrics.RECONCILE_ALERTS.inc()
                 continue
             # Re-read desired values after I/O as well as checking new outbox rows.
             desired = await desired_fields(db, settings, obj, id)
@@ -211,15 +248,25 @@ async def run_reconcile(session_factory, client, clock, *, settings) -> Reconcil
                 "employee": "/team/member_update",
                 "jwt_mapping": "/jwt/key/mapping/update",
             }
+            entity = outbox_entity(obj)
             if obj == "key":
                 if any(d.field != "blocked" for d in drifts):
-                    await ctx.enqueue(obj, id, "/key/update")
+                    await ctx.enqueue(entity, id, "/key/update")
                 if "blocked" in after:
                     await ctx.enqueue(
-                        obj, id, "/key/block" if desired["blocked"] else "/key/unblock"
+                        entity, id, "/key/block" if desired["blocked"] else "/key/unblock"
                     )
+            elif "token" in after:  # points at another key: re-point it, never mint a new key
+                gone = JwtKeyMappingDelete(
+                    jwt_issuer=settings.jwt_issuer, jwt_claim_name="upn", jwt_claim_value=id
+                )
+                await ctx.enqueue(
+                    entity, id, "/jwt/key/mapping/delete", payload=gone.payload(), chain=True
+                )
+                await ctx.enqueue(entity, id, "/jwt/key/mapping/new", chain=True)
+                await ctx.enqueue(entity, id, endpoints[obj], chain=True)
             else:
-                await ctx.enqueue(obj, id, endpoints[obj])
+                await ctx.enqueue(entity, id, endpoints[obj])
             for d in drifts:
                 metrics.RECONCILE_DRIFT.labels(obj, d.field).inc()
                 await db.flush()
