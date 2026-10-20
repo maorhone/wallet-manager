@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Step 1b.1.
+Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Step 1b.1 and 1b.2 done. Next = Step 1b.3.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -73,9 +73,13 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `tests/test_repo_hygiene.py`, `.public-denylist` gitignored. Tests: `tests/litellm/test_fake_lifecycle.py` (6), `test_client_lifecycle.py` (1),
   `tests/test_outbox_chain.py` (5), hygiene (1); `tests/test_schema.py` now matches §8.2 v0.3 (16 tables).
 
+- Step 1b.2: `app/services/lifecycle.py` (`JOINER`, `provision`, `close_member_shares` hook, `check_target`, `guard_idle`, `kick|restore|move|delete_member`, `move_targets`, `row_actions`),
+  `app/routers/members.py` (`POST /groups/{id}/members/{upn}/kick|restore|move|delete`, `GET .../move-targets`), `app/schemas/members.py`, `can_kick|can_move|can_delete_member`,
+  `member_state_conflict`/`lifecycle_in_progress` errors, `/groups/{id}/members` rows carry `actions` (deleted employees are no longer listed), metrics `wm_lifecycle_actions_total{action}`, `wm_outbox_held`.
+  Tests: `tests/api/test_member_{kick,move,delete}.py`, `test_lifecycle_permissions.py` (matrix 48 + 3), `tests/e2e_backend/test_move_invariant.py` (A12 x3, A9), `test_kick_wm.py` (A14).
+
 ## Next
 - Phase 1b (PLAN §2b), one step per session, in order:
-  - Step 1b.2: kick, restore, move, delete and their permissions (backend).
   - Step 1b.3: onboarding API, pending placement, place (backend).
   - Step 1b.4: UI member actions in Group Members and the side panel.
   - Step 1b.5: UI pending placement lists; Phase 1b wrap-up.
@@ -196,6 +200,11 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   database; an existing dev fake DB needs `scripts/dev_db.py` / a reset. `held` rows in `drain` are rows whose `depends_on` row is not `applied`; a transient error still ends the drain.
   The hygiene test treats single-label hosts (`fake`, `postgres`) as test aliases and checks every tracked text file; lock files skip the URL check. Tooling slip: one no-op `sed -i /dev/null` call (failed, changed nothing).
   No new API path prefix was added in this step, so `frontend/vite.config.ts` is unchanged.
+- Step 1b.2: lifecycle functions take the `principal` as well as PLAN's `(ctx, directory, group_id, upn)` (permissions need it). Check order: role (404/403) → self / tier (422) → target in URL group
+  (422 `SCOPE_FORBIDDEN`) → state (409) → `LIFECYCLE_IN_PROGRESS` (move, delete only) → target group (404 unknown, 422 outside the rep's department, 409 same or non-active group).
+  `CONFIRMATION_MISMATCH` is checked after the role and tier checks. Self errors carry `details {action, owner_role}`. Delete keeps `group_id` (history), sets `status=left`, `left_at`, clears model caps
+  and `key_token_hash`, and skips the `/key/delete` row when the employee has no key hash. A moved employee gets the target group's `default_member_cap`; if that is 0 the fake rejects their requests (budget), as in LiteLLM.
+  `/groups/{id}/members` no longer lists `left` employees (F10). No new path prefix (`/groups` is already proxied). `provision()` is not called yet (Step 1b.3 uses it); the seed still queues the Joiner steps per endpoint.
 - Step 10: Chromium (headless shell) launches here without extra system libraries; no `.cache/pwlibs` workaround needed.
 - Step 10: `eslint-formatter-unix` is a root devDependency because the lint hook calls `eslint -f unix`.
 - Step 10: the scope switcher is a native `<select>` (always in the DOM, keyboard accessible); the period is the `?period=YYYY-MM` URL param.

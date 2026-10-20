@@ -94,6 +94,20 @@ def scope_forbidden(message: str = "Target is outside your scope", rows=None) ->
     return ApiError(422, "SCOPE_FORBIDDEN", message, details=_with_rows(None, rows))
 
 
+def member_state_conflict(status: str) -> ApiError:
+    return ApiError(
+        409, "MEMBER_STATE_CONFLICT", "The action does not fit the employee's state",
+        details={"status": status},
+    )  # fmt: skip
+
+
+def lifecycle_in_progress(pending: int, failed: int) -> ApiError:
+    return ApiError(
+        409, "LIFECYCLE_IN_PROGRESS", "Earlier changes for this employee are not applied yet",
+        details={"pending": pending, "failed": failed},
+    )  # fmt: skip
+
+
 def invalid_request(message: str, details: dict | None = None) -> ApiError:
     return ApiError(422, "INVALID_REQUEST", message, details=details)
 

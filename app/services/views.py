@@ -34,6 +34,7 @@ from app.permissions import (
 )
 from app.services import wallet
 from app.services.history import values_as_of
+from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
 from app.services.spend import Spend, month_bounds
@@ -278,12 +279,13 @@ async def members_list(
     cache: dict = {}
     rows = []
     for r in g.rows(spend, th):
+        if members[r["upn"]].status == "left":
+            continue  # a deleted employee leaves the table (F10) but stays in history
         editable = False
+        tier = await target_tier(db, directory, r["upn"])
         if not pc["read_only"]:
             try:
-                authorize(
-                    principal, members[r["upn"]], group, await target_tier(db, directory, r["upn"])
-                )
+                authorize(principal, members[r["upn"]], group, tier)
                 editable = True
             except ApiError:
                 pass
@@ -294,6 +296,7 @@ async def members_list(
                 "is_group_head": r["upn"] in heads,
                 "sync_status": syncs[r["upn"]],
                 "editable": editable,
+                "actions": row_actions(principal, group, members[r["upn"]], tier),
                 "owner": await owner_of(db, directory, r["upn"], group, cache),
             }  # fmt: skip
         )

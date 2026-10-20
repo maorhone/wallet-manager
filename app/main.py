@@ -12,7 +12,7 @@ from app.db import make_engine, make_session_factory
 from app.directory import FixtureDirectory
 from app.errors import ApiError, install_error_handlers
 from app.litellm_client import LiteLLMClient, LiteLLMReader
-from app.routers import audit, departments, groups, me, platform, policies, reports
+from app.routers import audit, departments, groups, me, members, platform, policies, reports
 from app.security_headers import SecurityHeadersMiddleware
 from app.writes import install_replay_handler
 
@@ -58,6 +58,7 @@ def create_app(
     app.include_router(me.router)
     app.include_router(departments.router)
     app.include_router(groups.router)
+    app.include_router(members.router)
     app.include_router(policies.router)
     app.include_router(reports.router)
     app.include_router(platform.router)

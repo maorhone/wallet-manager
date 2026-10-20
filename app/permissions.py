@@ -128,6 +128,22 @@ async def can_write_members(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), (ADMIN, REP, HEAD), _GROUP_VIEW)
 
 
+# §9.4: roles allowed to run each member lifecycle action on a group's members
+KICK_ROLES, MOVE_ROLES, DELETE_ROLES = (ADMIN, REP, HEAD), (ADMIN, REP), (ADMIN,)
+
+
+async def can_kick(session, p: Principal, group_id: int) -> str:
+    return _pick(await _group_roles(session, p, group_id), KICK_ROLES, _GROUP_VIEW)
+
+
+async def can_move(session, p: Principal, group_id: int) -> str:
+    return _pick(await _group_roles(session, p, group_id), MOVE_ROLES, _GROUP_VIEW)
+
+
+async def can_delete_member(session, p: Principal, group_id: int) -> str:
+    return _pick(await _group_roles(session, p, group_id), DELETE_ROLES, _GROUP_VIEW)
+
+
 async def target_tier(session: AsyncSession, directory: Directory, upn: str) -> str:
     """Highest role the target holds, from directory groups ∩ role_binding (DR9)."""
     roles = {b.role for b in await load_bindings(session, directory.groups_of(upn))}

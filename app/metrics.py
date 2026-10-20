@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from prometheus_client import CollectorRegistry, Counter, Gauge, generate_latest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import LitellmWrite, SpendSnapshot
 
@@ -19,6 +20,12 @@ SNAPSHOT_AGE = Gauge(
 OVERALLOCATION = Gauge(
     "wm_overallocation_findings", "Findings of the last over-allocation check", registry=REGISTRY
 )
+LIFECYCLE_ACTIONS = Counter(
+    "wm_lifecycle_actions", "Member lifecycle actions by kind", ["action"], registry=REGISTRY
+)
+OUTBOX_HELD = Gauge(
+    "wm_outbox_held", "Pending outbox rows waiting for a row they depend on", registry=REGISTRY
+)
 STATUSES = ("pending", "applied", "failed")
 
 
@@ -32,6 +39,15 @@ async def outbox_counts(db: AsyncSession) -> dict[str, int]:
 async def render(db: AsyncSession) -> bytes:
     for status, n in (await outbox_counts(db)).items():
         OUTBOX_DEPTH.labels(status).set(n)
+    dep = aliased(LitellmWrite)
+    OUTBOX_HELD.set(
+        await db.scalar(
+            select(func.count())
+            .select_from(LitellmWrite)
+            .join(dep, LitellmWrite.depends_on == dep.id)
+            .where(LitellmWrite.status == "pending", dep.status != "applied")
+        )
+    )
     taken = await db.scalar(select(func.max(SpendSnapshot.taken_at)))
     SNAPSHOT_AGE.set((datetime.now(UTC) - taken).total_seconds() if taken else float("nan"))
     return generate_latest(REGISTRY)

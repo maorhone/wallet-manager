@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.models import Department, Employee, Grp, LitellmWrite, Policy, RoleBinding
+from app.services.lifecycle import JOINER
 from app.writes import WriteContext
 
 _DEPT_FIELDS = ("name", "ad_group_dn", "budget", "pmo_pool", "reserve")
@@ -26,9 +27,6 @@ async def _upsert(session: AsyncSession, model, key_col: str, key: str, values: 
     return row
 
 
-_JOINER = ("/user/new", "/team/member_add", "/key/generate", "/jwt/key/mapping/new")  # §9.3
-
-
 async def _provision(session: AsyncSession, settings: Settings) -> None:
     """Enqueue the LiteLLM objects the seeded rows need: orgs, teams, then the Joiner sequence."""
     ctx = WriteContext(session, settings, "seed", str(uuid.uuid4()), "initial provisioning")
@@ -39,7 +37,7 @@ async def _provision(session: AsyncSession, settings: Settings) -> None:
     employees = await session.scalars(
         select(Employee).where(Employee.group_id.is_not(None)).order_by(Employee.upn)
     )
-    steps += [("employee", e.upn, ep) for e in employees for ep in _JOINER]
+    steps += [("employee", e.upn, ep) for e in employees for ep in JOINER]
     known = await session.execute(
         select(LitellmWrite.entity, LitellmWrite.entity_id, LitellmWrite.endpoint)
     )
