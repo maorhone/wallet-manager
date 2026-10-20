@@ -313,8 +313,10 @@ export const useGrantAction = () => {
 export const useProjectSummary = (ref: string) =>
   useQuery({
     queryKey: ['project', ref],
-    queryFn: () => apiFetch<ProjectSummary>(`/projects/${encodeURIComponent(ref)}/summary`),
+    queryFn: () =>
+      apiFetch<ProjectSummary>(`/projects/summary?project_ref=${encodeURIComponent(ref)}`),
     enabled: ref !== '',
+    refetchInterval: 15000,
   });
 
 export const useGrantShares = (grantId: number, enabled = true) =>
@@ -322,6 +324,7 @@ export const useGrantShares = (grantId: number, enabled = true) =>
     queryKey: ['project', 'shares', grantId],
     queryFn: () => apiFetch<GrantShare[]>(`/grants/${grantId}/shares`),
     enabled,
+    refetchInterval: 15000,
   });
 
 export const useMyUsage = (from: string, to: string) =>

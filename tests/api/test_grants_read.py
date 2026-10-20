@@ -87,3 +87,13 @@ async def test_project_summary_aggregates_visible_grants(login, provisioned):
     assert (await pmo.get("/projects/NOPE/summary")).status_code == 404
     async with provisioned() as s:
         assert (await s.get(Grant, gid)).amount == 20000
+
+
+async def test_project_summary_query_form_serves_slash_refs(login, provisioned):
+    pmo = await login("pmo")
+    await _make(pmo, A1, "FY/2026", 10000)
+    assert (await pmo.get("/projects/FY%2F2026/summary")).status_code == 404  # path form cannot
+    r = await pmo.get("/projects/summary", params={"project_ref": "FY/2026"})
+    assert r.status_code == 200 and r.json()["totals"]["amount"] == 10000
+    assert (await pmo.get("/projects/summary", params={"project_ref": "NOPE"})).status_code == 404
+    assert (await pmo.get("/projects/summary")).status_code == 422

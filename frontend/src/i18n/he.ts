@@ -166,6 +166,8 @@ export const he = {
     newExpiry: 'תוקף חדש',
     newAmount: 'סכום חדש',
     closeWarning: 'הסכום שלא נוצל יוחזר לקופה',
+    returnToPool: 'יוחזר לקופה',
+    poolAvailable: 'זמין בקופה',
     projects: {
       empty: 'אין פרויקטים להצגה',
       grants: 'מענקים בפרויקט',

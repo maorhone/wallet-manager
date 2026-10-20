@@ -25,7 +25,10 @@ export default function Grants({
   const [edit, setEdit] = useState<{ g: Grant; mode: GrantEditMode } | null>(null);
   const { data: me } = useMe();
   const canCreate = !!pool.data?.actions.create_grant && !summary.read_only;
-  useEffect(() => setOpen(false), [period]);
+  useEffect(() => {
+    setOpen(false);
+    setEdit(null);
+  }, [period]);
   if (grants.isPending) return <Loader aria-label={he.loading} />;
   if (grants.error || !grants.data)
     return <ErrorState error={grants.error} onRetry={grants.refetch} />;
@@ -41,7 +44,7 @@ export default function Grants({
       <GrantList
         grants={grants.data}
         actions={(g) =>
-          g.actions.edit || g.actions.close ? (
+          !summary.read_only && (g.actions.edit || g.actions.close) ? (
             <Group gap={4} wrap="nowrap">
               {g.actions.edit && (
                 <>
@@ -75,10 +78,12 @@ export default function Grants({
           ) : null
         }
       />
-      {edit && (
+      {edit && !summary.read_only && pool.data && (
         <GrantEditDialog
           grant={edit.g}
           mode={edit.mode}
+          timezone={me?.timezone ?? 'Asia/Jerusalem'}
+          available={pool.data.available}
           onClose={() => setEdit(null)}
           onConfirm={(patch, reason, key) => act.mutateAsync({ id: edit.g.id, patch, reason, key })}
         />

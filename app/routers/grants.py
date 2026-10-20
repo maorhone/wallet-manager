@@ -114,8 +114,10 @@ async def pmo_pool(
     )
 
 
+@router.get("/projects/summary")
 @router.get("/projects/{project_ref}/summary")
-async def project_summary(project_ref: str, request: Request, principal: CurrentPrincipal, db: Db):
+async def project_summary(request: Request, principal: CurrentPrincipal, db: Db, project_ref: str):
+    """`?project_ref=` also serves references containing '/', which the path form cannot carry."""
     return await grants.project_summary(
         db, principal, request.app.state.clock, project_ref, request.app.state.settings.app_timezone
     )

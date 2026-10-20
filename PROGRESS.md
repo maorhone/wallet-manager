@@ -154,6 +154,10 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Review 2.7: all 7 majors fixed (read_only gating + editor closes on period change; idempotency key kept per payload; close preview
+  amount-used-returned; /me timezone for dates; inline before/after + pool-effect table in `GrantEditDialog` instead of
+  `ChangeSummaryDialog` (that one rotates its key on every error); 15 s refetch for project summary and shares; query-param summary route).
+  Not done: the close preview is computed client-side, not by the server with Decimal (credits are whole numbers in the UI).
 - Flaky, unrelated to 2.7 (backend untouched): `tests/api/test_lifecycle_permissions.py::test_matrix[rep-delete]` hit the 60s
   pytest-timeout once while FastAPI was building a route (`fastapi/params.py` in `create_app`); the file passes on rerun (51 passed).
   Further 60s timeouts hit random tests during fixture setup (`tests/api/test_placement.py::test_rep_places_pending_of_own_department_then_ready`,

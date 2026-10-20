@@ -85,9 +85,12 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   with its current state, amount with the pool available and a block above it, optional model, dates, then a summary with the
   reason). A pool race returns the `PMO_POOL_INSUFFICIENT` message. The create button needs `actions.create_grant`.
 - PMO grant actions - Done (Step 2.7): per grant row (only when the server `actions` allow) PMO can extend the expiry,
-  increase the amount or close early, each with a required reason; closing early shows the unused amount that returns to the pool.
+  increase the amount or close early, each with a required reason; closing early shows the unused amount (amount - used - returned) that returns to the pool.
+  The dialog shows before/after of the changed value and of the pool availability, uses application-timezone days (from `/me`),
+  keeps one idempotency key across retries of the same submission, and is hidden for past (read-only) periods.
   Projects tab: one row per project reference (grants, amount, used, returned) with drill-down to each group's grant and each
-  share's usage.
+  share's usage; the detail refreshes every 15 s. References containing `/` drill down via
+  `GET /projects/summary?project_ref=` (the path form stays).
 - Group heads' Grants tab - Planned (Steps 2.8-2.9).
 
 ### 4.5 Scheduler - Phase 2: In progress (grants job Done in Step 2.3)
