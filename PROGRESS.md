@@ -194,6 +194,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   department pending list (no role on the department), so the tab is absent.
 
 ## Questions for owner
+**Owner approved all 21 defaults below on 20/10/2026, including 10 (keep placeholder concurrency/rpm until pilot), 11 (client id claim order appid, client_id, azp) and 12 (no static key, ADFS JWT mapped by upn).**
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).
 2. **Default model caps for new members (FR-G2).** §8.2 has no column, so they are stored in `policy` key `member_defaults.group.<id>`.
 3. **Missing parent ceiling.** A missing department allowance or group pot counts as 0 for FR-D3 and FR-G3.
