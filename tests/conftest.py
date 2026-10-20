@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.config import Settings
 from app.db import create_database, to_asyncpg_url
 from app.litellm_client import LiteLLMClient
-from app.main import create_app
+from app.main import close_app, create_app
 from app.seed import seed
 from fake_litellm import db as fake_db
 from fake_litellm.main import create_app as create_fake_app
@@ -120,7 +120,7 @@ async def seeded(settings):
     app = create_app(settings)
     await seed(app.state.session_factory, settings.seed_file)
     yield app.state.session_factory
-    await app.state.engine.dispose()
+    await close_app(app)
 
 
 @pytest_asyncio.fixture
@@ -137,7 +137,7 @@ async def make_client(settings, seeded):
     yield _make
     for client, app in made:
         await client.aclose()
-        await app.state.engine.dispose()
+        await close_app(app)
 
 
 @pytest_asyncio.fixture
@@ -181,7 +181,7 @@ async def login_wm(prov_settings, seeded, litellm, ro_engine):
     yield _login
     for client, app in made:
         await client.aclose()
-        await app.state.engine.dispose()
+        await close_app(app)
 
 
 @pytest_asyncio.fixture
@@ -254,7 +254,7 @@ async def make_portal(prov_settings, seeded, litellm):
     yield _make
     for client, app in made:
         await client.aclose()
-        await app.state.engine.dispose()
+        await close_app(app)
 
 
 @pytest_asyncio.fixture
@@ -269,4 +269,4 @@ async def api(settings):
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         yield client
-    await app.state.engine.dispose()
+    await close_app(app)

@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -28,6 +30,25 @@ from app.security_headers import SecurityHeadersMiddleware
 from app.writes import install_replay_handler
 
 
+async def close_app(app: FastAPI) -> None:
+    """Release what ``create_app`` opened: the WM engine and the LiteLLM client/reader it built.
+
+    Injected ``litellm``/``reader`` objects belong to the caller and are left open.
+    """
+    owned = app.state.owned
+    if owned.get("litellm") is not None:
+        await owned["litellm"].aclose()
+    if owned.get("reader_engine") is not None:
+        await owned["reader_engine"].dispose()
+    await app.state.engine.dispose()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    await close_app(app)
+
+
 def create_app(
     settings: Settings | None = None,
     litellm: LiteLLMClient | None = None,
@@ -37,16 +58,19 @@ def create_app(
     settings = settings or Settings()
     if settings.dev_jwt_secret and not settings.dev_auth:
         raise RuntimeError("DEV_JWT_SECRET is set but DEV_AUTH is off; refusing to start")
-    app = FastAPI(title="Wallet Manager")
+    app = FastAPI(title="Wallet Manager", lifespan=_lifespan)
     app.state.settings = settings
-    app.state.litellm = litellm or LiteLLMClient(
-        settings.litellm_base_url, settings.litellm_master_key
-    )
-    app.state.litellm_reader = reader or (
-        LiteLLMReader(create_async_engine(settings.litellm_database_url))
-        if settings.litellm_database_url
-        else None
-    )
+    owned: dict = {}
+    if litellm is None:
+        litellm = owned["litellm"] = LiteLLMClient(
+            settings.litellm_base_url, settings.litellm_master_key
+        )
+    if reader is None and settings.litellm_database_url:
+        owned["reader_engine"] = create_async_engine(settings.litellm_database_url)
+        reader = LiteLLMReader(owned["reader_engine"])
+    app.state.owned = owned
+    app.state.litellm = litellm
+    app.state.litellm_reader = reader
     app.state.engine = make_engine(settings.database_url)
     app.state.session_factory = make_session_factory(app.state.engine)
     app.state.directory = FixtureDirectory(settings.seed_file)
