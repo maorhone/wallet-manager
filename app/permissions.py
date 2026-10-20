@@ -107,6 +107,27 @@ def can_edit_dept_budget(p: Principal) -> str:
     return ADMIN
 
 
+def can_manage_grants(p: Principal, department_id: int) -> str:
+    """FR-P1: admin and the department's PMO; everyone else is forbidden."""
+    roles = p.department_roles(department_id)
+    for role in (ADMIN, PMO):
+        if role in roles:
+            return role
+    raise _forbidden()
+
+
+async def can_view_grants(
+    session, p: Principal, department_id: int, group_id: int | None = None
+) -> str:
+    """Admin, PMO, rep or viewer on the department; head or viewer on the group."""
+    roles = (
+        await _group_roles(session, p, group_id)
+        if group_id
+        else await _dept_roles(session, p, department_id)
+    )
+    return _pick(roles, _GROUP_VIEW, _GROUP_VIEW)
+
+
 async def can_view_group(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), _GROUP_VIEW, _GROUP_VIEW)
 

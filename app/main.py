@@ -9,6 +9,7 @@ from app.auth import dev, oidc
 from app.auth.csrf import CsrfMiddleware
 from app.auth.oidc import build_oauth
 from app.auth.session import SESSION_MAX_AGE
+from app.clock import Clock, SystemClock
 from app.config import Settings
 from app.db import make_engine, make_session_factory
 from app.directory import FixtureDirectory
@@ -17,6 +18,7 @@ from app.litellm_client import LiteLLMClient, LiteLLMReader
 from app.routers import (
     audit,
     departments,
+    grants,
     groups,
     me,
     members,
@@ -53,8 +55,9 @@ def create_app(
     settings: Settings | None = None,
     litellm: LiteLLMClient | None = None,
     reader: LiteLLMReader | None = None,
+    clock: Clock | None = None,
 ) -> FastAPI:
-    """``litellm`` and ``reader`` are injected by tests; by default they come from settings."""
+    """``litellm``, ``reader`` and ``clock`` are injected by tests; the defaults are real."""
     settings = settings or Settings()
     if settings.dev_jwt_secret and not settings.dev_auth:
         raise RuntimeError("DEV_JWT_SECRET is set but DEV_AUTH is off; refusing to start")
@@ -68,6 +71,7 @@ def create_app(
     if reader is None and settings.litellm_database_url:
         owned["reader_engine"] = create_async_engine(settings.litellm_database_url)
         reader = LiteLLMReader(owned["reader_engine"])
+    app.state.clock = clock or SystemClock()
     app.state.owned = owned
     app.state.litellm = litellm
     app.state.litellm_reader = reader
@@ -94,6 +98,7 @@ def create_app(
         app.include_router(dev.router)
     app.include_router(me.router)
     app.include_router(departments.router)
+    app.include_router(grants.router)
     app.include_router(groups.router)
     app.include_router(members.router)
     app.include_router(onboarding.router)

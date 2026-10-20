@@ -80,7 +80,7 @@ async def _thresholds(db: AsyncSession) -> dict[str, Decimal]:
 
 async def _grants_by_group(db, group_ids: list[int]) -> dict[int, Decimal]:
     rows = await db.execute(
-        select(Grant.group_id, func.sum(Grant.amount))
+        select(Grant.group_id, func.sum(Grant.amount - Grant.returned))
         .where(Grant.status == "active", Grant.group_id.in_(group_ids))
         .group_by(Grant.group_id)
     )

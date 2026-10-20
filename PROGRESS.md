@@ -95,14 +95,23 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `he.pending`, department summary `actions.place` (admin or rep). Tests: `e2e/pending.spec.ts` (3, U12). Phase 1b acceptance table in PLAN §2b checked: every listed test exists and passes,
   `test_repo_hygiene.py` passes. Questions D14–D25 are in "Questions for owner" (11, 12) and the notes above.
 
+- Step 2.1: `app/clock.py` (`Clock`, `SystemClock`, `FakeClock`; `create_app(..., clock=)` stores `app.state.clock`), migration `0003` (indexes only),
+  `app/{schemas,services,routers}/grants.py` (`POST/PATCH /grants`, `POST /grants/{id}/close`, `GET /grants`, `GET /departments/{id}/pmo-pool`,
+  `GET /projects/{ref}/summary`), `can_manage_grants` / `can_view_grants`, effective amount (`amount − returned`) in `desired.py` and `views._grants_by_group`.
+  Tests: `tests/api/test_grants*.py` (17), `tests/unit/test_clock.py`. `./scripts/test.sh`: pytest 363 passed, 4 skipped; vitest 24; Playwright 27.
+
 ## Next
-- Phase 1b is complete (Steps 1b.1–1b.5).
-- Phase 2 (PLAN §4): grants and expiry (A1, A9 with a share, A11; U5).
+- Step 2.2: shares backend, attribution (7.3.1), FR-P4/P5 member values, share close (PLAN §2c).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.1: the group summary `grants` list and `/grants` rows show only what the spec needs; closing a pending grant enqueues no `/team/update` (LiteLLM never saw it).
+  A closed grant's `used` is Σ of its shares' `used` (0 until Step 2.2). `/pmo-pool` for a past period uses live pending/active grants plus grants closed in that period.
+  PMO of another department creating a grant gets 422 `SCOPE_FORBIDDEN`; a user with no PMO binding anywhere gets 403 (PLAN's wording). `/grants` and `/projects` were already in the vite proxy regex.
+  Existing `datetime.now()` calls (period_ctx etc.) from Phase 1 are untouched; new grant code uses `app.state.clock` only.
+  `uq_notification_dedupe` (Step 2.4) is in migration 0003 as PLAN says; the indexes are not declared on the SQLAlchemy models (migration is the source).
 - Step 11: `/me/shares` rows have no project name or per-share usage yet (Phase 1 has no grants), so `SharesTable` shows the grant id and `used` defaults to 0.
   The usage chart draws daily stacked bars (left axis) plus a running-total line against the cap line, since a monthly cap cannot be compared with a single day.
   The "contact" alert for group/department blocks names the group head from `owners.base_cap`.

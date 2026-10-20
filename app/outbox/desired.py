@@ -70,15 +70,14 @@ async def _team_fields(session: AsyncSession, entity_id: str) -> dict:
     dept = await session.get(Department, g.department_id)
     period = dept.budget_period
     active = (Grant.group_id == g.id, Grant.status == "active")
-    grants = await session.scalar(
-        select(func.coalesce(func.sum(Grant.amount), 0)).where(*active, Grant.model.is_(None))
-    )
+    effective = Grant.amount - Grant.returned
+    grants = await session.scalar(select(func.coalesce(func.sum(effective), 0)).where(*active))
     pots = {
         r.model: r.amount
         for r in await session.scalars(select(GroupModelPot).where(GroupModelPot.group_id == g.id))
     }
     for r in await session.execute(
-        select(Grant.model, Grant.amount).where(*active, Grant.model.is_not(None))
+        select(Grant.model, effective.label("amount")).where(*active, Grant.model.is_not(None))
     ):
         pots[r.model] = pots.get(r.model, Decimal(0)) + r.amount
     defaults = await _policy(session, f"member_defaults.group.{g.id}", {})
