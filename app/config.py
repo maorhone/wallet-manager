@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     dev_jwt_secret: str = ""  # HS256 for local tests; refused unless DEV_AUTH=1
     litellm_public_url: str = "https://litellm.corp.example"
     outbox_poll_s: float = 1
+    outbox_backoff_max_s: float = 60  # cap for the worker's retry backoff after a LiteLLM outage
     spend_snapshot_interval_s: float = 300
     overalloc_interval_s: float = 300
     scheduler_grants_interval_s: float = 60

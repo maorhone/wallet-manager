@@ -74,6 +74,9 @@ def main() -> None:
         "LITELLM_PUBLIC_URL": f"http://127.0.0.1:{FAKE_PORT}",
         "SPEND_SNAPSHOT_INTERVAL_S": "2",
         "OUTBOX_POLL_S": "0.5",
+        # Short retry cap: with the default 60 s, the worker can still be asleep long after an
+        # outage test turns LiteLLM back on, and "applied" misses its 60 s wait (U3 flake).
+        "OUTBOX_BACKOFF_MAX_S": "3",
         "SCHEDULER_GRANTS_INTERVAL_S": "2",
         "SCHEDULER_NOTIFY_INTERVAL_S": "2",
         "SEED_FILE": str(ROOT / "seed" / "dev.yaml"),

@@ -13,7 +13,7 @@ from app.outbox.worker import drain
 from app.services.overallocation import scheduled_check
 from app.services.spend import take_snapshot
 
-BACKOFF_START, BACKOFF_MAX = 1.0, 60.0
+BACKOFF_START = 1.0
 
 
 async def outbox_loop(settings: Settings) -> None:
@@ -25,7 +25,7 @@ async def outbox_loop(settings: Settings) -> None:
         while True:
             result = await drain(sf, client, settings)
             if result.stopped:
-                backoff = min(max(backoff * 2, BACKOFF_START), BACKOFF_MAX)
+                backoff = min(max(backoff * 2, BACKOFF_START), settings.outbox_backoff_max_s)
             else:
                 backoff = 0.0
             await asyncio.sleep(max(settings.outbox_poll_s, backoff))
