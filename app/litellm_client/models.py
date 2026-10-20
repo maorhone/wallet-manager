@@ -137,11 +137,32 @@ class KeyBlock(_Req):
     key: str
 
 
+class KeyDelete(_Req):
+    keys: list[str]  # token hashes or plaintext keys (V7)
+
+
+class UserDelete(_Req):
+    user_ids: list[str]
+
+
 class JwtKeyMappingNew(_Req):
     jwt_issuer: str
     jwt_claim_name: str
     jwt_claim_value: str
     token: str
+
+
+class JwtKeyMappingUpdate(_Req):
+    jwt_issuer: str
+    jwt_claim_name: str
+    jwt_claim_value: str
+    is_active: bool  # kick sets it false, restore true (V6)
+
+
+class JwtKeyMappingDelete(_Req):
+    jwt_issuer: str
+    jwt_claim_name: str
+    jwt_claim_value: str
 
 
 # --- responses --------------------------------------------------------------------------------

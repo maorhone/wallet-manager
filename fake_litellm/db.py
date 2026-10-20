@@ -104,6 +104,7 @@ jwt_mapping = Table(
     Column("jwt_claim_name", Text),
     Column("jwt_claim_value", Text),
     Column("token", Text),
+    Column("is_active", Boolean, nullable=False, default=True, server_default="true"),
 )
 spend_logs = Table(
     "LiteLLM_SpendLogs",

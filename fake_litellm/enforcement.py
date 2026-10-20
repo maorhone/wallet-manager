@@ -74,6 +74,7 @@ async def _authenticate(conn: AsyncConnection, auth: str) -> dict:
                     jwt_mapping.c.jwt_issuer == claims.get("iss"),
                     jwt_mapping.c.jwt_claim_name == "upn",
                     jwt_mapping.c.jwt_claim_value == claims.get("upn"),
+                    jwt_mapping.c.is_active.is_(True),  # inactive = unmapped (V6)
                 )
             )
         ).scalar()

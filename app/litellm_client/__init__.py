@@ -3,8 +3,11 @@
 from .client import LiteLLMClient
 from .errors import LiteLLMError, LiteLLMPermanentError, LiteLLMTransientError
 from .models import (
+    JwtKeyMappingDelete,
     JwtKeyMappingNew,
+    JwtKeyMappingUpdate,
     KeyBlock,
+    KeyDelete,
     KeyGenerate,
     KeyUpdate,
     Member,
@@ -17,13 +20,17 @@ from .models import (
     TeamMemberUpdate,
     TeamNew,
     TeamUpdate,
+    UserDelete,
     UserNew,
 )
 from .readonly import LiteLLMReader
 
 __all__ = [
+    "JwtKeyMappingDelete",
     "JwtKeyMappingNew",
+    "JwtKeyMappingUpdate",
     "KeyBlock",
+    "KeyDelete",
     "KeyGenerate",
     "KeyUpdate",
     "LiteLLMClient",
@@ -41,5 +48,6 @@ __all__ = [
     "TeamMemberUpdate",
     "TeamNew",
     "TeamUpdate",
+    "UserDelete",
     "UserNew",
 ]

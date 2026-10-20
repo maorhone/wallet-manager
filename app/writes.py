@@ -46,6 +46,7 @@ class WriteContext:
     request_id: str
     reason: str
     _seq: int = field(default=0, init=False)
+    _last: int | None = field(default=None, init=False)
 
     async def lock(self, kind: LockKind, id: int) -> None:
         await lock_parent(self.db, kind, id)
@@ -60,12 +61,18 @@ class WriteContext:
             )
         )  # fmt: skip
 
-    async def enqueue(self, entity: str, entity_id, endpoint: str) -> None:
+    async def enqueue(
+        self, entity: str, entity_id, endpoint: str, *, payload: dict | None = None,
+        chain: bool = False,
+    ) -> int:  # fmt: skip
+        """Queue a LiteLLM call; ``chain=True`` waits for the previous row this context queued."""
         self._seq += 1
-        await enqueue(
+        self._last = await enqueue(
             self.db, self.settings, entity, str(entity_id), endpoint,
-            f"{self.request_id}:{self._seq}",
+            f"{self.request_id}:{self._seq}", payload=payload,
+            depends_on=self._last if chain else None,
         )  # fmt: skip
+        return self._last
 
 
 async def write_context(request: Request, principal: CurrentPrincipal, db: Db) -> WriteContext:

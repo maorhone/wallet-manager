@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.litellm_client import (
     JwtKeyMappingNew,
+    JwtKeyMappingUpdate,
+    KeyBlock,
     KeyGenerate,
     KeyUpdate,
     Member,
@@ -155,6 +157,11 @@ async def build(session: AsyncSession, settings: Settings, endpoint: str, entity
             return KeyUpdate(
                 key=e.key_token_hash, team_id=g.litellm_team_id, **await _key_limits(session, e)
             )
+        case "/key/block" | "/key/unblock":
+            e = await _get(session, Employee, entity_id)
+            if not e.key_token_hash:
+                raise DesiredUnavailable(f"{e.upn} has no key yet")
+            return KeyBlock(key=e.key_token_hash)
         case "/jwt/key/mapping/new":
             e = await _get(session, Employee, entity_id)
             if not e.key_token_hash:
@@ -162,5 +169,11 @@ async def build(session: AsyncSession, settings: Settings, endpoint: str, entity
             return JwtKeyMappingNew(
                 jwt_issuer=settings.jwt_issuer, jwt_claim_name="upn", jwt_claim_value=e.upn,
                 token=e.key_token_hash,
+            )  # fmt: skip
+        case "/jwt/key/mapping/update":
+            e = await _get(session, Employee, entity_id)
+            return JwtKeyMappingUpdate(
+                jwt_issuer=settings.jwt_issuer, jwt_claim_name="upn", jwt_claim_value=e.upn,
+                is_active=e.status == "active",
             )  # fmt: skip
     raise DesiredUnavailable(f"no builder for {endpoint}")

@@ -6,7 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.litellm_client import LiteLLMClient, LiteLLMPermanentError, LiteLLMTransientError
+from app.litellm_client import (
+    JwtKeyMappingDelete,
+    KeyDelete,
+    LiteLLMClient,
+    LiteLLMPermanentError,
+    LiteLLMTransientError,
+    TeamMemberDelete,
+    UserDelete,
+)
 from app.models import Employee, LitellmWrite
 from app.outbox.desired import DesiredUnavailable, build
 
@@ -18,15 +26,31 @@ _METHODS = {
     "/user/new": "user_new",
     "/key/update": "key_update",
     "/jwt/key/mapping/new": "jwt_mapping_new",
+    "/jwt/key/mapping/update": "jwt_mapping_update",
+    "/key/block": "key_block",
+    "/key/unblock": "key_unblock",
+    "/team/member_delete": "team_member_delete",
+    "/key/delete": "key_delete",
+    "/user/delete": "user_delete",
+    "/jwt/key/mapping/delete": "jwt_mapping_delete",
 }
 # Replays after a lost response get a 4xx "already exists"; for these the desired state is met.
 _ALREADY_OK = {"/user/new", "/team/member_add"}
+# Targets that must not follow later state changes: the payload stored at enqueue time is applied.
+_FROZEN = {
+    "/team/member_delete": TeamMemberDelete,
+    "/key/delete": KeyDelete,
+    "/user/delete": UserDelete,
+    "/jwt/key/mapping/delete": JwtKeyMappingDelete,
+}
+_GONE_OK = set(_FROZEN)  # a 404 on a delete means it is already gone
 
 
 @dataclass
 class DrainResult:
     applied: int = 0
     failed: int = 0
+    held: int = 0  # skipped because the row they depend on is not applied
     stopped: bool = False  # a transient error ended the drain; retry later with backoff
 
 
@@ -61,7 +85,8 @@ async def _apply(client: LiteLLMClient, session: AsyncSession, row: LitellmWrite
         try:
             await getattr(client, _METHODS[ep])(body)
         except LiteLLMPermanentError as exc:
-            if not (ep in _ALREADY_OK and exc.status < 500 and "already" in str(exc.body)):
+            already = ep in _ALREADY_OK and exc.status < 500 and "already" in str(exc.body)
+            if not (already or (ep in _GONE_OK and exc.status == 404)):
                 raise
 
 
@@ -82,9 +107,23 @@ async def drain(
             row = await s.get(LitellmWrite, row_id)
             if row.status != "pending":
                 continue
+            if (
+                row.depends_on
+                and await s.scalar(
+                    select(LitellmWrite.status).where(LitellmWrite.id == row.depends_on)
+                )
+                != "applied"
+            ):
+                result.held += 1
+                continue
             try:
-                body = await build(s, settings, row.endpoint, row.entity_id)
-                row.payload = body.payload()
+                if row.endpoint in _FROZEN:
+                    if row.payload is None:
+                        raise DesiredUnavailable(f"{row.endpoint} has no stored payload")
+                    body = _FROZEN[row.endpoint](**row.payload)
+                else:
+                    body = await build(s, settings, row.endpoint, row.entity_id)
+                    row.payload = body.payload()
                 await _apply(client, s, row, body)
                 row.status, row.last_error = "applied", None
                 result.applied += 1

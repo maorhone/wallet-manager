@@ -10,9 +10,12 @@ from pydantic import BaseModel
 
 from .errors import LiteLLMPermanentError, LiteLLMTransientError
 from .models import (
+    JwtKeyMappingDelete,
     JwtKeyMappingNew,
     JwtKeyMappingRecord,
+    JwtKeyMappingUpdate,
     KeyBlock,
+    KeyDelete,
     KeyGenerate,
     KeyGenerateResponse,
     KeyListResponse,
@@ -28,6 +31,7 @@ from .models import (
     TeamNew,
     TeamRecord,
     TeamUpdate,
+    UserDelete,
     UserNew,
     UserRecord,
 )
@@ -136,9 +140,21 @@ class LiteLLMClient:
     async def key_unblock(self, body: KeyBlock) -> None:
         await self._call("POST", "/key/unblock", None, body)
 
+    async def key_delete(self, body: KeyDelete) -> None:
+        await self._call("POST", "/key/delete", None, body)
+
+    async def user_delete(self, body: UserDelete) -> None:
+        await self._call("POST", "/user/delete", None, body)
+
     async def key_list(self, user_id: str) -> KeyListResponse:
         return await self._call("GET", "/key/list", KeyListResponse, params={"user_id": user_id})
 
     # --- SSO mapping ---
     async def jwt_mapping_new(self, body: JwtKeyMappingNew) -> JwtKeyMappingRecord:
         return await self._call("POST", "/jwt/key/mapping/new", JwtKeyMappingRecord, body)
+
+    async def jwt_mapping_update(self, body: JwtKeyMappingUpdate) -> None:
+        await self._call("POST", "/jwt/key/mapping/update", None, body)
+
+    async def jwt_mapping_delete(self, body: JwtKeyMappingDelete) -> None:
+        await self._call("POST", "/jwt/key/mapping/delete", None, body)

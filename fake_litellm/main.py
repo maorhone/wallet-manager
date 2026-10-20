@@ -35,6 +35,10 @@ async def guard(request: Request) -> None:
     state: FakeState = request.app.state.fake
     if request.headers.get("authorization") != f"Bearer {state.master_key}":
         raise _err(401, "Authentication Error, invalid key")
+    fail = state.failures.get(request.url.path)
+    if fail and fail[1] > 0:  # /_test/fail: fail the next N calls to this endpoint
+        fail[1] -= 1
+        raise _err(fail[0], "injected failure")
 
 
 async def _one(conn: AsyncConnection, table, col, value, what: str):
@@ -355,6 +359,22 @@ def _key_router() -> APIRouter:
             await conn.execute(insert(user).values(**body.payload(), teams=[]))
             return m.UserRecord(**await _one(conn, user, "user_id", body.user_id, "user"))
 
+    @r.post("/user/delete")
+    async def user_delete(body: m.UserDelete, request: Request):
+        async with request.app.state.fake.engine.begin() as conn:
+            for uid in body.user_ids:
+                await _one(conn, user, "user_id", uid, "user")
+            await conn.execute(delete(user).where(user.c.user_id.in_(body.user_ids)))
+        return {"status": "success"}
+
+    @r.post("/key/delete")
+    async def key_delete(body: m.KeyDelete, request: Request):
+        async with request.app.state.fake.engine.begin() as conn:
+            tokens = [await _token_hash(conn, k) for k in body.keys]  # 404 before any change
+            await conn.execute(delete(jwt_mapping).where(jwt_mapping.c.token.in_(tokens)))
+            await conn.execute(delete(token).where(token.c.token.in_(tokens)))
+        return {"deleted_keys": body.keys}
+
     @r.post("/key/generate")
     async def key_generate(body: m.KeyGenerate, request: Request):
         key = "sk-" + secrets.token_urlsafe(24)
@@ -416,6 +436,31 @@ def _key_router() -> APIRouter:
                 insert(jwt_mapping).values(**body.payload()).returning(jwt_mapping.c.id)
             )
             return m.JwtKeyMappingRecord(id=res.scalar_one(), **body.payload())
+
+    def _mapping_where(body: m._Req):
+        return (
+            jwt_mapping.c.jwt_issuer == body.jwt_issuer,
+            jwt_mapping.c.jwt_claim_name == body.jwt_claim_name,
+            jwt_mapping.c.jwt_claim_value == body.jwt_claim_value,
+        )
+
+    @r.post("/jwt/key/mapping/update")
+    async def jwt_mapping_update(body: m.JwtKeyMappingUpdate, request: Request):
+        async with request.app.state.fake.engine.begin() as conn:
+            res = await conn.execute(
+                update(jwt_mapping).where(*_mapping_where(body)).values(is_active=body.is_active)
+            )
+            if res.rowcount == 0:
+                raise _err(404, "jwt key mapping not found")
+        return {"status": "success"}
+
+    @r.post("/jwt/key/mapping/delete")
+    async def jwt_mapping_delete(body: m.JwtKeyMappingDelete, request: Request):
+        async with request.app.state.fake.engine.begin() as conn:
+            res = await conn.execute(delete(jwt_mapping).where(*_mapping_where(body)))
+            if res.rowcount == 0:
+                raise _err(404, "jwt key mapping not found")
+        return {"status": "success"}
 
     return r
 

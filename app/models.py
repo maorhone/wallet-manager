@@ -91,7 +91,17 @@ class GroupModelPot(Base):
 class Employee(Base):
     __tablename__ = "employee"
     __table_args__ = (
-        CheckConstraint(_in("status", "active", "blocked", "left"), name="ck_employee_status"),
+        CheckConstraint(
+            _in("status", "active", "blocked", "left", "pending_placement"),
+            name="ck_employee_status",
+        ),
+        CheckConstraint(
+            "pending_reason IS NULL OR "
+            + _in(
+                "pending_reason", "no_budget_group", "multiple_budget_groups", "not_in_directory"
+            ),
+            name="ck_employee_pending_reason",
+        ),
     )
     upn: Mapped[str] = mapped_column(Text, primary_key=True)
     display_name: Mapped[str | None] = mapped_column(Text)
@@ -104,6 +114,10 @@ class Employee(Base):
     rpm_limit: Mapped[int | None] = mapped_column(Integer)
     model_tpm_limits: Mapped[dict | None] = mapped_column(JSONB)
     left_at: Mapped[datetime | None] = mapped_column(TS)
+    # §9.5: set while status is pending_placement, cleared on place
+    pending_department_id: Mapped[int | None] = mapped_column(ForeignKey("department.id"))
+    pending_reason: Mapped[str | None] = mapped_column(Text)
+    pending_since: Mapped[datetime | None] = mapped_column(TS)
 
 
 class EmployeeModelCap(Base):
@@ -183,27 +197,6 @@ class RoleBinding(Base):
     scope_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
-class SyncRun(Base):
-    __tablename__ = "sync_run"
-    id: Mapped[int] = mapped_column(BigInteger, **ID)
-    started_at: Mapped[datetime] = _created()
-    finished_at: Mapped[datetime | None] = mapped_column(TS)
-    dry_run: Mapped[bool] = mapped_column(Boolean, server_default="true")
-    stats: Mapped[dict | None] = mapped_column(JSONB)
-    aborted_reason: Mapped[str | None] = mapped_column(Text)
-
-
-class SyncAction(Base):
-    __tablename__ = "sync_action"
-    id: Mapped[int] = mapped_column(BigInteger, **ID)
-    run_id: Mapped[int] = mapped_column(ForeignKey("sync_run.id"))
-    kind: Mapped[str] = mapped_column(Text)
-    upn: Mapped[str | None] = mapped_column(Text)
-    payload: Mapped[dict | None] = mapped_column(JSONB)
-    status: Mapped[str] = mapped_column(Text, server_default="pending")
-    error: Mapped[str | None] = mapped_column(Text)
-
-
 class LitellmWrite(Base):
     __tablename__ = "litellm_write"
     __table_args__ = (Index("ix_litellm_write_status_id", "status", "id"),)
@@ -217,6 +210,7 @@ class LitellmWrite(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
+    depends_on: Mapped[int | None] = mapped_column(ForeignKey("litellm_write.id"))  # FR-RC3, §9.3
 
 
 class SpendSnapshot(Base):

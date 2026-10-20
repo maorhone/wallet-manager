@@ -1,4 +1,5 @@
 import enum
+import zlib
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -34,6 +35,11 @@ class LockKind(enum.IntEnum):
     DEPARTMENT = 1  # split, allowances, group pots
     GROUP = 2  # member caps and member model caps
     PMO = 3  # Phase 2
+    EMPLOYEE = 4  # member lifecycle actions on one person (id = employee_lock_id(upn))
+
+
+def employee_lock_id(upn: str) -> int:
+    return zlib.crc32(upn.encode()) & 0x7FFFFFFF
 
 
 async def lock_parent(session: AsyncSession, kind: LockKind, id: int) -> None:

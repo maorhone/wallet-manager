@@ -1,13 +1,14 @@
 """Test-only controls, mounted when FAKE_TEST_CONTROLS=1 (the fake's default)."""
 
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import insert, select
+from sqlalchemy import exists, insert, select
 
-from .db import reset_db, spend_logs, team
+from .db import reset_db, spend_logs, team, team_member, token
 from .enforcement import bump_spend
 
 router = APIRouter(prefix="/_test")
@@ -20,6 +21,12 @@ class Outage(BaseModel):
 class Config(BaseModel):
     latency_ms: int = 0
     cost_per_request: float = 1
+
+
+class Fail(BaseModel):
+    endpoint: str
+    status: Literal[400, 500]
+    times: int = 1
 
 
 class Spend(BaseModel):
@@ -48,6 +55,31 @@ async def config(body: Config, request: Request):
     request.app.state.fake.latency_ms = body.latency_ms
     request.app.state.fake.cost_per_request = body.cost_per_request
     return body
+
+
+@router.post("/fail")
+async def fail(body: Fail, request: Request):
+    """Fail the next ``times`` calls to ``endpoint`` (500 = transient, 400 = permanent)."""
+    request.app.state.fake.failures[body.endpoint] = [body.status, body.times]
+    return body
+
+
+@router.get("/invariants")
+async def invariants(request: Request):
+    """Keys whose team has no membership for the key's user (a key outliving its membership)."""
+    async with request.app.state.fake.engine.connect() as conn:
+        rows = await conn.execute(
+            select(token.c.token, token.c.user_id, token.c.team_id)
+            .where(
+                token.c.team_id.is_not(None),
+                ~exists().where(
+                    team_member.c.team_id == token.c.team_id,
+                    team_member.c.user_id == token.c.user_id,
+                ),
+            )
+            .order_by(token.c.token)
+        )
+        return [dict(r) for r in rows.mappings()]
 
 
 @router.post("/spend")

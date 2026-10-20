@@ -66,9 +66,15 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   (+ `split.pmo_reserve_sync_status`). E2E: `department.spec.ts` (4), `viewer.spec.ts` (U7), `roles.spec.ts` (U6), `rtl.spec.ts` (U8).
   Phase 1 acceptance table in PLAN §3 checked: every listed test exists and passes.
 
+- Step 1b.1: migration `0002_lifecycle` (employee `pending_*` columns + status CHECK, `litellm_write.depends_on`, `sync_run`/`sync_action` dropped, ORM updated),
+  `LockKind.EMPLOYEE` + `employee_lock_id`, client `key_delete|user_delete|jwt_mapping_update|jwt_mapping_delete` (+ typed bodies), fake endpoints
+  (`/key/delete`, `/user/delete`, `/jwt/key/mapping/update|delete`, `is_active` honored by enforcement, `/_test/fail`, `/_test/invariants`),
+  chained outbox (`enqueue(..., payload, depends_on)`, `WriteContext.enqueue(..., payload, chain)`, worker `held`, `_FROZEN`, `_GONE_OK`, key block/unblock and mapping update builders),
+  `tests/test_repo_hygiene.py`, `.public-denylist` gitignored. Tests: `tests/litellm/test_fake_lifecycle.py` (6), `test_client_lifecycle.py` (1),
+  `tests/test_outbox_chain.py` (5), hygiene (1); `tests/test_schema.py` now matches §8.2 v0.3 (16 tables).
+
 ## Next
 - Phase 1b (PLAN §2b), one step per session, in order:
-  - Step 1b.1: schema, fake LiteLLM lifecycle endpoints, client methods, chained outbox, repo hygiene test.
   - Step 1b.2: kick, restore, move, delete and their permissions (backend).
   - Step 1b.3: onboarding API, pending placement, place (backend).
   - Step 1b.4: UI member actions in Group Members and the side panel.
@@ -185,6 +191,11 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 20. **Public repository (D25, NFR10).** Placeholders only; hygiene test scans tracked files. Before publishing, scan the full git history and provide internal names via a gitignored `.public-denylist`.
 21. **F5/F6 wording.** F6 (a manager's own cap, DR9) is unrelated to sync and is kept; F5 and F7 are replaced, F8–F10 added.
 
+- Step 1b.1: SPEC §8.2 v0.3 has 16 tables (PLAN counts differently); followed the spec. A 404 on `/jwt/key/mapping/update` or `/delete` in the fake means no such mapping.
+  `/_test/fail` keys on the request path and is cleared by `/_test/reset`. The fake's `LiteLLM_JWTKeyMapping.is_active` column is added by `create_all` only on a fresh fake
+  database; an existing dev fake DB needs `scripts/dev_db.py` / a reset. `held` rows in `drain` are rows whose `depends_on` row is not `applied`; a transient error still ends the drain.
+  The hygiene test treats single-label hosts (`fake`, `postgres`) as test aliases and checks every tracked text file; lock files skip the URL check. Tooling slip: one no-op `sed -i /dev/null` call (failed, changed nothing).
+  No new API path prefix was added in this step, so `frontend/vite.config.ts` is unchanged.
 - Step 10: Chromium (headless shell) launches here without extra system libraries; no `.cache/pwlibs` workaround needed.
 - Step 10: `eslint-formatter-unix` is a root devDependency because the lint hook calls `eslint -f unix`.
 - Step 10: the scope switcher is a native `<select>` (always in the DOM, keyboard accessible); the period is the `?period=YYYY-MM` URL param.

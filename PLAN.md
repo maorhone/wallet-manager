@@ -1,6 +1,6 @@
 # PLAN.md: Wallet Manager for LiteLLM
 
-> Replaces the old PLAN.md. Source of truth: **SPEC.md v0.2** and **litellm_wallets_erd.mmd**. Every step lists the spec sections it covers (§). If this plan and the spec disagree, the spec wins: record the conflict in PROGRESS.md under "Questions for owner" and pick the safest option.
+> Replaces the old PLAN.md. Source of truth: **SPEC.md v0.3** and **litellm_wallets_erd.mmd**. Every step lists the spec sections it covers (§). If this plan and the spec disagree, the spec wins: record the conflict in PROGRESS.md under "Questions for owner" and pick the safest option.
 
 ## 0. Context
 

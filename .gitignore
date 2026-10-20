@@ -23,3 +23,4 @@ test-results/
 pgdata/
 *.log
 frontend/.e2e-state*.json
+.public-denylist
