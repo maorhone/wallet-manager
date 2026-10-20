@@ -1029,6 +1029,575 @@ These rules apply to every Phase 1b step: the §1 conventions, the write contrac
 
 ---
 
+## 2c. Steps (Phase 2: grants, scheduler, reconciliation, notifications)
+
+Every Phase 2 step follows these rules: the §1 conventions, the write contract, the §11.2 error envelope, and `./scripts/test.sh` as the only gate.
+- **Ports.** Do not change the e2e ports (test.sh uses 4120–4122). `scripts/e2e_stack.py` must keep working with its default ports for the live preview.
+- **Time budget.** Phase 2 may add at most about 60 s of pytest and 8 Playwright tests. Keep the whole run under about 5 minutes.
+- **Clock.** Nothing in `app/` calls `datetime.now()` directly. The API takes the time from `app.state.clock` and the scheduler takes it from its `clock` argument. Tests use `FakeClock` and move it forward instead of sleeping.
+- **Writes and actors.** Every LiteLLM write goes through the existing outbox. The scheduler's writes use `WriteContext` like the API does:
+  - grant jobs write as actor `system:scheduler` with role `scheduler`;
+  - reconciliation writes as actor `system:reconcile` with role `reconciliation`.
+- **Idempotent scheduler writes.** The request id of a scheduler write is `uuid5(NS, "<job>:<entity>:<id>:<event>")`. A rerun therefore finds the audit row that already exists and writes nothing (the same replay rule as §1).
+- **No AD sync anywhere** (owner decision 20/10/2026). The directory is used only for display names and role holders.
+- **Public repo.** Placeholders only (NFR10). `test_repo_hygiene.py` must keep passing.
+- **Order.** Backend steps 2.1–2.5 come first. The UI steps 2.6–2.10 are small: one screen or one tab each.
+
+### Step 2.1: Grants backend, PMO side (create, change, close, list, pool, projects)
+**Spec:** §7.3 FR-P1, P2, P6 (grant level), P7, P8; §6 PMO row; §8.1 Team rows; §11.1 PMO and grants; §11.2; §12.3 PMO pool formula; A11.
+
+**Files:**
+- `alembic/versions/0003_grants_notifications.py` (new).
+- `app/clock.py` (new).
+- `app/main.py` (`create_app(..., clock: Clock | None = None)` stores `app.state.clock`).
+- `app/services/grants.py`, `app/schemas/grants.py`, `app/routers/grants.py` (all new; register the router in `app/main.py`).
+- `app/permissions.py`.
+- `app/outbox/desired.py`.
+- `app/services/views.py` and `app/services/wallet.py` (use the effective grant amount).
+- `frontend/vite.config.ts` (proxy `/grants` and `/projects`).
+
+**Build:**
+- **Migration 0003.** No new tables or columns, because §8.2 already has them. It adds only indexes:
+  - `ix_grant_status_starts (status, starts_at)` and `ix_grant_status_expires (status, expires_at)`;
+  - `ix_grant_share_status_expires (status, expires_at)` and `ix_grant_share_upn_status (upn, status)`;
+  - a partial unique index `uq_grant_share_active (grant_id, upn) WHERE status='active'`;
+  - `uq_notification_dedupe` on `(upn, kind, (payload->>'key'))`, used by Step 2.4.
+
+  `tests/test_schema.py` stays unchanged: it checks tables and columns, and none change.
+- **`app/clock.py`:**
+  ```python
+  class Clock(Protocol):
+      def now(self) -> datetime: ...            # aware UTC
+      async def sleep(self, seconds: float) -> None: ...
+  class SystemClock: ...                        # datetime.now(UTC), asyncio.sleep
+  class FakeClock:
+      def __init__(self, start: datetime): ...
+      def advance(self, **delta) -> None: ...
+      def set(self, at: datetime) -> None: ...
+      async def sleep(self, seconds) -> None: ...   # advances, then await asyncio.sleep(0)
+  ```
+- **Effective amount and pool formulas:**
+  - The effective amount of a grant is `amount − returned`.
+  - `pool_available(db, dept_id, now) = pmo_pool − Σ effective(pending + active grants) − Σ used(grants closed in the current period)`. This is §12.3. Pending grants reserve pool money.
+  - `shared(G) = Σ amount of all shares of G`, active and closed. Money returned from a closed share goes back to the pool, not to the grant.
+- **`app/permissions.py`:**
+  - `can_manage_grants(session, p, department_id)` allows admin and PMO.
+  - `can_view_grants(session, p, department_id, group_id | None)` allows admin, plus PMO, rep or viewer on the department, plus head or viewer on the group.
+  - Both reuse `_pick` and the existing 404-vs-403 rules.
+- **`app/services/grants.py`** (all functions take `lock(PMO, department_id)` before reading any sums):
+  - `async def create_grant(ctx, principal, clock, body) -> list[dict]`:
+    - group 404 when it does not exist;
+    - a PMO whose department differs from the group's gets 422 `SCOPE_FORBIDDEN` (FR-P8: the department is always the group's own);
+    - a non-PMO, non-admin actor gets 403;
+    - `expires_at <= max(starts_at, now)`, or a non-active group, gives 422 `INVALID_REQUEST`;
+    - `amount > pool_available` gives 422 `PMO_POOL_INSUFFICIENT` with `{requested: amount, available, parent_total: pmo_pool}`.
+    - The status is `active` if `starts_at <= now`, otherwise `pending`. When active, it enqueues `/team/update` for the group.
+    - It writes a `grant` audit row.
+  - `async def patch_grant(ctx, principal, clock, grant_id, amount=None, expires_at=None)`:
+    - an increase is limited by the pool and gives `PMO_POOL_INSUFFICIENT` with `requested` = the increase;
+    - `amount < shared(G)` gives `GRANT_BELOW_SHARED` with `{requested: amount, available: shared, parent_total: amount}`;
+    - an `expires_at` before the latest active share's expiry gives `SHARE_EXPIRY_AFTER_GRANT`;
+    - a closed grant gives 422 `INVALID_REQUEST` with `details.status`;
+    - it enqueues `/team/update` when the grant is active.
+  - `async def close_grant(ctx, principal, clock, grant_id, reason)` and the shared internal `async def _close_grant(ctx, grant, now, share_reason)`:
+    - set the status to `closed` and `closed_at = now`;
+    - set `used` = Σ of the shares' `used`, and `returned = amount − used`;
+    - enqueue `/team/update`.
+    - In this step the grant has no shares yet; Step 2.2 makes it close the active shares first.
+  - `async def list_grants(db, principal, filters) -> list[dict]`. Each row: `{id, department_id, group_id, group_name, project_ref, purpose, amount, model, starts_at, expires_at, status, shared, unshared, used, returned, days_left, sync_status, actions:{edit, close, share}}`.
+  - `pmo_pool(db, principal, dept_id, period)` returns `{department_id, period, pool, active_grants, used, returned, available, actions:{create_grant}}`. It reuses `wallet.pmo_wallet`.
+  - `project_summary(db, principal, project_ref)` returns `{project_ref, totals:{amount, shared, used, returned}, grants:[row]}`. It includes only the grants the actor can see, and returns 404 if none are visible.
+- **`app/outbox/desired.py`:**
+  - Team `max_budget` = base + Σ effective amount of **all** active grants. This fixes the current filter `model IS NULL`: FR-P2 adds A to `max_budget` even when X is set.
+  - Team `model_max_budget[X]` = pot + Σ effective amount of active grants for X.
+- **Endpoints.** The reason travels in `X-Change-Reason` as in §1. The `{reason}` body field on close is optional and only echoed back.
+
+  | Endpoint | Body | Who | Errors |
+  |---|---|---|---|
+  | `POST /grants` | `{group_id, amount, model?, starts_at, expires_at, project_ref, purpose}` | admin, PMO | 403, 404, 422 `SCOPE_FORBIDDEN` / `PMO_POOL_INSUFFICIENT` / `INVALID_REQUEST` |
+  | `PATCH /grants/{id}` | `{amount?, expires_at?}` | admin, PMO | 403, 404, 422 `PMO_POOL_INSUFFICIENT` / `GRANT_BELOW_SHARED` / `SHARE_EXPIRY_AFTER_GRANT` / `INVALID_REQUEST` |
+  | `POST /grants/{id}/close` | `{reason}` | admin, PMO | 403, 404, 422 `INVALID_REQUEST` (already closed) |
+  | `GET /grants?department=&group=&status=&project_ref=` | | visible scopes | 403 / 404 per filter scope |
+  | `GET /departments/{id}/pmo-pool?period=` | | admin, PMO, rep, viewer | 403, 404, 422 (future period) |
+  | `GET /projects/{project_ref}/summary` | | visible grants only | 404 |
+
+  Write responses list entities `grant` (values `{status, amount, expires_at, returned}`) and `group` (sync of `/team/update`).
+
+**Tests:**
+- `tests/api/test_grants.py`:
+  - `test_create_active_grant_raises_team_max_budget_after_drain`
+  - `test_model_grant_raises_max_budget_and_pot`
+  - `test_future_grant_pending_reserves_pool_no_litellm_call`
+  - `test_amount_above_pool_422_with_numbers`
+  - `test_pmo_other_department_group_scope_forbidden`
+  - `test_head_viewer_employee_403`
+  - `test_expiry_before_start_invalid`
+  - `test_patch_increase_checks_pool`
+  - `test_patch_decrease_below_shared_grant_below_shared` (inserts a share row directly)
+  - `test_patch_expiry_before_share_expiry_422`
+  - `test_close_returns_amount_to_pool_and_lowers_team`
+  - `test_replay_same_idempotency_key_200`
+- `tests/api/test_grants_read.py`:
+  - `test_list_filters_and_visibility`
+  - `test_pmo_pool_formula`
+  - `test_project_summary_aggregates_visible_grants`
+- `tests/api/test_grants_concurrency.py::test_a11_concurrent_grants_one_pool_insufficient`. It uses `asyncio.gather` with the `asyncio.sleep(0)` patch trick from the split lock test.
+- `tests/unit/test_clock.py::test_fake_clock_advance_and_sleep`
+
+**test.sh after:** unchanged.
+
+### Step 2.2: Shares backend, attribution (7.3.1), FR-P4/P5 member values, share close
+**Spec:** §7.3 FR-P3, P4, P5, P6 (share level); §7.3.1; §8.1 Team member rows; §8.2 grant_share; §10 membership (both temp fields together); DR9/FR-G5; U2 (API half); §12.5.1 shares.
+
+**Files:**
+- `app/services/attribution.py` (new; pure functions plus the spend loader).
+- `app/services/shares.py` (new).
+- `app/schemas/grants.py` and `app/routers/grants.py`.
+- `app/services/grants.py` (`_close_grant` closes the active shares first).
+- `app/permissions.py` (`can_share(session, p, group_id)`: admin, plus rep of the department, plus head of the group).
+- `app/outbox/desired.py`.
+- `app/litellm_client/models.py` (relax `TeamMemberUpdate` so that `temp_budget_increase=0` with `temp_budget_expiry=None` is valid; both keys are always sent).
+- `fake_litellm/main.py` (`/team/member_update` returns 400 if only one of the two temp fields is present).
+- `app/services/views.py` (`/me/wallet` share rows).
+
+**Build:**
+- **`attribution.py`:**
+  ```python
+  @dataclass(frozen=True)
+  class ShareSpan: id: int; amount: Decimal; expires_at: datetime; used: Decimal | None = None  # closed: stored used
+  def attribute(member_spend: Decimal, base_cap: Decimal, shares: Sequence[ShareSpan]) -> dict[int, Decimal]
+      # sort by (expires_at, id); used(s) = clamp(spend − base − Σ used(earlier), 0, s.amount)
+  def attribute_periods(spend_by_period: Mapping[str, Decimal], base_cap: Decimal,
+                        shares_by_period: Mapping[str, Sequence[ShareSpan]]) -> dict[int, Decimal]
+      # sum per share across periods, clamp to amount (grant spanning a period reset)
+  async def member_spend_by_period(db, client, reader, upn, team_id, since, now, tz) -> dict[str, Decimal]
+  ```
+  `member_spend_by_period` takes its numbers from three sources:
+  - **Current period:** `client.team_info(team_id).team_memberships[upn].spend`.
+  - **Earlier periods since `grant.starts_at`:** `reader.spend_rows(start, end)` filtered by team and user.
+  - **If LiteLLM is unreachable:** the `spend_snapshot` employee rows, with a WARNING log.
+- **`app/services/shares.py`.** Every function takes `lock(GROUP, grant.group_id)` and then loads the grant `FOR UPDATE`.
+  - `create_shares(ctx, principal, clock, grant_id, rows)` is a bulk, all-or-nothing write. It checks each row in this order:
+    1. role (`can_share`), else 403/404;
+    2. the grant is active, else 422 `INVALID_REQUEST`;
+    3. per row: self gives `SELF_ALLOCATION_FORBIDDEN` with `details.owner_role`; a head targeting a co-head, or a upn outside the grant's group, gives `SCOPE_FORBIDDEN` (reuse `target_tier`);
+    4. the employee is not active: 409 `MEMBER_STATE_CONFLICT`;
+    5. the upn already has an active share on this grant: 422 `INVALID_REQUEST` with `details.reason = "share_exists"`;
+    6. `e > E` gives `SHARE_EXPIRY_AFTER_GRANT`; `e <= now` gives `INVALID_REQUEST`;
+    7. `shared(G) + Σ new > A` gives `SHARE_EXCEEDS_GRANT` with `{requested, available: A − shared, parent_total: A}`.
+
+    Bulk errors carry `details.rows`. Each new share enqueues `/team/member_update` (entity `employee`).
+  - `patch_share(ctx, principal, clock, grant_id, share_id, amount=None, expires_at=None)` applies the same checks, then enqueues `/team/member_update`.
+  - `async def close_shares(ctx, shares, now, reason: Literal["expiry","move","manual"], client, reader) -> list[int]` is the one closing routine used by everything. It:
+    - computes `used` with `attribute_periods` over the employee's shares in each period (active, plus closed ones with their stored `used`);
+    - sets `returned = amount − used`, `status=closed` and `closed_reason`;
+    - adds `grant.returned += returned`;
+    - enqueues `/team/member_update` for the employee and `/team/update` for the group;
+    - writes a `grant_share` audit row.
+  - `close_share(...)` is the route wrapper and always uses reason `manual`.
+  - `_close_grant` calls `close_shares(..., share_reason)` first. After that, `grant.used = Σ shares.used` and `grant.returned = amount − used`.
+- **Desired member values (`/team/member_update`, rebuilt at apply time):**
+  - `temp_budget_increase = Σ active share amounts`.
+  - `temp_budget_expiry = min(active share expires_at)`.
+  - With no active shares, send `0` and `null`. Both keys are always sent (FR-P4).
+  - `model_max_budget[X] = personal cap + Σ active shares of grants with model X` (FR-P5).
+- **`/me/wallet`.** Share rows become `{share_id, grant_id, project_ref, model, amount, used, expires_at, days_left}`. `used` is attributed from the snapshot spend.
+- **Endpoints:**
+
+  | Endpoint | Body | Who | Errors |
+  |---|---|---|---|
+  | `GET /grants/{id}/shares` | | admin, PMO, rep, head of the group, viewer of the scope | 403, 404 |
+  | `POST /grants/{id}/shares` | `[{upn, amount, expires_at}]` | head (own group), rep (department), admin | 403, 404, 409 `MEMBER_STATE_CONFLICT`, 422 `SHARE_EXCEEDS_GRANT` / `SHARE_EXPIRY_AFTER_GRANT` / `SELF_ALLOCATION_FORBIDDEN` / `SCOPE_FORBIDDEN` / `INVALID_REQUEST` |
+  | `PATCH /grants/{id}/shares/{share_id}` | `{amount?, expires_at?}` | same | same |
+  | `POST /grants/{id}/shares/{share_id}/close` | `{reason}` | same | 403, 404, 422 `INVALID_REQUEST` (already closed) |
+
+  Share rows: `{id, upn, display_name, amount, expires_at, status, used, returned, closed_reason, sync_status, actions:{edit, close}}`.
+
+**Tests:**
+- `tests/unit/test_attribution.py`:
+  - `test_base_first_then_earliest_expiry`
+  - `test_clamp_zero_and_amount`
+  - `test_closed_share_used_counts_as_earlier`
+  - `test_period_reset_sums_periods`
+  - `test_tie_on_expiry_ordered_by_id`
+- `tests/unit/test_desired_member.py`:
+  - `test_temp_increase_sum_and_earliest_expiry`
+  - `test_no_shares_sends_zero_and_null_together`
+  - `test_model_share_raises_member_model_cap`
+- `tests/api/test_shares.py`:
+  - `test_share_writes_temp_fields_after_drain`
+  - `test_sum_above_grant_share_exceeds_grant`
+  - `test_expiry_after_grant_422`
+  - `test_head_shares_to_self_self_allocation_forbidden` (U2 API)
+  - `test_rep_shares_to_group_head_ok`
+  - `test_head_to_cohead_scope_forbidden`
+  - `test_upn_outside_group_scope_forbidden`
+  - `test_second_active_share_same_upn_invalid`
+  - `test_close_share_used_returned_pool_and_team_lowered`
+  - `test_close_grant_closes_shares_then_returns_remainder`
+  - `test_viewer_pmo_cannot_share_403`
+- `tests/litellm/test_fake_lifecycle.py::test_member_update_temp_fields_must_come_together`
+- `tests/api/test_me_wallet.py::test_share_rows_have_project_used_expiry`
+
+**test.sh after:** unchanged.
+
+### Step 2.3: Scheduler process, injectable clock, grant and share activation/expiry, FR-P4 recompute, share closing on move and delete
+**Spec:** §5.1 Scheduler; §7.3 FR-P2, P4, P6; §7.3.1; §9.3 move and delete rows; §12.6 F3 step 4 and F5 step 2; NFR4; A1; A9 (with a share); owner requirements 1–2.
+
+**Files:**
+- `app/scheduler/__init__.py`, `app/scheduler/__main__.py` (`python -m app.scheduler`), `app/scheduler/loop.py`, `app/scheduler/jobs.py` (all new).
+- `app/db.py` (`LockKind.JOB = 5`).
+- `app/config.py`, `.env.example`.
+- `app/services/lifecycle.py` (fill in `close_member_shares`).
+- `app/metrics.py`.
+- `fake_litellm/{controls,enforcement,main}.py` (fake clock).
+- `scripts/e2e_stack.py` (start the scheduler).
+- `tests/conftest.py` (fixtures `fake_clock` and `run_job`).
+
+**Build:**
+- **Settings:**
+  - `scheduler_grants_interval_s = 60`
+  - `scheduler_notify_interval_s = 900` (used by Step 2.4)
+  - `reconcile_interval_min = 5` (used by Step 2.5)
+  - `scheduler_lock_timeout_s = 300`
+- **`app/scheduler/loop.py`:**
+  ```python
+  @dataclass(frozen=True)
+  class Job: name: str; lock_id: int; interval: timedelta; run: Callable[[], Awaitable[object]]; run_at_start: bool
+  async def run_loop(jobs: Sequence[Job], session_factory, clock: Clock, *, stop: asyncio.Event) -> None
+  def build_jobs(settings, session_factory, client, reader, directory, clock) -> list[Job]
+  async def main(settings: Settings | None = None) -> None   # SystemClock, SIGTERM sets stop
+  ```
+  - Each job's next run time is kept in memory.
+  - When a job is due, the loop calls `pg_try_advisory_lock(5, job.lock_id)` on a dedicated connection. If another replica holds the lock, the job is skipped and logged. Otherwise the job runs under `asyncio.wait_for(timeout)` and the lock is released.
+  - An exception is logged and counted, and the loop keeps going.
+  - It sleeps with `clock.sleep(min(time to the next due job, 1 s))`.
+  - Grants: lock id 1, runs at start. Notifications: lock id 2, runs at start. Reconcile: lock id 3, first run after one interval.
+- **Restart safety.**
+  - All state lives in the DB (statuses and timestamps), so a restart catches up on everything that is overdue.
+  - The jobs select rows with `FOR UPDATE SKIP LOCKED` and re-check `status` in the `UPDATE ... WHERE status='active'`. Two replicas therefore never close the same row twice, even without the job lock.
+- **Metrics:** `wm_scheduler_job_runs_total{job,outcome}` and `wm_scheduler_job_last_success_timestamp{job}`.
+- **`app/scheduler/jobs.py`:**
+  ```python
+  @dataclass
+  class GrantsResult: activated: int; shares_closed: int; grants_closed: int; members_recomputed: int
+  async def run_grants(session_factory, client, clock, *, reader, settings) -> GrantsResult
+  ```
+  It runs these phases in order, with one transaction per grant:
+  1. **Activate:** pending grants with `starts_at <= now` become `active` and enqueue `/team/update` (FR-P2).
+  2. **Close expired shares:** active shares with `expires_at <= now` are closed with reason `expiry`, in expiry order (`close_shares`).
+  3. **Close expired grants:** active grants with `expires_at <= now` go through `_close_grant(..., share_reason="expiry")`.
+  4. **FR-P4 recompute:** every employee touched in phases 2–3 gets exactly one `/team/member_update`. Both temp fields are rebuilt at apply time from the shares that are still active.
+
+  Each event uses the deterministic request id `uuid5(NS, "grants:<entity>:<id>:<event>")`, so a rerun is a no-op.
+- **`close_member_shares(ctx, upn, reason)`.**
+  - It closes the employee's active shares with reason `move` or `manual`. The returns and team lowering are those of FR-P6, computed with the spend in the **old** team while that membership still exists.
+  - Its outbox rows are **not** chained before the move chain, so they never hold up the move. The old team's `/team/update` is rebuilt at apply time.
+  - The signature gains `clock, client, reader` as keyword arguments. `move` and `delete_member` pass them from `request.app.state`.
+- **Fake LiteLLM.**
+  - `POST /_test/clock {offset_s}` and `GET /_test/clock`; `/_test/reset` clears the offset.
+  - `fake_now()` replaces `datetime.now(UTC)` in `enforcement.py`, including the temp-increase expiry check (R2).
+- **`scripts/e2e_stack.py`.** Also starts `python -m app.scheduler` with `SCHEDULER_GRANTS_INTERVAL_S=2`, `SCHEDULER_NOTIFY_INTERVAL_S=2` and the default reconcile interval (5 min, first run after one interval).
+  - This is the same for the test.sh stack (4120–4122) and the live preview (4100/4111/4112).
+  - The live preview also gets `SEED_GRANTS=1`, decided by the API port being the default 4111 (see Step 2.4 seed).
+- **Unchanged:** the outbox, snapshot and overallocation loops stay in `python -m app.worker`.
+
+**Tests:**
+- `tests/scheduler/test_loop.py`:
+  - `test_jobs_run_at_their_intervals_with_fake_clock`
+  - `test_job_exception_logged_loop_continues`
+  - `test_second_replica_skips_while_job_lock_held`
+  - `test_stop_event_ends_loop`
+- `tests/scheduler/test_grants_job.py`:
+  - `test_pending_grant_activates_at_start_time`
+  - `test_share_expiry_closes_returns_and_recomputes_next_share` (two shares, the earliest expires, the member gets the second share's amount and expiry)
+  - `test_grant_expiry_closes_all_shares_and_unshared_remainder`
+  - `test_run_twice_is_noop`
+  - `test_two_concurrent_runs_never_double_close`
+  - `test_restart_catches_up_on_overdue`
+- `tests/api/test_member_move.py`:
+  - `test_move_closes_active_shares_reason_move` (replaces the hook test `test_move_calls_close_member_shares_hook`, which is a spec change)
+  - `test_move_share_return_does_not_hold_move_chain`
+- `tests/api/test_member_delete.py::test_delete_closes_shares_reason_manual`
+- `tests/contract/test_a1_temp_increase.py::test_a1_increase_expires_without_external_action[fake]`. It moves the fake clock 3 min; `[real]` waits for real and is skipped without `LITELLM_BASE_URL`.
+- `tests/e2e_backend/test_a1_wm.py::test_a1_share_expiry_blocks_then_scheduler_closes_and_returns`
+- `tests/e2e_backend/test_move_invariant.py::test_a9_move_with_active_share_closes_and_returns_to_pool`
+
+**test.sh after:** test.sh itself is unchanged. The e2e stack now also runs the scheduler.
+
+### Step 2.4: Notifications backend (FR-N1 triggers, FR-N2 mute, `/me/notifications*`)
+**Spec:** §7.9 FR-N1, FR-N2; §8.2 notification and notification_pref; §11.1 Session and self; §12.5.3 (group head notified after a grant); §12.6 F3 step 1 and F5 step 4; §9.5; owner requirement 4.
+
+**Files:**
+- `app/services/notifications.py`, `app/notify_email.py`, `app/routers/notifications.py`, `app/schemas/notifications.py` (all new).
+- `app/scheduler/jobs.py` (`run_notifications`).
+- `app/services/{onboarding,lifecycle,grants}.py` (the event hooks).
+- `app/services/owners.py` (reuse `holders()`).
+- `app/config.py`, `.env.example`.
+- `seed/dev.yaml` and `app/seed.py` (`grants:` section).
+
+**Build:**
+- **Kinds.** Critical kinds cannot be muted.
+
+  | kind | trigger | recipients | critical |
+  |---|---|---|---|
+  | `employee_80`, `employee_100` | employee used ≥ 80% / 100% of their total (snapshot plus `employee_wallet`) | the employee | 100 only |
+  | `group_80`, `group_100` | group used ≥ 80% / 100% (`group_wallet`) | group heads | 100 only |
+  | `grant_expiring` | active grant with `expires_at − now ≤ 7 d` | group heads and the department's PMO | no |
+  | `grant_underused` | attributed used < 20% of the amount and ≤ 7 d left | PMO and group heads | no |
+  | `pending_placement` | onboarding or place leaves a user pending | the department's reps, or platform admins when the department is unknown | no |
+  | `member_moved_in` | move | heads of the target group | no |
+  | `outbox_failed` | a `litellm_write` row is `failed` | platform admins | yes |
+  | `grant_received` | grant created (§12.5.3, F3) | group heads | no |
+  | `drift_repeated` | used by Step 2.5 | platform admins | yes |
+
+- **`async def notify(db, upns, kind, scope_kind, scope_id, payload, key) -> int`.**
+  - It skips users who muted a non-critical kind.
+  - It inserts with `ON CONFLICT DO NOTHING` on `uq_notification_dedupe`. Keys look like `emp:<period>:80`, `grant:<id>:expiring` or `outbox:<id>`.
+  - If `notify_email_enabled` (default `False`) is set, it also calls `notify_email.send(settings, upn, subject, body)` (smtplib to `smtp_host`, placeholder `smtp.corp.example`). There is no relay in tests.
+- **Where it is called.**
+  - Event kinds are written inside the domain write's transaction: `onboard`/`place` for pending, `move`, and `create_grant`.
+  - Threshold kinds come from `async def run_notifications(session_factory, client, clock, *, settings, directory) -> NotifyResult(created: dict[str, int])`.
+- **Endpoints.** These are personal UI state, not allocations. They need CSRF but no reason header and no audit row (new question 3).
+
+  | Endpoint | Body / response | Errors |
+  |---|---|---|
+  | `GET /me/notifications?unread=` | `{items:[{id, kind, critical, scope_kind, scope_id, payload, created_at, read_at}], unread_count, prefs:[{kind, critical, muted}]}` | 401 |
+  | `POST /me/notifications/{id}/read` | → `{id, read_at}` | 401, 404 (not the caller's own) |
+  | `PUT /me/notification-prefs` | `{"<kind>": bool}` → prefs | 401, 422 `INVALID_REQUEST` (unknown kind, or muting a critical kind) |
+
+- **Seed.** A `grants:` section adds one active grant (project `PRJ-ATLAS`, A2, 30,000, expiring in 60 days) with one share to `avi@corp.example`.
+  - It is applied only when `Settings.seed_grants` is true (default false).
+  - The pytest fixtures and the test.sh e2e stack therefore keep the Phase 1 numbers. The PMO user `pmo@corp.example` already exists.
+
+**Tests:**
+- `tests/api/test_notifications.py`:
+  - `test_list_mark_read_own_only_404_other`
+  - `test_mute_noncritical_suppresses_new`
+  - `test_mute_critical_422`
+  - `test_unknown_kind_422`
+- `tests/scheduler/test_notifications_job.py`:
+  - `test_employee_80_and_100`
+  - `test_group_80_and_100_to_heads`
+  - `test_grant_expiring_7_days`
+  - `test_grant_underused`
+  - `test_outbox_failed_to_admins`
+  - `test_run_twice_no_duplicates`
+- `tests/api/test_notification_events.py`:
+  - `test_pending_placement_notifies_rep_or_admins_when_unknown`
+  - `test_move_notifies_new_group_head`
+  - `test_grant_created_notifies_group_head`
+- `tests/unit/test_notify_email.py::test_email_disabled_by_default_no_smtp`
+
+**test.sh after:** unchanged.
+
+### Step 2.5: Reconciliation (FR-RC1, RC2, RC3) with a drift log and repeated-drift alert
+**Spec:** §7.7; §8.1 (all owned fields; roles are excluded per §6); DR5; §5.3; NFR4 and NFR7 (drift count); §12.5.5 (drift corrections log).
+
+**Files:**
+- `app/services/reconcile.py` (new; pure diff plus the job).
+- `app/scheduler/jobs.py` (`run_reconcile`).
+- `app/outbox/desired.py` (expose `desired_fields(session, settings, object, id) -> dict`, reusing the builders).
+- `app/litellm_client/{client,models}.py` (`jwt_mapping_list()` if missing).
+- `fake_litellm/main.py` (`GET /jwt/key/mapping/list` if missing; `/key/list` returns `metadata`, `blocked`, `team_id`, `max_parallel_requests`, `rpm_limit`).
+- `app/metrics.py`, `app/config.py`.
+
+**Build:**
+- **Settings:** `reconcile_interval_min = 5`, `reconcile_drift_alert_count = 3`, `reconcile_drift_window_h = 24`.
+- **Signatures:**
+  ```python
+  @dataclass(frozen=True)
+  class FieldDrift: object: str; id: str; field: str; live: object; desired: object
+  def diff(object: str, id: str, desired: dict, live: dict) -> list[FieldDrift]
+      # Decimal tolerance 0.01; None == missing; dicts per key; datetimes to the second
+  @dataclass
+  class ReconcileResult: checked: int; drifts: list[FieldDrift]; corrected: int; skipped_in_flight: int; missing: int; alerts: int
+  async def run_reconcile(session_factory, client, clock, *, settings) -> ReconcileResult
+  ```
+- **What is compared.** These are the §8.1 owned fields:
+
+  | LiteLLM object | Live source | Fields |
+  |---|---|---|
+  | Organization | `organization_info` | `max_budget`, `budget_duration` |
+  | Team | `team_info` | `organization_id`, `max_budget`, `model_max_budget`, `tpm_limit`, `metadata.model_tpm_limit`, `team_member_*` |
+  | Membership of active and blocked employees | `team_info` | `max_budget_in_team`, `budget_duration`, `temp_budget_increase` + `temp_budget_expiry`, `model_max_budget` |
+  | Personal key | `key_list(user_id)` | `team_id`, `max_parallel_requests`, `rpm_limit`, `metadata.model_tpm_limit`, `blocked` |
+  | JWT mapping | `jwt_mapping_list` | `is_active` follows employee status |
+
+  Role fields are never compared.
+- **Skips:**
+  - Entities with any pending or failed `litellm_write` rows, checked before the live read **and again after it** (`id > max id at start`). In-flight writes are not drift.
+  - Archived groups, and employees who are `left` or `pending_placement`.
+- **Correction.** Each one is a transaction with:
+  - an `audit_log` row (actor `system:reconcile`, role `reconciliation`, entity `organization|team|employee|key|jwt_mapping`, `before={field: live}`, `after={field: desired}`, reason `drift correction`). This is the drift log. Admins read it through the existing `GET /audit?actor=system:reconcile`;
+  - one outbox row on the normal endpoint (`/organization/update`, `/team/update`, `/team/member_update`, `/key/update`, `/key/block|unblock`, `/jwt/key/mapping/update`), rebuilt at apply time. It is retried with backoff and stays `pending` until applied (RC3).
+- **Missing objects** (no membership, no key, no mapping) are logged at WARNING and counted. They are **never recreated** automatically (new question 4).
+- **Repeated drift.** When `≥ reconcile_drift_alert_count` correction audit rows exist for the same entity, id and field within the window, the job:
+  - logs a WARNING;
+  - calls `notify(admins, "drift_repeated", key=f"drift:{object}:{id}:{field}:{date}")`;
+  - increments `wm_reconcile_alerts_total`.
+- **Metrics:** `wm_reconcile_drift_total{object,field}` and `wm_reconcile_last_run_timestamp`.
+- **No fake control needed.** Tests create drift by calling the fake's management API directly through `litellm`, the way a LiteLLM UI edit would.
+
+**Tests:**
+- `tests/unit/test_reconcile_diff.py`:
+  - `test_decimal_tolerance_and_none_missing`
+  - `test_model_dict_per_key`
+  - `test_role_fields_ignored`
+- `tests/scheduler/test_reconcile_job.py`:
+  - `test_team_max_budget_drift_corrected_and_logged`
+  - `test_member_temp_fields_drift_corrected_together`
+  - `test_key_blocked_and_mapping_follow_status`
+  - `test_in_flight_entity_skipped`
+  - `test_no_drift_no_writes`
+  - `test_repeated_drift_alerts_once_per_day`
+  - `test_missing_membership_reported_not_recreated`
+  - `test_litellm_down_run_fails_cleanly_no_writes`
+  - `test_run_twice_second_is_noop_after_drain`
+
+**test.sh after:** unchanged. In the e2e stack, reconciliation first runs after 5 minutes, so it does not touch Playwright runs.
+
+### Step 2.6: UI: PMO page, Pool and Grants tabs with the create wizard (small UI step)
+**Spec:** §12.5.3 tabs 1–2 and the create wizard; §12.2 PMO row; §12.3 PMO pool and grant list; §12.7; A11 in the UI.
+
+**Files:**
+- `frontend/src/pages/pmo/{PmoPage,Pool,Grants}.tsx` (new; route `/pmo/:id/:tab` with tabs `pool|grants`).
+- `frontend/src/components/GrantList.tsx` (new; the shared §12.3 grant list, reused in Step 2.8).
+- `frontend/src/components/GrantWizard.tsx` (new; Mantine Stepper: project and purpose → group, with its current state → amount and optional model, showing the pool available and blocking above it → dates → summary with the reason).
+- `frontend/src/routes.tsx`, `frontend/src/scopes.ts` (a PMO scope routes to `/pmo/<dept>/pool`).
+- `frontend/src/api/{queries,types}.ts` (`usePmoPool(deptId, period)`, `useGrants(filters)`, `useGrantWrite()`).
+- `frontend/src/i18n/{he,errors}.ts` (`he.pmo`; add `PMO_POOL_INSUFFICIENT`, `GRANT_BELOW_SHARED`, `SHARE_EXCEEDS_GRANT`, `SHARE_EXPIRY_AFTER_GRANT` if missing).
+- `frontend/e2e/fixtures.ts` (`apiAs(page, upn)` for API setup with CSRF).
+- `frontend/e2e/pmo.spec.ts`.
+
+**Build:**
+- Pool card with available, active, used and returned. Grants table filtered by project, group, status and "expiring soon" (client side, `days_left ≤ 7`).
+- The create button shows only when `actions.create_grant` is set.
+- Reuse `WalletCard`, `SyncBadge`, `ChangeSummaryDialog` and Mantine RTL.
+
+**Tests:**
+- Vitest `GrantWizard.test.tsx`: `blocks amount above pool`, `expiry before start invalid`.
+- Playwright `pmo.spec.ts`:
+  - `PMO creates a grant through the wizard and pool available drops`
+  - `A11 PMO amount above pool is blocked and the race returns PMO_POOL_INSUFFICIENT`
+
+**test.sh after:** unchanged. Two Playwright tests are added.
+
+### Step 2.7: UI: PMO grant actions (extend, increase, close early) and Projects tab (small UI step)
+**Spec:** §12.5.3 tab 2 actions and tab 3; FR-P7; FR-P6 (close early).
+
+**Files:**
+- `frontend/src/components/GrantEditDialog.tsx` (new; modes `extend|increase|close`, with the reason).
+- `frontend/src/pages/pmo/Projects.tsx` (new; tab `projects`; one row per `project_ref`, drill-down to grants and shares through `GET /projects/{ref}/summary` and `GET /grants/{id}/shares`).
+- `frontend/src/pages/pmo/{PmoPage,Grants}.tsx`.
+- `frontend/src/api/queries.ts` (`useProjectSummary`, `useGrantShares`), `frontend/src/i18n/he.ts`.
+- `frontend/e2e/pmo.spec.ts`.
+
+**Tests:**
+- Playwright: `PMO extends then closes a grant early and the projects tab shows used and returned`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 2.8: UI: Group Grants tab with share create, change and close; wallet share rows; U5 and U2 grant half (small UI step)
+**Spec:** §12.5.2 tab 3; §12.5.1 active project shares; §12.6 F3; U2; U5.
+
+**Files:**
+- `frontend/src/pages/group/Grants.tsx` (new; `/group/:id/grants`, tab shown to head, rep, PMO, viewer and admin; actions only from the server `actions`).
+- `frontend/src/components/ShareDialog.tsx` (new):
+  - member rows with amount and expiry, defaulting to the grant's expiry and never later;
+  - the unshared remainder updates live;
+  - the actor's own row is disabled and names the owner role (DR9).
+- `frontend/src/pages/group/GroupPage.tsx` (`TABS` gains `grants`).
+- `frontend/src/components/SharesTable.tsx` (project, amount, used, expiry with days left).
+- `frontend/src/api/queries.ts` (`useShareWrite`).
+- `frontend/src/i18n/he.ts`.
+- `frontend/e2e/grants.spec.ts`.
+
+**Tests:**
+- Vitest `ShareDialog.test.tsx`: `remainder updates and blocks above grant`, `expiry capped at grant expiry`, `own row disabled`.
+- Playwright `grants.spec.ts`:
+  - `U5 PMO grant then group head share; employee sees the share with expiry; PMO sees shared and unshared` (PMO creates through the UI)
+  - `U2 group head cannot share to themselves and the API returns SELF_ALLOCATION_FORBIDDEN`
+
+**test.sh after:** unchanged. Two Playwright tests are added.
+
+### Step 2.9: UI: Department Group heads tab (small UI step)
+**Spec:** §12.5.4 tab 4; DR9; FR-D5; §12.6 F6.
+
+**Files:**
+- `app/services/views.py`: department summary gains `group_heads: [{upn, display_name, group_id, group_name, base_cap, shares, model_caps, max_parallel, rpm_limit, sync_status, actions:{edit, share}}]`. It reuses the existing permission checks.
+- `tests/api/test_department_summary.py`: new key; add `test_group_heads_rows_for_rep` (pytest).
+- `frontend/src/pages/department/GroupHeads.tsx` (new; `/department/:id/group-heads`).
+- `frontend/src/pages/department/DepartmentPage.tsx` (tab shown when any row has `actions.edit`).
+- Reuses `MemberSidePanel`: base cap through `PUT /groups/{gid}/members/caps` with one row, model caps and limits through the existing endpoints. `ShareDialog` limits the choice to the head's group's active grants.
+- `frontend/src/i18n/he.ts`, `frontend/e2e/department.spec.ts`.
+
+**Tests:**
+- Playwright: `Rep edits a group head base cap from the Group heads tab; the head's own row stays read-only`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 2.10: UI: notifications bell and preferences; Phase 2 wrap-up (small UI step)
+**Spec:** §7.9 FR-N1 and FR-N2; §12.5.1 (notification preferences); §16 Phase 2 exit.
+
+**Files:**
+- `frontend/src/components/NotificationsBell.tsx` (new; in the shell header: unread count, list drawer, mark read, a link per scope).
+- `frontend/src/components/NotificationPrefs.tsx` (new; on `MyWallet.tsx`; critical kinds shown disabled).
+- `frontend/src/pages/MyWallet.tsx`, the shell layout file.
+- `frontend/src/api/queries.ts` (`useNotifications`, `useMarkRead`, `useNotificationPrefs`).
+- `frontend/src/i18n/he.ts` (`he.notifications.kinds`).
+- `frontend/e2e/notifications.spec.ts`, `PROGRESS.md`.
+
+**Tests:**
+- Playwright: `Group head sees grant_received, marks it read, mutes grant_expiring; critical kinds cannot be muted`.
+
+**Wrap-up:**
+- Every test in the table below exists and passes. `test_repo_hygiene.py` passes.
+- Record in PROGRESS.md:
+  - the full run time (pytest growth at most about 60 s; 7 new Playwright tests);
+  - the new questions;
+  - Next = Phase 3.
+
+**test.sh after:** unchanged. Run it fully and record the time.
+
+### Phase 2 acceptance mapping
+
+| Criterion | Step | Test(s) |
+|---|---|---|
+| FR-P1 create grant, pool check | 2.1, 2.6 | `test_grants.py::test_amount_above_pool_422_with_numbers`, `::test_create_active_grant_raises_team_max_budget_after_drain`; `pmo.spec.ts` "PMO creates…" |
+| FR-P2 activation raises team and pot | 2.1, 2.3 | `test_grants.py::test_model_grant_raises_max_budget_and_pot`; `test_grants_job.py::test_pending_grant_activates_at_start_time` |
+| FR-P3 shares ≤ grant, no self-share | 2.2, 2.8 | `test_shares.py::test_sum_above_grant_share_exceeds_grant`, `::test_expiry_after_grant_422`, `::test_head_shares_to_self_self_allocation_forbidden`, `::test_rep_shares_to_group_head_ok` |
+| FR-P4 temp increase = Σ shares, earliest expiry, both fields | 2.2, 2.3 | `test_desired_member.py::*`; `test_grants_job.py::test_share_expiry_closes_returns_and_recomputes_next_share`; `test_fake_lifecycle.py::test_member_update_temp_fields_must_come_together` |
+| FR-P5 model share raises personal cap | 2.2 | `test_desired_member.py::test_model_share_raises_member_model_cap` |
+| FR-P6 close at expiry, on request, on move or delete | 2.1–2.3 | `test_grants.py::test_close_returns_amount_to_pool_and_lowers_team`, `test_shares.py::test_close_share_used_returned_pool_and_team_lowered`, `test_grants_job.py::test_grant_expiry_closes_all_shares_and_unshared_remainder`, `test_member_move.py::test_move_closes_active_shares_reason_move`, `test_member_delete.py::test_delete_closes_shares_reason_manual` |
+| FR-P7 extend, increase, below shared rejected | 2.1, 2.7 | `test_grants.py::test_patch_increase_checks_pool`, `::test_patch_decrease_below_shared_grant_below_shared`; `pmo.spec.ts` "PMO extends then closes…" |
+| FR-P8 no cross-department grant | 2.1 | `test_grants.py::test_pmo_other_department_group_scope_forbidden` |
+| §7.3.1 attribution | 2.2 | `test_attribution.py::*` |
+| FR-RC1 desired vs live every N min | 2.3, 2.5 | `test_reconcile_job.py::test_team_max_budget_drift_corrected_and_logged`; `test_loop.py::test_jobs_run_at_their_intervals_with_fake_clock` |
+| FR-RC2 fix, log, repeated-drift alert | 2.5 | `test_reconcile_job.py::test_repeated_drift_alerts_once_per_day`, `::test_key_blocked_and_mapping_follow_status`, `::test_member_temp_fields_drift_corrected_together` |
+| FR-RC3 idempotent, retried, pending until applied | 2.5 | `test_reconcile_job.py::test_run_twice_second_is_noop_after_drain`, `::test_in_flight_entity_skipped`, `::test_litellm_down_run_fails_cleanly_no_writes` |
+| FR-N1 employee 80% / 100% | 2.4 | `test_notifications_job.py::test_employee_80_and_100` |
+| FR-N1 group 80% / 100% | 2.4 | `::test_group_80_and_100_to_heads` |
+| FR-N1 grant expiring in 7 days | 2.4 | `::test_grant_expiring_7_days` |
+| FR-N1 grant under 20% used, 7 days left | 2.4 | `::test_grant_underused` |
+| FR-N1 new pending placement | 2.4 | `test_notification_events.py::test_pending_placement_notifies_rep_or_admins_when_unknown` |
+| FR-N1 employee moved in | 2.4 | `::test_move_notifies_new_group_head` |
+| FR-N1 outbox failures | 2.4 | `test_notifications_job.py::test_outbox_failed_to_admins` |
+| FR-N1 email off by default | 2.4 | `test_notify_email.py::test_email_disabled_by_default_no_smtp` |
+| FR-N2 mute non-critical | 2.4, 2.10 | `test_notifications.py::test_mute_noncritical_suppresses_new`, `::test_mute_critical_422`; `notifications.spec.ts` |
+| A1 temp increase expires with no external action | 2.3 | `test_a1_temp_increase.py::test_a1_…[fake]` (`[real]` with env), `test_a1_wm.py::test_a1_share_expiry_blocks_then_scheduler_closes_and_returns` |
+| A9 move with an active share | 2.3 | `test_move_invariant.py::test_a9_move_with_active_share_closes_and_returns_to_pool` |
+| A11 concurrent grants over the pool | 2.1, 2.6 | `test_grants_concurrency.py::test_a11_…`; `pmo.spec.ts` "A11…" |
+| U2 grant half | 2.2, 2.8 | `test_shares.py::test_head_shares_to_self_…`; `grants.spec.ts` "U2…" |
+| U5 | 2.8 | `grants.spec.ts` "U5…" |
+| Scheduler is a separate process (`python -m app.scheduler`) with fixed intervals | 2.3 | `test_loop.py::test_jobs_run_at_their_intervals_with_fake_clock`, `::test_stop_event_ends_loop`; the e2e stack starts it |
+| Injectable clock; jobs callable as `run_<job>(session_factory, client, clock)` | 2.1, 2.3 | `test_clock.py`; every `tests/scheduler/test_*_job.py` calls the job directly with `FakeClock` |
+| Safe twice and across restarts; replicas never double-close | 2.3–2.5 | `test_grants_job.py::test_run_twice_is_noop`, `::test_two_concurrent_runs_never_double_close`, `::test_restart_catches_up_on_overdue`; `test_loop.py::test_second_replica_skips_while_job_lock_held`; `test_notifications_job.py::test_run_twice_no_duplicates` |
+| No AD sync | all | no job reads the directory except for names and role holders; nothing new to test |
+| NFR10 hygiene | all | `test_repo_hygiene.py::test_tracked_files_have_no_secrets_or_internal_names` |
+
+---
+
 ## 3. Phase 1 acceptance mapping (§16 exit criteria)
 
 | Criterion | Step | Test(s) |
@@ -1114,3 +1683,12 @@ Phase 1b questions (apply the default and keep going):
 19. **In-progress guard (D23).** Move, delete and place return 409 `LIFECYCLE_IN_PROGRESS` while earlier changes are unapplied. Kick and restore are always queued in order.
 20. **Public repository (D25, NFR10).** Placeholders only (`corp.example`, `litellm.corp.example`). `.env` stays gitignored, tests generate dummy secrets, and a hygiene test scans tracked files. Before publishing, the owner should scan the full git history (not only HEAD) and provide internal names to block through a gitignored `.public-denylist`.
 21. **F5/F6 wording.** F6 (a manager's own cap, DR9) is unrelated to sync, so it is kept. F5 (move) and F7 (sync review) are replaced, and F8–F10 are added.
+
+Phase 2 questions (apply the default and keep going):
+
+22. **Manual share close.** When a group head closes a share, the unused amount goes back to the **PMO pool**, the same as expiry and move (FR-P6), not back into the grant's unshared remainder. This fails toward less group budget. A head who only wants to change the amount can use PATCH.
+23. **Clearing the temporary increase.** With no active shares the plan sends `temp_budget_increase: 0, temp_budget_expiry: null` together. This needs re-checking on the real LiteLLM version in Phase 0.
+24. **Notification read and preference writes** are exempt from the reason header and audit, because they are personal UI state (like `/auth/logout`). CSRF still applies. §11 literally says every write needs a reason. Should those two endpoints require one anyway?
+25. **Missing LiteLLM objects found by reconciliation** (no membership, key or mapping) are reported and alerted, never recreated automatically. This avoids duplicate keys.
+26. **Pending (future-dated) grants reserve PMO pool money** from creation, so two future grants cannot overbook the pool.
+27. **F1 "group heads are notified of split changes"** is not an FR-N1 trigger and is not built in Phase 2. Should it be added?
