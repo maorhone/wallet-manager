@@ -154,6 +154,9 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Flaky, unrelated to 2.7 (backend untouched): `tests/api/test_lifecycle_permissions.py::test_matrix[rep-delete]` hit the 60s
+  pytest-timeout once while FastAPI was building a route (`fastapi/params.py` in `create_app`); the file passes on rerun (51 passed).
+  Earlier, an e2e `resetData` TRUNCATE once reported a deadlock; also passed on rerun.
 - Step 2.7: `GrantEditDialog` (extend|increase|close with reason), PMO `Grants` actions column from server
   `actions`, `Projects` tab (rows aggregated client-side from `GET /grants?department=`; drill-down via
   `GET /projects/{ref}/summary` and `GET /grants/{id}/shares`), `apiPatch`, `useGrantAction/useProjectSummary/useGrantShares`.
