@@ -156,6 +156,10 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 ## Notes
 - Flaky, unrelated to 2.7 (backend untouched): `tests/api/test_lifecycle_permissions.py::test_matrix[rep-delete]` hit the 60s
   pytest-timeout once while FastAPI was building a route (`fastapi/params.py` in `create_app`); the file passes on rerun (51 passed).
+  Further 60s timeouts hit random tests during fixture setup (`tests/api/test_placement.py::test_rep_places_pending_of_own_department_then_ready`,
+  `tests/api/test_shares.py::test_blocked_member_conflict_and_patch`, `tests/api/test_member_defaults.py::test_member_defaults_permissions`
+  inside `yaml.safe_load` of the seed file, a pure-CPU parse): the whole process stalls (one run took 406s for 100 tests), so the
+  sandbox is starved at times; the tests pass in 2-9s alone and in full green runs (453 passed). Not caused by Step 2.7 (frontend only).
   Earlier, an e2e `resetData` TRUNCATE once reported a deadlock; also passed on rerun.
 - Step 2.7: `GrantEditDialog` (extend|increase|close with reason), PMO `Grants` actions column from server
   `actions`, `Projects` tab (rows aggregated client-side from `GET /grants?department=`; drill-down via
