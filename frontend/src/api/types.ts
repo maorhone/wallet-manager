@@ -247,4 +247,46 @@ export interface AuditEntry {
   }[];
 }
 
+export interface PmoPool {
+  department_id: number;
+  period: string;
+  pool: number;
+  active_grants: number;
+  used: number;
+  returned: number;
+  available: number;
+  actions: { create_grant: boolean };
+}
+
+export interface Grant {
+  id: number;
+  department_id: number;
+  group_id: number;
+  group_name: string;
+  project_ref: string;
+  purpose: string;
+  amount: number;
+  model: string | null;
+  starts_at: string;
+  expires_at: string;
+  status: 'pending' | 'active' | 'closed';
+  shared: number;
+  unshared: number;
+  used: number;
+  returned: number;
+  days_left: number | null;
+  sync_status: SyncStatus;
+  actions: { edit: boolean; close: boolean; share: boolean };
+}
+
+export interface GrantIn {
+  group_id: number;
+  amount: number;
+  model: string | null;
+  starts_at: string;
+  expires_at: string;
+  project_ref: string;
+  purpose: string;
+}
+
 export type Policies = Record<string, { min?: number; default?: number; max?: number }>;

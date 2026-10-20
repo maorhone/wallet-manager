@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, request, type Page } from '@playwright/test';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 
@@ -16,6 +16,29 @@ export async function loginAs(page: Page, upn: string) {
   expect(res.ok()).toBeTruthy();
   const cookies = await page.context().cookies();
   expect(cookies.some((c) => c.name === 'wm_session')).toBeTruthy();
+}
+
+/** A separate API session as `upn` (own cookies + CSRF) for setup and races, independent of the page. */
+export async function apiAs(upn: string) {
+  const ctx = await request.newContext({ baseURL: state().api });
+  const login = await ctx.post('/auth/dev/login', { data: { upn } });
+  expect(login.ok()).toBeTruthy();
+  const csrf = (await ctx.storageState()).cookies.find((c) => c.name === 'wm_csrf')?.value ?? '';
+  const write = (method: 'post' | 'put' | 'patch', path: string, data: unknown, reason = 'e2e') =>
+    ctx[method](path, {
+      data,
+      headers: {
+        'X-CSRF-Token': decodeURIComponent(csrf),
+        'Idempotency-Key': crypto.randomUUID(),
+        'X-Change-Reason': encodeURIComponent(reason),
+      },
+    });
+  return {
+    get: (path: string) => ctx.get(path),
+    post: (path: string, data: unknown, reason?: string) => write('post', path, data, reason),
+    put: (path: string, data: unknown, reason?: string) => write('put', path, data, reason),
+    dispose: () => ctx.dispose(),
+  };
 }
 
 /** Re-seed the database and reset the fake LiteLLM (same as `scripts/seed.py --reset`). */

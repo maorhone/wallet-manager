@@ -80,7 +80,11 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   share is closed (reason `expiry`) and its unused part returns to the grant; an expired grant closes its remaining shares and
   returns the rest to the pool. Moving or deleting a member closes their active shares first (reason `move` / `manual`), with
   usage taken from the old team; the return never holds up the move.
-- UI for PMO and group heads - Planned (Steps 2.6-2.9).
+- PMO page `/pmo/<dept>/pool|grants` - Done (Step 2.6): the pool card (size, active grants, used, returned, available), a grant
+  list filtered by project, group, status and "expiring soon" (7 days or less), and a create wizard (project and purpose, group
+  with its current state, amount with the pool available and a block above it, optional model, dates, then a summary with the
+  reason). A pool race returns the `PMO_POOL_INSUFFICIENT` message. The create button needs `actions.create_grant`.
+- UI for PMO extend/increase/close and Projects tab, group heads' Grants tab - Planned (Steps 2.7-2.9).
 
 ### 4.5 Scheduler - Phase 2: In progress (grants job Done in Step 2.3)
 
@@ -117,7 +121,8 @@ The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 ### 4.8 UI screens - Phase 1/1b: Done; Phase 2: Planned
 
 RTL Hebrew React app: my wallet, group (overview, members with actions, history), department (overview, split, pending),
-scope switcher, change-summary dialog. Planned: PMO page (pool, grants, projects), group Grants tab with share dialogs,
+scope switcher, change-summary dialog, PMO page (pool and grants with the create wizard; Done in Step 2.6; a PMO scope opens
+`/pmo/<dept>/pool`). Planned: PMO grant actions and projects tab, group Grants tab with share dialogs,
 department group-heads tab, notifications.
 
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned

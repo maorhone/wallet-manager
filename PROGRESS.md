@@ -1,11 +1,12 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done. Next = Step 2.6.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) done. Next = Step 2.7.
 Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 2.6: UI PMO page with Pool and Grants tabs and the create-grant wizard (see Notes).
 - Step 2.5: FR-RC1–3 reconciliation, field-level drift log, repeated-drift alerts and metrics;
   delayed scheduler registration (lock 3), typed mapping list client/fake endpoint, and clearing
   of owned limits through desired-state outbox updates. Fourteen new tests cover diff rules,
@@ -146,12 +147,21 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 2.6: UI PMO page, Pool and Grants tabs with the create wizard. Not started.
+- Step 2.7: UI PMO grant actions (extend, increase, close early) and Projects tab.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.6: PMO page (`/pmo/:id/:tab`, pool|grants), `GrantList` (shared, optional `actions` column for 2.7),
+  `GrantWizard` (the final summary step reuses `ChangeSummaryDialog`), `usePmoPool/useGrants/useGrantWrite`,
+  `apiAs` e2e helper. A department scope with role `pmo` routes to `/pmo/<dept>/pool`. Vitest +2, Playwright +2.
+  The wizard group list and model choices come from the department summary (PMO may view it); `he.pmo` added;
+  the four error codes already existed in `errors.ts`. No spec/PLAN differences.
+  Latest runs: pytest 453 passed / 5 skipped, vitest 26, Playwright 29 (all green when run to completion).
+  Intermittent, unrelated flakes seen in three full runs, each passing alone and on rerun: Playwright
+  `wallet.spec.ts` U4 (snapshot timing), `resetData()` failing in `scripts/seed.py --reset` (hit
+  `member-actions.spec.ts` U10), and pytest `tests/api/test_shares.py::test_upn_outside_group_scope_forbidden`.
 - Step 2.5: reconciliation uses the existing desired builders, durable outbox, audit endpoint and
   critical notifications. Delayed five-minute scheduler job uses lock id 3 and the injected clock.
   Owned allocation/status fields are repaired; roles are excluded, missing objects are warned and

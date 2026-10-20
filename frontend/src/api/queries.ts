@@ -10,6 +10,8 @@ import type {
   AuditEntry,
   DepartmentSummary,
   DevUser,
+  Grant,
+  GrantIn,
   GroupSummary,
   Me,
   Member,
@@ -18,6 +20,7 @@ import type {
   MoveTarget,
   MyWallet,
   PendingPlacement,
+  PmoPool,
   Policies,
   Status,
   UsagePoint,
@@ -250,6 +253,38 @@ export const useDepartmentGroups = (deptIds: number[], period: string) =>
       ),
     }),
   });
+
+export const usePmoPool = (deptId: string, period: string) =>
+  useQuery({
+    queryKey: ['pmo', deptId, 'pool', period],
+    queryFn: () => apiFetch<PmoPool>(`/departments/${deptId}/pmo-pool?period=${period}`),
+    enabled: period !== '',
+    refetchInterval: 15000,
+  });
+
+export const useGrants = (filters: { department?: string; group?: string }) => {
+  const qs = new URLSearchParams(
+    Object.entries(filters).filter((e): e is [string, string] => !!e[1]),
+  ).toString();
+  return useQuery({
+    queryKey: ['grants', qs],
+    queryFn: () => apiFetch<Grant[]>(`/grants${qs ? `?${qs}` : ''}`),
+    refetchInterval: (q) => (q.state.data?.some((g) => g.sync_status === 'pending') ? 2000 : 15000),
+  });
+};
+
+/** Create a grant (one POST per confirm); the pool, grant lists and group views refresh. */
+export const useGrantWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: GrantIn; reason: string; key: string }) =>
+      apiPost<WriteResponse>('/grants', v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: () => {
+      for (const k of ['pmo', 'grants', 'department', 'group', 'audit'])
+        qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+};
 
 export const useMyUsage = (from: string, to: string) =>
   useQuery({
