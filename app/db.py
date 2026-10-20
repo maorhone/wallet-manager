@@ -36,6 +36,7 @@ class LockKind(enum.IntEnum):
     GROUP = 2  # member caps and member model caps
     PMO = 3  # Phase 2
     EMPLOYEE = 4  # member lifecycle actions on one person (id = employee_lock_id(upn))
+    JOB = 5  # scheduler job locks (session-level, one replica per job)
 
 
 def employee_lock_id(upn: str) -> int:

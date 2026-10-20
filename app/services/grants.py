@@ -189,8 +189,9 @@ async def patch_grant(
 
 
 async def _close_grant(
-    ctx: WriteContext, g: Grant, now: datetime, role: str, share_reason: str, client, reader
-):
+    ctx: WriteContext, g: Grant, now: datetime, role: str, share_reason: str, client, reader,
+    member_update: bool = True,
+):  # fmt: skip
     """Close ``g`` and return the unused money to the pool (FR-P6); returns the response entities.
 
     ``share_reason`` is the reason recorded on shares closed with the grant.
@@ -202,8 +203,9 @@ async def _close_grant(
         )
     )
     await shares_service.close_shares(
-        ctx, open_shares, now, share_reason, client, reader, role, team_update=False
-    )
+        ctx, open_shares, now, share_reason, client, reader, role, team_update=False,
+        member_update=member_update,
+    )  # fmt: skip
     await ctx.db.flush()
     used = (await _shares(ctx.db, [g.id])).get(g.id, (ZERO, ZERO))[1]
     g.status, g.closed_at, g.used, g.returned = "closed", now, used, g.amount - used

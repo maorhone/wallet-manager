@@ -1,9 +1,10 @@
 import pytest
+from grants import shared_grant
 from lifecycle import A1, DANI, act, employee, last_id, outbox
 from sqlalchemy import select
 
 from app.litellm_client import LiteLLMPermanentError, UserDelete
-from app.models import EmployeeModelCap
+from app.models import EmployeeModelCap, Grant, GrantShare
 from app.outbox.worker import drain
 
 
@@ -59,3 +60,17 @@ async def test_deleted_hidden_from_members_and_sums(login, put, provisioned):
     # and caps can no longer be written for them
     r = await put(admin, f"/groups/{A1}/members/caps", [{"upn": DANI, "base_cap": 1}])
     assert r.status_code == 422 and r.json()["code"] == "SCOPE_FORBIDDEN"
+
+
+async def test_delete_closes_shares_reason_manual(login_wm, provisioned, litellm, prov_settings):
+    gid, sid = await shared_grant(login_wm, provisioned, litellm, prov_settings)
+    before = (await litellm.team_info("A1")).team_info.max_budget
+    r = await act(await login_wm("admin"), A1, DANI, "delete", {"confirm_upn": DANI})
+    assert r.status_code == 200, r.text
+    async with provisioned() as s:
+        sh, g = await s.get(GrantShare, sid), await s.get(Grant, gid)
+        assert (sh.status, sh.closed_reason, sh.returned) == ("closed", "manual", 3000)
+        assert g.returned == 3000
+    res = await drain(provisioned, litellm, prov_settings)
+    assert res.failed == 0
+    assert (await litellm.team_info("A1")).team_info.max_budget == before - 3000

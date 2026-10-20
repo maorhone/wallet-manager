@@ -69,12 +69,18 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   (both always sent; `0` and null when none); a model grant also raises the personal cap for that model.
 - Closing a share (and a grant, which closes its shares first) attributes usage: spend counts against the base cap first,
   then shares by earliest expiry (7.3.1); the unused part returns to the grant and the PMO pool, and the team budget is lowered.
-- Activation and expiry by the scheduler, share closing on move/delete - Planned (Step 2.3).
+- Activation and expiry by the scheduler - Done (Step 2.3): a pending grant becomes active at its start time; an expired
+  share is closed (reason `expiry`) and its unused part returns to the grant; an expired grant closes its remaining shares and
+  returns the rest to the pool. Moving or deleting a member closes their active shares first (reason `move` / `manual`), with
+  usage taken from the old team; the return never holds up the move.
 - UI for PMO and group heads - Planned (Steps 2.6-2.9).
 
-### 4.5 Scheduler - Phase 2: Planned (Step 2.3)
+### 4.5 Scheduler - Phase 2: In progress (grants job Done in Step 2.3)
 
-Separate process with an injectable clock: grant/share activation and expiry, earliest-expiry recompute, notification dispatch.
+Separate process (`python -m app.scheduler`) with an injectable clock; one replica runs a job at a time (advisory lock) and a
+restart catches up on everything overdue. Grants job (every 60 s): activation, share and grant expiry, then one recompute of the
+member's temporary budget (earliest remaining expiry) per affected person. Metrics: `wm_scheduler_job_runs_total`,
+`wm_scheduler_job_last_success_timestamp`. Notification dispatch (Step 2.4) and reconciliation (Step 2.5) join later.
 
 ### 4.6 Reconciliation (FR-RC) - Phase 2: Planned (Step 2.5)
 

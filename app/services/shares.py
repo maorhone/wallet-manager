@@ -161,7 +161,7 @@ async def patch_share(
 async def close_shares(
     ctx: WriteContext, shares: list[GrantShare], now: datetime,
     reason: Literal["expiry", "move", "manual"], client, reader, role: str = "system",
-    team_update: bool = True,
+    team_update: bool = True, member_update: bool = True,
 ) -> list[int]:  # fmt: skip
     """Close ``shares`` (FR-P6): attribute usage, return the unused part to their grants.
 
@@ -213,7 +213,8 @@ async def close_shares(
                       department_id=g.department_id)  # fmt: skip
             groups[g.group_id] = g
             closed.append(s.id)
-        await ctx.enqueue("employee", upn, "/team/member_update")
+        if member_update:
+            await ctx.enqueue("employee", upn, "/team/member_update")
     if team_update:
         for group_id in groups:
             await ctx.enqueue("group", group_id, "/team/update")

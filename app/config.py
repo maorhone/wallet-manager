@@ -32,3 +32,7 @@ class Settings(BaseSettings):
     outbox_poll_s: float = 1
     spend_snapshot_interval_s: float = 300
     overalloc_interval_s: float = 300
+    scheduler_grants_interval_s: float = 60
+    scheduler_notify_interval_s: float = 900  # used by Step 2.4
+    reconcile_interval_min: float = 5  # used by Step 2.5
+    scheduler_lock_timeout_s: float = 300

@@ -30,6 +30,14 @@ ONBOARDING_CALLS = Counter(
 OUTBOX_HELD = Gauge(
     "wm_outbox_held", "Pending outbox rows waiting for a row they depend on", registry=REGISTRY
 )
+SCHEDULER_RUNS = Counter(
+    "wm_scheduler_job_runs", "Scheduler job runs by outcome (ok, error, timeout, skipped)",
+    ["job", "outcome"], registry=REGISTRY,
+)  # fmt: skip
+SCHEDULER_LAST_SUCCESS = Gauge(
+    "wm_scheduler_job_last_success_timestamp", "Unix time of the last successful job run", ["job"],
+    registry=REGISTRY,
+)  # fmt: skip
 STATUSES = ("pending", "applied", "failed")
 
 

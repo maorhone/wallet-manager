@@ -1,9 +1,9 @@
+from grants import shared_grant
 from lifecycle import A1, A2, DANI, act, employee, last_id, outbox
 from sqlalchemy import select
 
-from app.models import EmployeeModelCap, Grp
+from app.models import EmployeeModelCap, Grant, GrantShare, Grp, LitellmWrite
 from app.outbox.worker import drain
-from app.services import lifecycle
 
 
 async def _prepare(factory, cap=7000):
@@ -70,12 +70,39 @@ async def test_move_same_group_409(login, provisioned):
     assert r.status_code == 404
 
 
-async def test_move_calls_close_member_shares_hook(login, provisioned, monkeypatch):
-    calls = []
+async def test_move_closes_active_shares_reason_move(login_wm, provisioned, litellm, prov_settings):
+    gid, sid = await shared_grant(login_wm, provisioned, litellm, prov_settings)
+    before = (await litellm.team_info("A1")).team_info.max_budget
+    start = await last_id(provisioned)
+    r = await act(await login_wm("rep"), A1, DANI, "move", {"to_group_id": A2})
+    assert r.status_code == 200, r.text
+    async with provisioned() as s:
+        sh, g = await s.get(GrantShare, sid), await s.get(Grant, gid)
+        assert (sh.status, sh.closed_reason, sh.used, sh.returned) == ("closed", "move", 0, 3000)
+        assert g.returned == 3000
+    res = await drain(provisioned, litellm, prov_settings)
+    assert res.failed == 0
+    assert (await litellm.team_info("A1")).team_info.max_budget == before - 3000
+    assert (await litellm.key_list(DANI)).keys[0].team_id == "A2"
+    assert "/team/member_update" not in [x.endpoint for x in await outbox(provisioned, DANI, start)]
 
-    async def spy(ctx, upn, reason):
-        calls.append((upn, reason))
 
-    monkeypatch.setattr(lifecycle, "close_member_shares", spy)
-    assert (await act(await login("rep"), A1, DANI, "move", {"to_group_id": A2})).status_code == 200
-    assert calls == [(DANI, "move")]
+async def test_move_share_return_does_not_hold_move_chain(
+    login_wm, provisioned, litellm, prov_settings, fake_app
+):
+    await shared_grant(login_wm, provisioned, litellm, prov_settings)
+    start = await last_id(provisioned)
+    assert (
+        await act(await login_wm("rep"), A1, DANI, "move", {"to_group_id": A2})
+    ).status_code == 200
+    async with provisioned() as s:
+        rows = (await s.scalars(select(LitellmWrite).where(LitellmWrite.id > start))).all()
+    update = next(x for x in rows if x.endpoint == "/team/update")
+    assert update.depends_on is None
+    chain = [x for x in rows if x.endpoint.startswith(("/team/member", "/key/update"))]
+    assert all(x.depends_on != update.id for x in chain)
+    fake_app.state.fake.failures["/team/update"] = [400, 1]  # the return fails ...
+    res = await drain(provisioned, litellm, prov_settings)
+    assert (res.failed, res.held) == (1, 0)  # ... the move chain still completes
+    assert DANI in {m.user_id for m in (await litellm.team_info("A2")).team_memberships}
+    assert DANI not in {m.user_id for m in (await litellm.team_info("A1")).team_memberships}

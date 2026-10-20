@@ -65,14 +65,19 @@ class WriteContext:
         self, entity: str, entity_id, endpoint: str, *, payload: dict | None = None,
         chain: bool = False,
     ) -> int:  # fmt: skip
-        """Queue a LiteLLM call; ``chain=True`` waits for the previous row this context queued."""
+        """Queue a LiteLLM call; ``chain=True`` waits for the previous chained row of this context.
+
+        Unchained rows are independent and never become a chain predecessor.
+        """
         self._seq += 1
-        self._last = await enqueue(
+        row_id = await enqueue(
             self.db, self.settings, entity, str(entity_id), endpoint,
             f"{self.request_id}:{self._seq}", payload=payload,
             depends_on=self._last if chain else None,
         )  # fmt: skip
-        return self._last
+        if chain:
+            self._last = row_id
+        return row_id
 
 
 def make_request_id(actor_upn: str, key: str | None) -> str:

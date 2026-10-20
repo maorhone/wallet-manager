@@ -25,3 +25,15 @@ async def send(client, method, path, body=None, reason="grant", **headers):
 
 async def create(client, body=None, **headers):
     return await send(client, "POST", "/grants", body or grant_body(), **headers)
+
+
+async def shared_grant(login, provisioned, litellm, settings, upn="dani@corp.example"):
+    """A grant in A1 with a 3000 share to ``upn``, applied; returns (grant id, share id)."""
+    from app.outbox.worker import drain
+
+    gid = int((await create(await login("pmo"))).json()["entities"][0]["id"])
+    rows = [{"upn": upn, "amount": 3000, "expires_at": when(days=10)}]
+    r = await send(await login("dana"), "POST", f"/grants/{gid}/shares", rows, "share")
+    assert r.status_code == 200, r.text
+    await drain(provisioned, litellm, settings)
+    return gid, int(r.json()["entities"][0]["id"])

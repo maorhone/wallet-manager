@@ -21,7 +21,15 @@ from app.errors import (
     self_allocation_forbidden,
 )
 from app.litellm_client import JwtKeyMappingDelete, KeyDelete, TeamMemberDelete, UserDelete
-from app.models import Department, Employee, EmployeeModelCap, Grp, LitellmWrite
+from app.models import (
+    Department,
+    Employee,
+    EmployeeModelCap,
+    Grant,
+    GrantShare,
+    Grp,
+    LitellmWrite,
+)
 from app.permissions import (
     DELETE_ROLES,
     HEAD,
@@ -56,9 +64,31 @@ async def provision(ctx: WriteContext, e: Employee) -> None:
 
 
 async def close_member_shares(
-    ctx: WriteContext, upn: str, reason: Literal["move", "manual"]
-) -> None:
-    """Close the employee's active grant shares (FR-P6); Phase 2 fills this in, no grants yet."""
+    ctx: WriteContext, upn: str, reason: Literal["move", "manual"], *,
+    clock, client, reader, role: str = "system",
+) -> None:  # fmt: skip
+    """Close the employee's active grant shares (FR-P6), spend taken in the old team.
+
+    Called before the membership changes. The rows are not chained to the move chain; the old
+    team's ``/team/update`` is rebuilt when applied and no ``/team/member_update`` is queued
+    (the membership is about to go).
+    """
+    from app.services.shares import close_shares  # shares imports this module
+
+    rows = (
+        await ctx.db.execute(
+            select(GrantShare, Grant.group_id).join(Grant, Grant.id == GrantShare.grant_id)
+            .where(GrantShare.upn == upn, GrantShare.status == "active")
+            .order_by(GrantShare.id)
+        )
+    ).all()  # fmt: skip
+    for group_id in sorted({g for _, g in rows}):
+        await ctx.lock(LockKind.GROUP, group_id)
+    if rows:
+        await close_shares(
+            ctx, [s for s, _ in rows], clock.now(), reason, client, reader, role,
+            member_update=False,
+        )  # fmt: skip
 
 
 def check_target(role: str, actor_upn: str, upn: str, tier: str, action: str = "") -> None:
@@ -161,7 +191,9 @@ async def restore(ctx, principal, directory, group_id, upn) -> list[dict]:
     return await _set_status(ctx, principal, directory, group_id, upn, "restore", "active", steps)
 
 
-async def move(ctx, principal, directory, group_id, upn, to_group_id: int) -> list[dict]:
+async def move(
+    ctx, principal, directory, group_id, upn, to_group_id: int, *, clock, client, reader
+) -> list[dict]:
     """Add to the new team, repoint the key, remove from the old team (the key keeps a team)."""
     role, old, emp = await _begin(ctx, principal, directory, group_id, upn, "move")
     _check_state(emp, "move")
@@ -174,7 +206,9 @@ async def move(ctx, principal, directory, group_id, upn, to_group_id: int) -> li
     if new.id == old.id or new.status != "active":
         raise member_state_conflict(emp.status)
 
-    await close_member_shares(ctx, upn, "move")
+    await close_member_shares(
+        ctx, upn, "move", role=role, clock=clock, client=client, reader=reader
+    )
     before = {"group_id": old.id, "base_cap": emp.base_cap}
     emp.group_id, emp.base_cap = new.id, new.default_member_cap
     await ctx.db.execute(sql_delete(EmployeeModelCap).where(EmployeeModelCap.upn == upn))
@@ -186,7 +220,9 @@ async def move(ctx, principal, directory, group_id, upn, to_group_id: int) -> li
     return _done(ctx, role, new, emp, "move", before, {**after, "from_group_id": old.id})
 
 
-async def delete_member(ctx, principal, directory, group_id, upn, confirm_upn: str) -> list[dict]:
+async def delete_member(
+    ctx, principal, directory, group_id, upn, confirm_upn: str, *, clock, client, reader
+) -> list[dict]:
     """Remove the key before the membership (D16); all targets are fixed at enqueue time."""
     role, group, emp = await _begin(ctx, principal, directory, group_id, upn, "delete")
     if confirm_upn != upn:
@@ -194,7 +230,9 @@ async def delete_member(ctx, principal, directory, group_id, upn, confirm_upn: s
     _check_state(emp, "delete")
     await guard_idle(ctx.db, upn)
 
-    await close_member_shares(ctx, upn, "manual")
+    await close_member_shares(
+        ctx, upn, "manual", role=role, clock=clock, client=client, reader=reader
+    )
     before = {"status": emp.status, "base_cap": emp.base_cap}
     mapping = JwtKeyMappingDelete(
         jwt_issuer=ctx.settings.jwt_issuer, jwt_claim_name="upn", jwt_claim_value=upn

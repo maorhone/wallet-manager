@@ -262,6 +262,34 @@ async def portal(make_portal):
     return await make_portal()
 
 
+@pytest.fixture
+def fake_clock():
+    """Scheduler clock starting now; tests advance it instead of sleeping."""
+    from datetime import UTC, datetime
+
+    from app.clock import FakeClock
+
+    return FakeClock(datetime.now(UTC))
+
+
+@pytest_asyncio.fixture
+async def run_job(provisioned, litellm, ro_engine, prov_settings, fake_clock):
+    """Run the grants job once against the provisioned DB and the fake LiteLLM."""
+    from app.litellm_client import LiteLLMReader
+    from app.scheduler.jobs import run_grants
+
+    async def _run():
+        return await run_grants(
+            provisioned,
+            litellm,
+            fake_clock,
+            reader=LiteLLMReader(ro_engine),
+            settings=prov_settings,
+        )
+
+    return _run
+
+
 @pytest_asyncio.fixture
 async def api(settings):
     app = create_app(settings)

@@ -1,0 +1,171 @@
+"""Scheduler jobs (SPEC §5.1): grant and share activation and expiry, FR-P4 recompute.
+
+Every job takes ``clock``; nothing here reads the wall clock. Writes go through ``WriteContext`` as
+actor ``system:scheduler``. The request id of each event is deterministic, so a rerun that finds
+its audit row writes nothing; rows are also re-checked under ``FOR UPDATE SKIP LOCKED``, so two
+replicas never close the same row twice even without the job lock.
+"""
+
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import select
+
+from app.clock import Clock
+from app.config import Settings
+from app.db import LockKind
+from app.models import AuditLog, Employee, Grant, GrantShare
+from app.services import grants as grants_service
+from app.services import shares as shares_service
+from app.writes import WriteContext
+
+ACTOR, ROLE = "system:scheduler", "scheduler"
+_NS = uuid.UUID("0c7d8f56-3b0e-4c53-9d36-6a1f2b9e4a71")
+
+
+@dataclass
+class GrantsResult:
+    activated: int = 0
+    shares_closed: int = 0
+    grants_closed: int = 0
+    members_recomputed: int = 0
+
+
+def request_id(entity: str, entity_id, event: str) -> str:
+    return str(uuid.uuid5(_NS, f"grants:{entity}:{entity_id}:{event}"))
+
+
+async def _begin(db, settings: Settings, entity: str, entity_id, event: str, reason: str):
+    """A scheduler WriteContext, or None when this event was already written (replay)."""
+    rid = request_id(entity, entity_id, event)
+    if await db.scalar(select(AuditLog.id).where(AuditLog.request_id == rid).limit(1)):
+        return None
+    return WriteContext(db, settings, ACTOR, rid, reason)
+
+
+async def _activate(sf, settings: Settings, grant_id: int, group_id: int, now: datetime) -> bool:
+    async with sf() as db:
+        ctx = await _begin(db, settings, "grant", grant_id, "activate", "grant start time reached")
+        if ctx is None:
+            return False
+        await ctx.lock(LockKind.GROUP, group_id)
+        g = await db.scalar(
+            select(Grant).where(
+                Grant.id == grant_id, Grant.status == "pending", Grant.starts_at <= now
+            ).with_for_update(skip_locked=True)
+        )  # fmt: skip
+        if g is None:
+            return False
+        before, g.status = grants_service._values(g), "active"
+        grants_service._audit_grant(ctx, g, before, ROLE)
+        await grants_service._team_update(ctx, g, ROLE, [])
+        await db.commit()
+        return True
+
+
+async def _expire_share(
+    sf, settings: Settings, share_id: int, group_id: int, now: datetime, client, reader
+) -> str | None:
+    """Close one expired share; returns its member's upn, or None if it was already closed."""
+    async with sf() as db:
+        ctx = await _begin(db, settings, "share", share_id, "expiry", "share expired")
+        if ctx is None:
+            return None
+        await ctx.lock(LockKind.GROUP, group_id)
+        s = await db.scalar(
+            select(GrantShare).where(
+                GrantShare.id == share_id, GrantShare.status == "active",
+                GrantShare.expires_at <= now,
+            ).with_for_update(skip_locked=True)
+        )  # fmt: skip
+        if s is None:
+            return None
+        await shares_service.close_shares(
+            ctx, [s], now, "expiry", client, reader, ROLE, member_update=False
+        )
+        await db.commit()
+        return s.upn
+
+
+async def _expire_grant(
+    sf, settings: Settings, grant_id: int, group_id: int, now: datetime, client, reader
+) -> list[str] | None:
+    """Close one expired grant and its open shares; returns the affected members' upns."""
+    async with sf() as db:
+        ctx = await _begin(db, settings, "grant", grant_id, "expiry", "grant expired")
+        if ctx is None:
+            return None
+        await ctx.lock(LockKind.GROUP, group_id)
+        g = await db.scalar(
+            select(Grant).where(
+                Grant.id == grant_id, Grant.status == "active", Grant.expires_at <= now
+            ).with_for_update(skip_locked=True)
+        )  # fmt: skip
+        if g is None:
+            return None
+        upns = list(
+            await db.scalars(
+                select(GrantShare.upn).where(
+                    GrantShare.grant_id == g.id, GrantShare.status == "active"
+                )
+            )
+        )
+        await grants_service._close_grant(
+            ctx, g, now, ROLE, "expiry", client, reader, member_update=False
+        )
+        await db.commit()
+        return upns
+
+
+async def _recompute(sf, settings: Settings, upn: str, now: datetime) -> bool:
+    """FR-P4: one ``/team/member_update``; the temp fields are rebuilt when it is applied."""
+    async with sf() as db:
+        e = await db.get(Employee, upn)
+        if e is None or e.status not in ("active", "blocked") or e.group_id is None:
+            return False
+        ctx = WriteContext(
+            db, settings, ACTOR, request_id("employee", upn, f"recompute:{now.isoformat()}"),
+            "temporary budget recompute",
+        )  # fmt: skip
+        await ctx.enqueue("employee", upn, "/team/member_update")
+        await db.commit()
+        return True
+
+
+async def run_grants(sf, client, clock: Clock, *, reader, settings: Settings) -> GrantsResult:
+    now, out, touched = clock.now(), GrantsResult(), set()
+
+    async def ids(*columns, where, order):
+        async with sf() as db:
+            return (await db.execute(select(*columns).where(*where).order_by(*order))).all()
+
+    for gid, group_id in await ids(
+        Grant.id, Grant.group_id, where=(Grant.status == "pending", Grant.starts_at <= now),
+        order=(Grant.starts_at, Grant.id),
+    ):  # fmt: skip
+        out.activated += await _activate(sf, settings, gid, group_id, now)
+
+    for sid, group_id in await ids(
+        GrantShare.id, Grant.group_id, where=(
+            GrantShare.grant_id == Grant.id, GrantShare.status == "active",
+            GrantShare.expires_at <= now,
+        ), order=(GrantShare.expires_at, GrantShare.id),
+    ):  # fmt: skip
+        if upn := await _expire_share(sf, settings, sid, group_id, now, client, reader):
+            out.shares_closed += 1
+            touched.add(upn)
+
+    for gid, group_id in await ids(
+        Grant.id, Grant.group_id, where=(Grant.status == "active", Grant.expires_at <= now),
+        order=(Grant.expires_at, Grant.id),
+    ):  # fmt: skip
+        if (
+            upns := await _expire_grant(sf, settings, gid, group_id, now, client, reader)
+        ) is not None:
+            out.grants_closed += 1
+            touched.update(upns)
+
+    for upn in sorted(touched):
+        out.members_recomputed += await _recompute(sf, settings, upn, now)
+    return out

@@ -1,6 +1,6 @@
 """Test-only controls, mounted when FAKE_TEST_CONTROLS=1 (the fake's default)."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
@@ -57,6 +57,23 @@ async def config(body: Config, request: Request):
     return body
 
 
+class Clock(BaseModel):
+    offset_s: float
+
+
+@router.post("/clock")
+async def set_clock(body: Clock, request: Request):
+    """Move the fake's clock ``offset_s`` seconds ahead of the wall clock (R2 expiry)."""
+    request.app.state.fake.clock_offset_s = body.offset_s
+    return body
+
+
+@router.get("/clock")
+async def get_clock(request: Request):
+    fake = request.app.state.fake
+    return {"offset_s": fake.clock_offset_s, "now": fake.now()}
+
+
 @router.post("/fail")
 async def fail(body: Fail, request: Request):
     """Fail the next ``times`` calls to ``endpoint`` (500 = transient, 400 = permanent)."""
@@ -85,7 +102,7 @@ async def invariants(request: Request):
 @router.post("/spend")
 async def add_spend(body: Spend, request: Request):
     """Insert a SpendLogs row and bump team / membership / organization spend consistently."""
-    at = body.at or datetime.now(UTC)
+    at = body.at or request.app.state.fake.now()
     async with request.app.state.fake.engine.begin() as conn:
         row = (
             await conn.execute(select(team.c.organization_id).where(team.c.team_id == body.team_id))

@@ -2,7 +2,7 @@
 
 ## Status
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Phase 2 (PLAN §4).
-Latest `./scripts/test.sh`: pytest 346 passed, 4 skipped; vitest 24; Playwright 27; ~3.3 min (1.4 pytest + 1.8 Playwright).
+Latest `./scripts/test.sh` (Step 2.3): green; pytest 405 collected (5 skipped real-target cases); vitest 24; Playwright 27; Playwright 1.8 min.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -105,13 +105,26 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   fake `/team/member_update` 400 on one temp field. `PRD.md` created. Tests: `tests/unit/test_{attribution,desired_member}.py`, `tests/api/test_shares.py` (11),
   `test_me_wallet` share rows, fake lifecycle temp-fields test. `./scripts/test.sh`: pytest 385 passed, 4 skipped.
 
+- Step 2.3: `app/scheduler/{loop,jobs,__main__}.py` (`python -m app.scheduler`; `Job`, `run_loop`, `build_jobs`, `run_grants` -> `GrantsResult`), `LockKind.JOB`,
+  scheduler settings + `.env.example`, metrics `wm_scheduler_job_runs{job,outcome}` / `wm_scheduler_job_last_success_timestamp{job}`, `lifecycle.close_member_shares`
+  (move -> `move`, delete -> `manual`), fake LiteLLM clock (`POST|GET /_test/clock`, `FakeState.now()`), `scripts/e2e_stack.py` starts the scheduler (grants/notify 2 s),
+  fixtures `fake_clock` / `run_job`, helpers `tests/helpers/grants.py`. Tests: `tests/scheduler/test_{loop,grants_job}.py` (4 + 6), move/delete share tests (3, the hook test was replaced),
+  `tests/contract/test_a1_temp_increase.py` (`[fake]`; `[real]` skipped), `tests/e2e_backend/test_a1_wm.py`, A9 with a share.
+
 ## Next
-- Step 2.3: scheduler process, injectable clock, grant/share activation and expiry, share closing on move and delete (fill `lifecycle.close_member_shares`, which is still a stub; it should call `shares.close_shares`).
+- Step 2.4: notifications backend (FR-N1 triggers, FR-N2 mute, `/me/notifications*`). Register its job in `scheduler.loop.build_jobs` (lock id 2, `NOTIFY_LOCK`); reconcile is lock 3.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.3: `WriteContext.enqueue` now sets the chain predecessor only from `chain=True` rows (before, any earlier row of the context became the predecessor), otherwise the share-return
+  `/team/update` queued before the move chain would have held the move up. `build_jobs` registers only the grants job for now. `Job` has an extra `timeout_s` field (from `scheduler_lock_timeout_s`).
+  Phases 2-3 close with `member_update=False` and phase 4 enqueues the single `/team/member_update` per touched member; a crash between a phase commit and phase 4 loses that recompute
+  (the share's own expiry in LiteLLM still ends the increase, and the team `/team/update` is queued in the closing transaction). Move/delete queue no `/team/member_update` for the closed shares
+  (the membership goes). Tests create shares to the same member in two grants for "next share" (one active share per member per grant). `PATCH`-shortening a grant below its share
+  expiry is not possible through the API, so the grant-expiry test edits `expires_at` in the DB. Tooling slip: one `sed -i` on `tests/scheduler/test_grants_job.py` (import path) and
+  empty `cat >>`/`python3` heredocs through Bash that wrote nothing.
 - Step 2.2: DR9 (no grant shares to yourself, any role) wins over FR-P3's "the representative can"; a self share is always `SELF_ALLOCATION_FORBIDDEN`.
   "Shared" for the grant ceiling is Σ amount of all shares (active and closed), since closed amount = used + returned. Attribution across periods treats a share as present in a month
   overlapping `[grant.starts_at, share.expires_at]`; `/me/wallet` and the share list attribute from the current-period snapshot only (active shares). A share without expiry falls back to the grant's.

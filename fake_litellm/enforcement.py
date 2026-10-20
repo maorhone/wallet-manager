@@ -7,7 +7,7 @@ import hmac
 import json
 import os
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -103,7 +103,7 @@ def _cap(models: dict | None, model: str) -> float | None:
     return None if entry is None else float(entry["budget_limit"])
 
 
-async def _check_budgets(conn: AsyncConnection, key: dict, model: str) -> None:
+async def _check_budgets(conn: AsyncConnection, key: dict, model: str, now: datetime) -> None:
     """Order: key, team member, team, organization, then model budgets (R1, R5, R6)."""
     if key["max_budget"] is not None and key["spend"] >= key["max_budget"]:
         raise _blocked("key", "key")
@@ -129,7 +129,7 @@ async def _check_budgets(conn: AsyncConnection, key: dict, model: str) -> None:
     if mem and mem["max_budget"] is not None:
         limit = mem["max_budget"]
         expiry = mem["temp_budget_expiry"]
-        if expiry is not None and expiry > datetime.now(UTC):  # R2
+        if expiry is not None and expiry > now:  # R2
             limit += mem["temp_budget_increase"] or 0
         if (mem["spend"] or 0) >= limit:
             raise _blocked("team_member", "team member")
@@ -240,10 +240,10 @@ async def chat_completions(request: Request):
                 return _error(429, "max_parallel_requests", "Max parallel request limit reached")
             state.in_flight[tok] = state.in_flight.get(tok, 0) + 1
             try:
-                await _check_budgets(conn, key, model)
-                start = datetime.now(UTC)
+                await _check_budgets(conn, key, model, state.now())
+                start = state.now()
                 await asyncio.sleep(state.latency_ms / 1000)
-                end = datetime.now(UTC)
+                end = state.now()
                 async with state.engine.begin() as wconn:
                     await _charge(wconn, key, model, state.cost_per_request, start, end)
             finally:

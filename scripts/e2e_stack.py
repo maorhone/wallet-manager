@@ -1,8 +1,8 @@
 """Throw-away full stack for Playwright: ``uv run python scripts/e2e_stack.py``.
 
 pgembed in a temp dir, migrations, fake LiteLLM (E2E_FAKE_PORT, default 4112), seed, API
-(E2E_API_PORT, default 4111, DEV_AUTH=1) and the worker. Writes E2E_STATE_FILE (default
-frontend/.e2e-state.json: URLs + env) and runs until SIGTERM/SIGINT.
+(E2E_API_PORT, default 4111, DEV_AUTH=1), the worker and the scheduler.
+Writes E2E_STATE_FILE (default frontend/.e2e-state.json: URLs + env) and runs until SIGTERM/SIGINT.
 """
 
 import asyncio
@@ -74,6 +74,8 @@ def main() -> None:
         "LITELLM_PUBLIC_URL": f"http://127.0.0.1:{FAKE_PORT}",
         "SPEND_SNAPSHOT_INTERVAL_S": "2",
         "OUTBOX_POLL_S": "0.5",
+        "SCHEDULER_GRANTS_INTERVAL_S": "2",
+        "SCHEDULER_NOTIFY_INTERVAL_S": "2",
         "SEED_FILE": str(ROOT / "seed" / "dev.yaml"),
     }
     env = {**os.environ, **overrides}
@@ -109,6 +111,7 @@ def main() -> None:
         )
         spawn("-m", "uvicorn", "app.main:create_app", "--factory", "--port", str(API_PORT))
         spawn("-m", "app.worker")
+        spawn("-m", "app.scheduler")
         wait_for(f"http://127.0.0.1:{API_PORT}/readyz")
         print(f"e2e stack ready (logs: {tmp / 'stack.log'})", flush=True)
         while True:

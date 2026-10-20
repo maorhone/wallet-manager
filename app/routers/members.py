@@ -30,9 +30,11 @@ async def restore(group_id: int, upn: str, ctx: Write, principal: CurrentPrincip
 async def move(
     group_id: int, upn: str, body: MoveIn, ctx: Write, principal: CurrentPrincipal, req: Request
 ):
+    s = req.app.state
     entities = await lifecycle.move(
-        ctx, principal, req.app.state.directory, group_id, upn, body.to_group_id
-    )
+        ctx, principal, s.directory, group_id, upn, body.to_group_id,
+        clock=s.clock, client=s.litellm, reader=s.litellm_reader,
+    )  # fmt: skip
     return await write_response(ctx, entities)
 
 
@@ -40,7 +42,9 @@ async def move(
 async def delete(
     group_id: int, upn: str, body: DeleteIn, ctx: Write, principal: CurrentPrincipal, req: Request
 ):
+    s = req.app.state
     entities = await lifecycle.delete_member(
-        ctx, principal, req.app.state.directory, group_id, upn, body.confirm_upn
-    )
+        ctx, principal, s.directory, group_id, upn, body.confirm_upn,
+        clock=s.clock, client=s.litellm, reader=s.litellm_reader,
+    )  # fmt: skip
     return await write_response(ctx, entities)
