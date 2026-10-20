@@ -10,7 +10,7 @@ The real target (airgapped OpenShift, LiteLLM Enterprise, ADFS, AD) is not avail
 - **Fake LiteLLM** (`fake_litellm/`, FastAPI, port 4102). It implements only the §10 endpoints Phase 1 uses, plus the §3 runtime behavior the tests depend on: R1, R2, R5, R6, R7, R10, R11. It has test-only controls. It keeps its state in Postgres tables named and shaped after the ERD, so the WM read-only reader runs the §11.3 SQL as written.
 - **Contract tests** (§15.2) run against the fake every time. They run against a real LiteLLM only when `LITELLM_BASE_URL` is set; otherwise they are skipped.
 - **PostgreSQL via `pgembed`** for dev and tests. Production uses `DATABASE_URL` and `LITELLM_DATABASE_URL` (a read-only role, NFR6).
-- **Auth**: real ADFS OIDC through the BFF, by configuration. `DEV_AUTH=1` adds a seeded-user login. AD sync is Phase 3; seeding uses a fixture.
+- **Auth**: real ADFS OIDC through the BFF, by configuration. `DEV_AUTH=1` adds a seeded-user login. There is no AD sync (owner decision 20/10/2026). The directory is read once at onboarding: `FixtureDirectory` now, `ldap3` in Phase 3.
 - Ports on 0.0.0.0: UI 4100, API 4101, fake 4102. The E2E stack uses 4110 (UI), 4111 (API) and 4112 (fake).
 - The sandbox has Python 3.13. Code must stay 3.12-compatible (NFR2): `requires-python = ">=3.12"`, ruff `target-version = "py312"`, and no 3.13-only APIs.
 - Never edit `.claude/hooks/*` or `.claude/settings.json`. `./scripts/test.sh` is the only test gate. The Stop hook runs it with a 540 s timeout. Keep the whole run under about 300 s.
@@ -86,6 +86,14 @@ Take the lock before reading any sums.
 **Lint loop.** The format hook uses `./.venv/bin/ruff` and the repo-root `node_modules/.bin/{prettier,eslint}`. Therefore:
 - `ruff` is a dev dependency.
 - The frontend is an **npm workspace of a root `package.json`**, so the hook finds prettier and eslint at the root.
+
+**Public repository (NFR10).** After Phase 1b the repository becomes public.
+- Never commit secrets, tokens, keys, certificates, real hostnames, IPs or internal corporate names (organizations, departments, people, AD DNs). Use placeholders (corp.example).
+- Use placeholders only: `corp.example`, `litellm.corp.example`, `adfs.corp.example`, `DC=corp,DC=example`.
+- `.env` stays gitignored; `.env.example` holds placeholders.
+- Tests and scripts generate dummy secrets at run time (`secrets.token_urlsafe`) and never hardcode real-looking ones.
+- `tests/test_repo_hygiene.py` enforces this on every run.
+- Internal names to block go in an optional gitignored `.public-denylist`, which the test reads if present. Never commit that list.
 
 ## 2. Steps (Phase 1)
 
@@ -725,6 +733,302 @@ npm run -s e2e
 
 ---
 
+## 2b. Steps (Phase 1b: onboarding API + manual member actions)
+
+These rules apply to every Phase 1b step: the §1 conventions, the write contract, the error envelope (new codes per SPEC §11.2 v0.3), and `./scripts/test.sh` as the only gate.
+- Do not change the e2e ports (test.sh uses 4120–4122).
+- `scripts/e2e_stack.py` must keep working with its default ports for the live preview.
+- Keep the full run under about 4 minutes. The budget added by Phase 1b is roughly 40 s of pytest plus 9 Playwright tests.
+
+### Step 1b.1: Schema, fake LiteLLM lifecycle endpoints, client methods, chained outbox, repo hygiene
+**Spec:** §8.2 (v0.3), §9.3 (order, chaining), §10 (v0.3), §3.5 V6/V7, NFR3, NFR10.
+
+**Files:**
+- `alembic/versions/0002_lifecycle.py`, `app/models.py`.
+- `app/db.py`.
+- `app/litellm_client/{models,client}.py`.
+- `fake_litellm/{db,main,enforcement,controls}.py`.
+- `app/outbox/{enqueue,worker,desired}.py`, `app/writes.py`.
+- The Step 1 schema test: update its expected tables and columns to §8.2 v0.3. This is a spec change, not a weakening.
+- `tests/test_repo_hygiene.py`, `.gitignore` (`.public-denylist`), `PLAN.md` §0/§1, `CLAUDE.md`, `PROGRESS.md` (copy the new questions).
+
+**Build:**
+- **Migration 0002:**
+  - Employee status CHECK becomes `active|blocked|left|pending_placement`.
+  - Add `employee.pending_department_id bigint NULL FK department`, `pending_reason text NULL CHECK in (no_budget_group, multiple_budget_groups, not_in_directory)`, `pending_since timestamptz NULL`.
+  - Make `employee.group_id` nullable if it is not already.
+  - Add `litellm_write.depends_on bigint NULL FK litellm_write(id)`.
+  - Drop `sync_run` and `sync_action`, and remove their ORM classes.
+- **`app/db.py`:** `LockKind.EMPLOYEE = 4` and `def employee_lock_id(upn: str) -> int` (crc32 & 0x7fffffff).
+- **Client:**
+  - New typed models `KeyDelete{keys: list[str]}`, `UserDelete{user_ids: list[str]}`, `JwtKeyMappingUpdate{jwt_issuer, jwt_claim_name, jwt_claim_value, is_active: bool}`, `JwtKeyMappingDelete{jwt_issuer, jwt_claim_name, jwt_claim_value}`.
+  - New methods `key_delete`, `user_delete`, `jwt_mapping_update`, `jwt_mapping_delete`.
+  - `team_member_delete`, `key_block`, `key_unblock` and `key_update` already exist.
+- **Fake LiteLLM:**
+  - `LiteLLM_JWTKeyMapping.is_active` boolean, default true.
+  - `POST /key/delete` removes the tokens and the mappings that point at them.
+  - `POST /user/delete`.
+  - `POST /jwt/key/mapping/update` and `/delete`.
+  - `/team/member_delete` returns 404 for a non-member.
+  - Enforcement treats an inactive mapping like an unmapped upn (401/403, as for A10).
+- **Fake test controls:**
+  - `POST /_test/fail {endpoint, status: 500|400, times}` fails the next N calls to an endpoint.
+  - `GET /_test/invariants` returns `[{token, user_id, team_id}]` for keys whose team has no membership for the key's user.
+- **Outbox:**
+  - `enqueue(..., *, payload: dict | None = None, depends_on: int | None = None) -> int`.
+  - `WriteContext.enqueue(entity, entity_id, endpoint, *, payload=None, chain=False) -> int`. With `chain=True` the row depends on the previous row this context enqueued.
+- **Worker:**
+  - Skip a row while its `depends_on` row is not `applied` (it stays pending; add `DrainResult.held`).
+  - `_FROZEN = {"/team/member_delete", "/key/delete", "/user/delete", "/jwt/key/mapping/delete"}` apply the stored payload instead of rebuilding it.
+  - `_GONE_OK`: a 404 on the delete endpoints counts as applied.
+- **Builders:** `/key/block` and `/key/unblock` → `KeyBlock(key=e.key_token_hash)`; `/jwt/key/mapping/update` → `is_active = e.status == "active"`.
+- **`tests/test_repo_hygiene.py`:**
+  - Scans `git ls-files` for private-key headers, `sk-` tokens, JWT-shaped strings, URLs and hosts outside an allow-list, and DN components other than `DC=corp,DC=example`. Lock files are allowed their registry hosts.
+  - The allow-list is `*.example`, `*.test`, `localhost`, `127.0.0.1`, `0.0.0.0`, and the registry and docs hosts.
+  - It also checks the optional `.public-denylist`.
+
+**Tests:**
+- `tests/litellm/test_fake_lifecycle.py`:
+  - `test_key_delete_removes_key_and_mapping`
+  - `test_user_delete`
+  - `test_member_delete_non_member_404`
+  - `test_inactive_mapping_rejects_jwt`
+  - `test_fail_injection_then_ok`
+  - `test_invariants_flags_key_without_membership`
+- `tests/litellm/test_client_lifecycle.py`: `test_typed_bodies_for_new_endpoints`.
+- `tests/test_outbox_chain.py`:
+  - `test_dependent_held_while_predecessor_pending`
+  - `test_failed_predecessor_holds_chain_until_retry`
+  - `test_frozen_payload_not_rebuilt`
+  - `test_delete_404_counts_as_applied`
+  - `test_unchained_rows_keep_phase1_behavior`
+- `tests/test_repo_hygiene.py::test_tracked_files_have_no_secrets_or_internal_names`.
+
+**test.sh after:** unchanged. The new pytest files are collected automatically; all Phase 1 tests stay green.
+
+### Step 1b.2: Kick, restore, move, delete and their permissions (backend)
+**Spec:** §6 (v0.3), §9.3, §9.4, §11.1 member lifecycle, §11.2, §12.2, A9 (without shares), A12, A14.
+
+**Files:**
+- `app/services/lifecycle.py` (new).
+- `app/permissions.py`.
+- `app/schemas/members.py` (new).
+- `app/routers/members.py` (new; register it in `app/main.py`).
+- `app/services/views.py` (member rows gain `actions`).
+- `app/seed.py` (import `JOINER` from lifecycle).
+- `app/metrics.py` (`wm_lifecycle_actions_total{action}`, `wm_outbox_held`).
+
+**Build:**
+- **`app/permissions.py`:**
+  - Group-scoped checks: `can_kick(session, p, group_id)` (admin, rep, head), `can_move(...)` (admin, rep) and `can_delete_member(...)` (admin). Each returns the role and uses the existing `_pick`/404-vs-403 rules.
+- **`app/services/lifecycle.py`:**
+  - `JOINER` (moved from seed); `async def provision(ctx, e: Employee) -> None` enqueues JOINER chained.
+  - `async def close_member_shares(ctx, upn, reason: Literal["move", "manual"]) -> None`: a Phase 2 hook. It is a no-op now, with a docstring pointing at FR-P6.
+  - `def check_target(role, actor_upn, upn, tier)`:
+    - self → `SELF_ALLOCATION_FORBIDDEN` with `details.action`;
+    - head with a tier other than member → `SCOPE_FORBIDDEN`;
+    - rep with a rep or admin tier → `SCOPE_FORBIDDEN`.
+    - Reuse `target_tier`.
+  - `async def guard_idle(db, upn)` raises 409 `LIFECYCLE_IN_PROGRESS` if the employee has pending or failed rows.
+  - `kick`, `restore`, `move(..., to_group_id)` and `delete_member(..., confirm_upn)` all take `(ctx, directory, group_id, upn)` and return `list[dict]`. Each:
+    - takes `lock(EMPLOYEE)`;
+    - checks the state, raising 409 `MEMBER_STATE_CONFLICT`;
+    - writes audit plus the chained outbox rows in §9.3 order;
+    - for move, enqueues `member_delete` with a frozen `{team_id: old, user_id}`;
+    - for delete, enqueues a frozen mapping delete → key delete → member delete → user delete.
+- **Move scope:** the target must be an active group. A rep's target must be in the rep's department, else `SCOPE_FORBIDDEN`. The base cap becomes the target's `default_member_cap` and model caps are removed.
+- **Router:** `POST /groups/{id}/members/{upn}/{kick|restore|move|delete}` and `GET /groups/{id}/members/{upn}/move-targets`.
+- **`/groups/{id}/members` rows:** add `actions: {kick, restore, move, delete}`, computed from the same checks so the UI shows only allowed buttons.
+
+**Tests:**
+- `tests/api/test_member_kick.py`:
+  - `test_kick_blocks_key_and_mapping_inactive_order`
+  - `test_restore_reverses`
+  - `test_kick_twice_409_state_conflict`
+  - `test_replay_same_idempotency_key_200_no_new_rows`
+  - `test_kick_during_outage_pending_then_applied`
+- `tests/api/test_member_move.py`:
+  - `test_move_order_add_update_delete`
+  - `test_move_sets_new_default_cap_clears_model_caps`
+  - `test_move_while_rows_pending_409`
+  - `test_move_same_group_409`
+  - `test_move_calls_close_member_shares_hook`
+- `tests/api/test_member_delete.py`:
+  - `test_delete_order_mapping_key_member_user`
+  - `test_confirm_mismatch_422`
+  - `test_deleted_hidden_from_members_and_sums`
+- `tests/api/test_lifecycle_permissions.py::test_matrix`, parametrized. Actions kick/restore/move/delete × actors admin, rep D1, head A1 on A1, head A1 on A2, head on co-head, PMO, viewer, plain employee, self. It expects 200, 403 `FORBIDDEN`, 404, 422 `SCOPE_FORBIDDEN` or 422 `SELF_ALLOCATION_FORBIDDEN` per SPEC §9.4. It also covers a rep moving into a D2 group (422 `SCOPE_FORBIDDEN`) and an admin moving across departments (200).
+- `tests/e2e_backend/test_move_invariant.py`:
+  - `test_a12_failure_before_each_substep_invariant_holds_then_retry_completes`: for each of the three endpoints, inject a failure, drain, assert `/_test/invariants` is empty, retry, drain, assert the final state.
+  - `test_a9_move_requests_succeed_throughout`
+- `tests/e2e_backend/test_kick_wm.py::test_a14_kick_rejects_jwt_restore_accepts`.
+
+**test.sh after:** unchanged.
+
+### Step 1b.3: Onboarding API, pending placement, place (backend)
+**Spec:** §9.1, §9.2, §9.5, §11.1 onboarding and placements, §5.4, NFR5, NFR10, A15, D14–D20, D24.
+
+**Files:**
+- `app/auth/portal_jwt.py` (new).
+- `app/services/onboarding.py` (new).
+- `app/routers/onboarding.py` and `app/routers/placements.py` (new).
+- `app/auth/csrf.py` (exempt `/onboarding`).
+- `app/config.py`, `.env.example` (placeholders).
+- `app/directory.py` (`class DirectoryUnavailable(Exception)`).
+- `app/permissions.py` (`can_place(session, p, department_id: int | None)`, `can_view_pending(...)`: admin, plus rep when the department is known).
+- `seed/dev.yaml`, `app/seed.py`, `scripts/e2e_stack.py`.
+- `scripts/dev_onboard.py` (DEV_AUTH only; prints the onboarding response for a upn).
+- `tests/helpers/jwt.py`.
+
+**Build:**
+- **Settings:** `adfs_jwks_url`, `adfs_issuer`, `onboarding_audience`, `onboarding_client_ids: list[str]`, `onboarding_user_audiences: list[str]`, `dev_jwt_secret`, `litellm_public_url` (default `https://litellm.corp.example`; e2e/dev point it at the fake). Startup fails if `dev_jwt_secret` is set without `dev_auth`.
+- **`app/auth/portal_jwt.py`:**
+  - `async def verify_portal(token) -> str` returns the client id.
+  - `async def verify_user(token) -> str` returns the upn.
+  - RS256 via JWKS (cached; reuse the OIDC metadata fetch in `app/auth/oidc.py` and joserfc). HS256 only when `dev_auth`. A strict alg allow-list.
+  - `PortalAuth` dependency that never logs tokens.
+- **`app/services/onboarding.py`:**
+  - `def find_placement(directory, upn, groups, departments) -> Placement(group_id, department_id, reason)`. It uses `display_name()` for existence and `groups_of()`, and raises `DirectoryUnavailable` → 503.
+  - `async def onboard(ctx, directory, upn, client_id) -> (dict, created: bool)`:
+    - takes `lock(EMPLOYEE)`;
+    - an existing employee is returned unchanged;
+    - otherwise it inserts the employee, active with the default cap and `provision()`, or `pending_placement` with the `pending_*` fields.
+  - `async def onboarding_status(db, settings, upn) -> dict` builds the §9.2 response. `install` is included only when ready, and never a secret.
+  - `place(ctx, directory, upn, group_id)` and `pending_list(db, department_id | None | "all")`.
+- **Routers:**
+  - `POST /onboarding` requires `Idempotency-Key`, else 422. The reason is set by the server (`first-login onboarding via <client_id>`), and the actor role is `onboarding_portal`.
+  - `GET /onboarding`.
+  - `GET /departments/{id}/pending-placements`, `GET /pending-placements?department=`, `POST /pending-placements/{upn}/place`.
+- **Seed (`seed/dev.yaml`), all `corp.example`:**
+  - Directory-only users (`provision: false`):
+    - `newbie@corp.example` (grp-b1) → ready;
+    - `drifter@corp.example` (dept-d1 only) → pending `no_budget_group` D1;
+    - `twin@corp.example` (grp-a1 + grp-b1) → pending `multiple_budget_groups` D1.
+  - Seeded pending users for the UI:
+    - `pazit@corp.example` (`pending: true`, dept-d1);
+    - `lost@corp.example` (`pending: true`, no department).
+  - Phase 1 counts must not change. Pending users have no group; if a Phase 1 test counts employees, change the fixtures only, never the assertions.
+- **`scripts/e2e_stack.py`:** generates `DEV_JWT_SECRET` and the portal settings per run. Default ports are unchanged.
+
+**Tests:**
+- `tests/api/test_onboarding.py`:
+  - `test_new_user_provisioning_then_ready_after_drain`
+  - `test_joiner_order_user_member_key_mapping`
+  - `test_same_idempotency_key_replay_no_new_rows`
+  - `test_existing_user_other_key_no_changes`
+  - `test_concurrent_first_calls_one_employee`
+  - `test_no_group_pending_no_litellm_calls`
+  - `test_multiple_groups_pending`
+  - `test_not_in_directory_pending_unknown_department`
+  - `test_kicked_returns_blocked`
+  - `test_deleted_returns_blocked`
+  - `test_install_only_when_ready_and_has_no_secret`
+  - `test_secret_never_returned_stored_or_logged`: caplog, response bodies, and a WM DB scan for the fake's plaintext.
+  - `test_directory_unavailable_503_writes_nothing`
+  - `test_get_onboarding_never_writes`
+  - `test_get_unknown_upn_404`
+- `tests/auth/test_portal_jwt.py`:
+  - `test_missing_portal_token_401`
+  - `test_missing_user_assertion_401`
+  - `test_client_not_allowlisted_403`
+  - `test_portal_token_with_upn_rejected`
+  - `test_user_wrong_audience_401`
+  - `test_expired_401`
+  - `test_hs256_rejected_without_dev_auth`
+  - `test_alg_none_rejected`
+  - `test_session_cookie_ignored`
+- `tests/api/test_placement.py`:
+  - `test_rep_places_pending_of_own_department_then_ready`
+  - `test_rep_place_into_other_department_scope_forbidden`
+  - `test_rep_cannot_see_unknown_department_404`
+  - `test_admin_places_unknown_department`
+  - `test_head_pmo_viewer_place_403_or_404`
+  - `test_place_non_pending_409`
+  - `test_place_self_forbidden`
+  - `test_pending_list_scoped_to_department`
+  - `test_pending_list_viewer_403`
+- `tests/e2e_backend/test_onboarding_wm.py::test_a15_onboarded_user_jwt_request_succeeds`.
+
+**test.sh after:** unchanged.
+
+### Step 1b.4: UI: member actions in Group Members and the side panel (small UI step)
+**Spec:** §12.5.2 (v0.3), §12.4, §12.6 F5/F9/F10, §12.7, U9–U11, U7.
+
+**Files:**
+- `frontend/src/components/MemberActionDialog.tsx` (new; reason field, optional group select, optional typed-upn confirm).
+- `frontend/src/components/MemberSidePanel.tsx` ("פעולות" section).
+- `frontend/src/pages/group/Members.tsx` (muted kicked rows, "מושעה" badge).
+- `frontend/src/components/StateBadge.tsx`.
+- `frontend/src/api/{queries,types}.ts` (`useMemberAction(groupId, period)`, `useMoveTargets(groupId, upn)`, `Member.actions`).
+- `frontend/src/i18n/{he,errors}.ts` (`he.memberActions`, the new codes).
+- `frontend/e2e/fixtures.ts` (`fakeFail(endpoint, times)` through `fake('/_test/fail', ...)`).
+- `frontend/e2e/member-actions.spec.ts`, `frontend/src/components/MemberActionDialog.test.tsx`.
+
+**Build:**
+- Buttons appear only from server `actions`.
+- Each action writes through the existing write helper (reason header, Idempotency-Key), invalidates members and summary, and shows the `SyncBadge` per row.
+- Delete keeps the confirm button disabled until the typed upn matches exactly.
+- Use existing components and Mantine RTL. Do not add a new design.
+
+**Tests:**
+- Vitest `MemberActionDialog.test.tsx`: `reason required`, `delete confirm disabled until exact upn`, `move lists targets`.
+- Playwright `member-actions.spec.ts`:
+  - `U9 head kicks and restores a member`
+  - `U9 head sees no move or delete and no actions on own row`
+  - `U10 rep moves a member within the department`
+  - `U10 admin moves a member across departments`
+  - `U11 admin delete requires typed upn`
+  - `U7 viewer and PMO get 403 on lifecycle endpoints` (via `page.request`)
+
+**test.sh after:** unchanged. Check the run time is still under about 4 min.
+
+### Step 1b.5: UI: pending placement lists; Phase 1b wrap-up (small UI step)
+**Spec:** §12.5.4 tab 5, §12.5.5 pending placement, §12.6 F7, U12, §16 Phase 1b exit.
+
+**Files:**
+- `frontend/src/components/PendingPlacementsTable.tsx` (new; reuses `MemberActionDialog` with a group select).
+- `frontend/src/pages/department/Pending.tsx` (route `/department/:id/pending`, tab "ממתינים לשיבוץ", shown when `actions.place`).
+- `frontend/src/pages/department/DepartmentPage.tsx`.
+- `frontend/src/pages/Platform.tsx` (replaces the placeholder with a pending-placement section only).
+- `frontend/src/routes.tsx`, `frontend/src/api/queries.ts` (`usePendingPlacements(deptId | 'all')`, `usePlace`), `frontend/src/i18n/he.ts`.
+- `app/services/views.py` (department summary `actions.place`).
+- `frontend/e2e/pending.spec.ts`, `PROGRESS.md`.
+
+**Tests (Playwright `pending.spec.ts`):**
+- `U12 rep places a pending user of the department`
+- `U12 admin places an unknown-department user from the platform view`
+- `U12 group head has no pending tab and the API returns 404`
+
+**Wrap-up:**
+- Every test in the table below exists and passes.
+- `tests/test_repo_hygiene.py` passes.
+- PROGRESS.md: Phase 1b done, questions D14–D25, next = Phase 2.
+
+**test.sh after:** unchanged. Run it fully and record the time in PROGRESS.md.
+
+### Phase 1b acceptance mapping
+
+| Criterion | Step | Test(s) |
+|---|---|---|
+| §8.2 v0.3 schema (no sync tables, pending fields, `depends_on`) | 1b.1 | Step 1 schema test (updated), `test_outbox_chain.py::*` |
+| §10 lifecycle endpoints in the fake and client (V6/V7 locally) | 1b.1 | `test_fake_lifecycle.py::*`, `test_client_lifecycle.py` |
+| Chained, frozen, gone-ok outbox | 1b.1 | `test_outbox_chain.py::test_failed_predecessor_holds_chain_until_retry`, `::test_frozen_payload_not_rebuilt`, `::test_delete_404_counts_as_applied` |
+| Kick / restore (§9.3, §9.4) | 1b.2, 1b.4 | `test_member_kick.py::*`; `member-actions.spec.ts` U9 |
+| Move order and invariant (A9 without shares, A12) | 1b.2, 1b.4 | `test_member_move.py::test_move_order_add_update_delete`, `test_move_invariant.py::test_a12_…`, `::test_a9_…`; U10 |
+| Delete with double confirm | 1b.2, 1b.4 | `test_member_delete.py::*`; U11 |
+| Permissions, all actions × roles (allowed and 403/404/422) | 1b.2, 1b.3 | `test_lifecycle_permissions.py::test_matrix`, `test_placement.py::*` |
+| Self-targeting forbidden | 1b.2, 1b.3 | `test_matrix[self-*]`, `test_placement.py::test_place_self_forbidden` |
+| A14 kick blocks the JWT | 1b.2 | `test_kick_wm.py::test_a14_…` |
+| Onboarding idempotency (per upn and Idempotency-Key) | 1b.3 | `test_onboarding.py::test_same_idempotency_key_replay_no_new_rows`, `::test_existing_user_other_key_no_changes`, `::test_concurrent_first_calls_one_employee` |
+| Pending placement | 1b.3, 1b.5 | `test_onboarding.py::test_no_group_pending_no_litellm_calls`, `::test_multiple_groups_pending`, `test_placement.py::*`; U12 |
+| Secret never shown (D15, NFR5) | 1b.3 | `test_onboarding.py::test_secret_never_returned_stored_or_logged`, `::test_install_only_when_ready_and_has_no_secret` |
+| Portal authentication (D14) | 1b.3 | `test_portal_jwt.py::*` |
+| A15 onboarded user can call the model | 1b.3 | `test_onboarding_wm.py::test_a15_…` |
+| U7 viewer has no lifecycle actions | 1b.4 | `member-actions.spec.ts` "U7 viewer and PMO get 403…" |
+| NFR10 public-repo hygiene | 1b.1 | `test_repo_hygiene.py::test_tracked_files_have_no_secrets_or_internal_names` |
+
+---
+
 ## 3. Phase 1 acceptance mapping (§16 exit criteria)
 
 | Criterion | Step | Test(s) |
@@ -756,28 +1060,28 @@ npm run -s e2e
 
 ## 4. Later phases (outline only)
 
-**Phase 2: Grants and expiry (§7.3, §7.7, §7.9; A1, A9 manual move, A11; U5)**
+**Phase 2: Grants and expiry (§7.3, §7.7, §7.9; A1, A9 with a share, A11; U5)**
 - Backend:
-  - `POST/PATCH /grants`, `/grants/{id}/close`, shares CRUD, `GET /departments/{id}/pmo-pool`, `/projects/{ref}/summary`, with `lock(PMO)` and codes `PMO_POOL_INSUFFICIENT`, `SHARE_EXCEEDS_GRANT`, `SHARE_EXPIRY_AFTER_GRANT`, `GRANT_BELOW_SHARED`.
+  - `POST/PATCH /grants`, `/grants/{id}/close`, shares CRUD, `GET /departments/{id}/pmo-pool` and `/projects/{ref}/summary`. They use `lock(PMO)` and the codes `PMO_POOL_INSUFFICIENT`, `SHARE_EXCEEDS_GRANT`, `SHARE_EXPIRY_AFTER_GRANT`, `GRANT_BELOW_SHARED`.
   - FR-P4 temp-increase recomputation (both fields together), and the attribution formula §7.3.1 (unit tests).
   - Scheduler process: expiry, close, return.
-  - Reconciliation FR-RC1/2, reusing `outbox/desired.py` against `/team/info`, `/organization/info` and `/key/list`, with a drift log.
-  - Notifications FR-N plus `/me/notifications*`.
-  - Manual move service (§9.3 order).
+  - Reconciliation FR-RC1/2, reusing `outbox/desired.py` against `/team/info`, `/organization/info` and `/key/list`, with a drift log. The JWT mapping active flag and blocked keys follow employee status.
+  - Fill in `lifecycle.close_member_shares` (reason `move` | `manual`) for move and delete (FR-P6). A9 with an active share.
+  - Notifications FR-N plus `/me/notifications*`: new pending placement (rep, or admins for unknown department), employee moved in (new group head), outbox failures.
   - Extend the fake with the matching behavior.
 - UI: PMO screens (§12.5.3), the Group Grants tab, the Department Group heads tab, notifications. Complete the grant half of U2, plus U5.
 
-**Phase 3: AD sync, service keys, production (§9, FR-K; A9, A12)**
-- `ldap3` directory, sync runs with dry-run and safety gate (`sync_run`, `sync_action`), approve and resolve endpoints, `/departments/{id}/review-items`, role mirroring (`org_admin`, team `admin`), leaver block and grace period.
+**Phase 3: Directory, service keys, production (FR-K)**
+- `ldap3` implementation of `Directory` (one-time onboarding lookup, owner names, login roles), with `DirectoryUnavailable` on LDAP errors. It needs a contract test against a test LDAP. There is no sync, dry-run, safety gate, role mirroring or leaver grace period (owner decision 20/10/2026).
 - `/service-keys` with the secret shown once and only the hash stored; production organizations and systems.
-- `PUT /policies`, Redis status in `/status`, service-to-service ADFS JWT for the sync service.
-- UI: Department Review and Production tabs, Group Service keys tab, Platform screens (§12.5.5).
+- `PUT /policies`, Redis status in `/status`, and group creation by the platform admin (`/team/new` at zero budget, §9.3).
+- UI: Department Production tab, Group Service keys tab, the rest of the Platform screens (§12.5.5). Pending placement there is already done in Phase 1b.
 
 **Phase 4: Reports (FR-R)**
 - `/reports/allocation`, `/reports/usage`, `/reports/grants`, `/reports/concurrency-peaks` (SpendLogs overlap), blocked-spend report, alerts.
 - Reports screens and usage charts at every level.
 
-Phase 0 (§16: LiteLLM configuration, V1–V5, A1–A8 and A10) needs the real environment. The `[real]` contract tests from Steps 3 and 9 are its starting point, and A6 can already run on the fake.
+Phase 0 (§16: LiteLLM configuration, V1–V7, A1–A8 and A10) needs the real environment. The `[real]` contract tests from Steps 3 and 9 are its starting point; add `[real]` variants of A12, A14 and A15 for V6/V7. A6 can already run on the fake.
 
 ## 5. Questions for Maor
 
@@ -792,3 +1096,21 @@ Phase 0 (§16: LiteLLM configuration, V1–V5, A1–A8 and A10) needs the real e
 8. **Team `budget_duration`.** It is listed in §10 but not in §8.1; it is set to the department period so team spend resets. Calendar-month alignment of `"1mo"` is re-checked in Phase 0 (V4).
 9. **Organization `models`.** It is not sent in Phase 1, because sending it would restrict the models a department can use.
 10. **D6 concurrency and rpm policy.** Placeholder values (concurrency 1/4/8, rpm 1/120/600) until pilot measurements exist.
+
+Phase 1b questions (apply the default and keep going):
+
+11. **Onboarding portal authentication (D14).** Two ADFS JWTs are checked against the ADFS JWKS:
+    - the portal's client-credentials token, with an allow-listed client id (`ONBOARDING_CLIENT_IDS`) and the WM audience;
+    - the user's ADFS JWT, which supplies `upn`, with allow-listed audiences (`ONBOARDING_USER_AUDIENCES`; empty disables onboarding).
+
+    Dev uses HS256 test-signed tokens only with `DEV_AUTH=1`. Please confirm the client id claim (`appid` vs `azp`) and the user token audience ADFS issues to the portal.
+12. **Key delivery (D15).** The personal key secret is never returned. Claude Code authenticates with the user's ADFS JWT, which LiteLLM maps by upn, so nothing can be lost and there is no "rotate key" action. If the portal must hand out a static key instead, we add "show the secret once" plus an explicit rotate action, which reverses NFR5.
+13. **Delete order (D16).** The order is: delete the mapping, delete the key, remove the membership, delete the user. Your draft removed the membership first, which would leave the key on a team without membership.
+14. **Department representative kick and restore (D17).** Yes, for members and group heads of their department; not for other representatives.
+15. **Over-allocation from default caps (D18).** Onboarding, place and move add the full default cap even if the group becomes over-allocated. The group then shows the warning; the action is not rejected.
+16. **Unknown-department pending users (D19)** are handled by the platform admin only. **A deleted user who calls onboarding again (D20)** gets `blocked`; only an admin can re-place them.
+17. **Move details (D21).** Personal model caps are cleared and concurrency/rpm kept. Moving a group head does not change their AD role.
+18. **JWT mapping inactive flag (D22, V6).** If LiteLLM has no such flag, kick deletes the mapping and restore recreates it.
+19. **In-progress guard (D23).** Move, delete and place return 409 `LIFECYCLE_IN_PROGRESS` while earlier changes are unapplied. Kick and restore are always queued in order.
+20. **Public repository (D25, NFR10).** Placeholders only (`corp.example`, `litellm.corp.example`). `.env` stays gitignored, tests generate dummy secrets, and a hygiene test scans tracked files. Before publishing, the owner should scan the full git history (not only HEAD) and provide internal names to block through a gitignored `.public-denylist`.
+21. **F5/F6 wording.** F6 (a manager's own cap, DR9) is unrelated to sync, so it is kept. F5 (move) and F7 (sync review) are replaced, and F8–F10 are added.

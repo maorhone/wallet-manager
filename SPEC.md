@@ -1,12 +1,14 @@
 # Wallet Manager for LiteLLM: Requirements and Specification
 
-Version 0.2 · 2026-10-19 · Status: ready for implementation planning
+Version 0.3 · 2026-10-20 · Status: ready for implementation planning
 
-This document specifies a web system ("Wallet Manager") that lets an organization allocate model budgets, per-model allowances and concurrency limits down an organizational hierarchy, on top of a LiteLLM Enterprise proxy. It has a web UI for every role, and a backend server that sits between the UI and LiteLLM. LiteLLM remains the runtime enforcement engine. The Wallet Manager owns allocation decisions, validates them, writes them to LiteLLM through its management API, keeps them in sync with Active Directory, and reports on them.
+This document specifies a web system ("Wallet Manager") that lets an organization allocate model budgets, per-model allowances and concurrency limits down an organizational hierarchy, on top of a LiteLLM Enterprise proxy. It has a web UI for every role, and a backend server that sits between the UI and LiteLLM. LiteLLM remains the runtime enforcement engine. The Wallet Manager owns allocation decisions, validates them, writes them to LiteLLM through its management API, provisions each employee on their first login (called by the onboarding portal), offers manual member actions (kick, restore, move, delete, place), and reports on them.
 
 Companion file: `litellm_wallets_erd.mmd` (Mermaid ERD of the LiteLLM tables this system writes to).
 
 Changes in 0.2: system architecture (section 5), managers' personal wallets (4.1, FR-G5), employee self-view (FR-E), web UI and UX (section 12), UI-facing API (11.1), UI phases in the delivery plan.
+
+Changes in 0.3 (owner decision 20/10/2026: no automatic AD sync; first-login onboarding API + manual member actions): the periodic AD sync, its dry-run, safety gate, `sync_run`/`sync_action` tables, `/sync/*` endpoints, role mirroring and sync notifications are removed. New: first-login onboarding called by the external onboarding portal (9.1, 9.2), manual member actions kick, restore, move, delete and place (9.3, 9.4), pending placement (9.5), their API (11.1), screens (12.5) and flows (12.6), public-repository hygiene (NFR10), delivery Phase 1b (16).
 
 ---
 
@@ -26,6 +28,9 @@ Changes in 0.2: system architecture (section 5), managers' personal wallets (4.1
 | מכסה | Cap | A spend ceiling at some level |
 | קופת מודל | Model pot | A per-model spend ceiling (`model_max_budget`) |
 | ענף | Branch | Not modeled. Out of scope |
+| פורטל הצטרפות | Onboarding portal | No LiteLLM object. External web app that shows the Claude Code install snippet and calls `POST /onboarding` (9.2) |
+| ממתין לשיבוץ | Pending placement | Employee known to the Wallet Manager with no budget group yet; no LiteLLM user, membership or key (9.5) |
+| השעיה | Kick | Personal key blocked and JWT mapping inactive; reversible by restore (9.4) |
 
 Budget units are LiteLLM spend units. The organization's internal model price list makes one unit equal one credit (see section 18).
 
@@ -39,7 +44,7 @@ Budget units are LiteLLM spend units. The organization's internal model price li
 - G3. The PMO grants time-limited budget to a group for a project. The group head shares it to the employees who work on the project. Unused grant money returns to the PMO pool when it expires or when the employee leaves the group.
 - G4. Per-model allowances: a group-level pot for a specific model, and per-employee caps for that model.
 - G5. Per-employee concurrency (`max_parallel_requests`) and rate limits on the single personal key.
-- G6. Membership follows Active Directory automatically: joiners, movers, leavers.
+- G6. Employees are provisioned on their first login: the onboarding portal calls the Wallet Manager, which looks up the employee's budget group in AD once and provisions them. There is no automatic AD sync. Later membership changes are manual actions by the group head, department representative or platform admin (kick, restore, move, delete, place; section 9). (Owner decision 20/10/2026.)
 - G7. Guarantee, at allocation time, that no level allocates more than it received (LiteLLM does not check sums; see 3.3).
 - G8. Production systems and group bots get keys that are not tied to a person.
 - G9. Every person sees the state of their own wallet, and every manager sees the state of the wallets under them.
@@ -91,6 +96,8 @@ All items in 3.1 to 3.4 were verified against the LiteLLM source on the `main` b
 - V3. That organization-level `model_max_budget` is still not enforced (R5).
 - V4. Exact config placement of `upperbound_key_generate_params`, `apply_user_budget_to_team_keys`, `fail_closed_rate_limit_enforcement`, JWT settings and Redis settings.
 - V5. That `temp_budget_increase` on a team member expires on time without any external action.
+- V6. That a JWT key mapping can be set inactive (an `is_active`-style flag on `/jwt/key/mapping/update`) and that an inactive mapping rejects the JWT like an unmapped upn (A10). If not, kick deletes the mapping and restore recreates it (D22).
+- V7. Body shapes and not-found behavior of `POST /key/delete` (`keys`), `POST /user/delete` (`user_ids`) and `POST /team/member_delete` (`team_id`, `user_id`), and that `/key/update` with a new `team_id` keeps the key's spend and limits.
 
 ---
 
@@ -135,10 +142,10 @@ flowchart LR
     UI["Web UI (SPA)"] --> API["Wallet Manager API + BFF"]
     API --> WMDB[("Wallet Manager DB")]
     WK["Workers: outbox, expiry scheduler, reconciliation"] --> WMDB
-    SYNC["AD sync (CronJob)"] --> WMDB
   end
-  ADFS["ADFS"] -- "OIDC login" --> API
-  AD[("Active Directory")] -- "LDAPS read" --> SYNC
+  ADFS["ADFS"] -- "OIDC login, JWKS" --> API
+  OP["Onboarding portal (external)"] -- "POST /onboarding (portal token + user ADFS JWT)" --> API
+  AD[("Active Directory")] -- "LDAPS read, one-time lookup at onboarding" --> API
   WK -- "management API" --> LL["LiteLLM proxy"]
   LL --> LLDB[("LiteLLM DB")]
   LL --> RD[("Redis")]
@@ -153,10 +160,11 @@ flowchart LR
 |---|---|---|
 | Web UI | Role-aware screens (section 12). Talks only to the Wallet Manager API | Static SPA served by the API or a web server |
 | Wallet Manager API + BFF | OIDC login with ADFS, session cookie, roles from AD groups, validation, writes to its own DB and outbox, read models for the UI | OpenShift Deployment, 2+ replicas |
-| Wallet Manager DB | Allocations, grants, policies, sync results, outbox, audit | PostgreSQL, separate from LiteLLM's database |
+| Wallet Manager DB | Allocations, grants, policies, pending placements, outbox, audit | PostgreSQL, separate from LiteLLM's database |
 | Outbox worker | Applies pending writes to LiteLLM through the management API, with retries | OpenShift Deployment, single active consumer |
 | Scheduler | Grant and share expiry, temporary-increase recomputation (FR-P4), reconciliation (FR-RC), scheduled reports | Same image as the worker, separate Deployment |
-| AD sync | Reads AD, computes actions, safety gate (section 9) | OpenShift CronJob |
+| Directory lookup | One-time read of a new employee's AD groups at onboarding (9.1), owner names (FR-E3), roles at login. No periodic sync | Inside the API |
+| Onboarding portal | External web app. Shows the Claude Code install snippet, calls `POST /onboarding` with its own ADFS token and the user's ADFS JWT (9.2) | External, not part of this system |
 | LiteLLM | Runtime enforcement on every model request | Existing |
 
 ### 5.2 Why a server between the UI and LiteLLM
@@ -179,7 +187,7 @@ flowchart LR
 | Wallet Manager down | No allocation changes | Model traffic is unaffected. LiteLLM keeps enforcing the last applied values. Member temporary increases still expire on time inside LiteLLM |
 | LiteLLM management API down | Changes cannot be applied | Changes are accepted and queued in the outbox. The UI shows `pending` and a banner |
 | LiteLLM database unreachable for reads | No fresh spend data | UI shows the last known spend with its timestamp |
-| AD unreachable or partial result | No membership changes | Sync run aborts (safety gate) and alerts |
+| AD unreachable at onboarding | New employees cannot be provisioned | `POST /onboarding` returns 503 `DIRECTORY_UNAVAILABLE` and writes nothing; the portal retries. Existing employees and manual actions are unaffected |
 | Redis down | Rate and concurrency counters unavailable | LiteLLM with fail-closed returns 503 to model requests. Not a Wallet Manager concern, but shown on the admin status screen |
 
 ---
@@ -191,16 +199,16 @@ Roles are derived from AD group membership at login and refreshed on every sessi
 | Role | Scope | Can |
 |---|---|---|
 | Employee | Self | See their own wallet (FR-E). Every authenticated user has this role |
-| Group head | One group | Set employees' base caps, share grants to employees, set personal model caps, set concurrency within the allowed range, manage group service keys. Not for themselves (DR9) |
+| Group head | One group | Set employees' base caps, share grants to employees, set personal model caps, set concurrency within the allowed range, manage group service keys. Kick and restore members of the group (9.4). Not for themselves (DR9), not for co-heads |
 | PMO | One department | Create, change and close grants to groups in the department, from the PMO pool |
-| Department representative | One department | Split the department into groups' base budgets, PMO pool and reserve. Set group model pots. Set group heads' personal values. Handle sync items for the department |
-| Platform admin | Global | Departments, production organizations, policies, sync and outbox operations. Set department representatives' personal values |
+| Department representative | One department | Split the department into groups' base budgets, PMO pool and reserve. Set group model pots. Set group heads' personal values. Move employees between groups of the department, place pending employees of the department, kick and restore employees and group heads of the department (9.4, 9.5). Not for themselves, not for other representatives |
+| Platform admin | Global | Departments, production organizations, policies and outbox operations. Set department representatives' personal values. All member actions, including moves across departments, delete, and placing employees whose department is unknown. Not for themselves |
 | Viewer | Any scope | Read the screens of that scope, no actions |
-| Sync service | Global | Provisioning actions from AD only (section 9) |
+| Onboarding portal | Global | `POST /onboarding` and `GET /onboarding` only, for the user whose ADFS JWT it presents (9.2) |
 
 A person can hold several roles, for example group head and employee. The UI lets them switch between scopes (12.1).
 
-The sync job also mirrors roles into LiteLLM (`org_admin` on the organization membership, `admin` on the team member) so the LiteLLM UI shows consistent read access.
+Roles are not mirrored into LiteLLM by any job (owner decision 20/10/2026). The role fields in 8.1 are informational and are not reconciled.
 
 ---
 
@@ -263,7 +271,7 @@ Member spend comes from `LiteLLM_TeamMembership.spend`, or from `LiteLLM_SpendLo
 - FR-R5. Spend of employees whose base cap or model cap reached 100% (blocked), per day.
 
 ### 7.9 Notifications (FR-N)
-- FR-N1. In-app notifications, and email if an internal mail relay is available: employee at 80% and 100% of their cap; group at 80% and 100%; grant expiring in 7 days; grant under 20% used with 7 days left; new group created by sync with zero budget; sync items needing review; outbox failures (platform admins).
+- FR-N1. In-app notifications, and email if an internal mail relay is available: employee at 80% and 100% of their cap; group at 80% and 100%; grant expiring in 7 days; grant under 20% used with 7 days left; a new pending placement (the department representative, or platform admins when the department is unknown, 9.5); an employee moved into a group (the new group head); outbox failures (platform admins).
 - FR-N2. Each user can mute non-critical notification types.
 
 ### 7.10 Audit (FR-A)
@@ -305,9 +313,12 @@ grp             (id, litellm_team_id, department_id, name, ad_group_dn,
                  base_budget, default_member_cap, overalloc_factor default 1.0,
                  tpm_limit, model_tpm_limits jsonb, status)       -- active | pending_dept_move | archived
 group_model_pot (group_id, model, amount)
-employee        (upn PK, display_name, litellm_user_id, group_id, base_cap, status, -- active | blocked | left
+employee        (upn PK, display_name, litellm_user_id, group_id null, base_cap,
+                 status,                                          -- active | blocked (kicked) | left (deleted) | pending_placement
                  key_token_hash, max_parallel, rpm_limit, model_tpm_limits jsonb,
-                 left_at)
+                 left_at,
+                 pending_department_id null, pending_reason null,  -- no_budget_group | multiple_budget_groups | not_in_directory
+                 pending_since null)                               -- 9.5; the three pending_* fields are cleared on place
 employee_model_cap (upn, model, amount)
 grant           (id, department_id, group_id, amount, model null, project_ref, purpose,
                  starts_at, expires_at, status,                   -- pending | active | closed
@@ -318,10 +329,9 @@ service_key     (id, owner_kind, owner_id, litellm_token_hash, alias, max_budget
                  max_parallel, rpm_limit, models text[], status)
 policy          (key, value jsonb)  -- concurrency min/default/max, rpm default, over-allocation, thresholds
 role_binding    (ad_group_dn, role, scope_kind, scope_id)
-sync_run        (id, started_at, finished_at, dry_run, stats jsonb, aborted_reason)
-sync_action     (id, run_id, kind, upn, payload jsonb, status, error) -- status includes needs_review
 litellm_write   (id, entity, entity_id, endpoint, payload jsonb, status, attempts,
-                 last_error, idempotency_key, created_at)          -- outbox, FR-RC3
+                 last_error, idempotency_key, created_at,
+                 depends_on null references litellm_write(id))     -- outbox, FR-RC3; ordered chains (9.3)
 spend_snapshot  (scope_kind, scope_id, period, model null, spend, taken_at) -- cached for the UI
 notification    (id, upn, kind, scope_kind, scope_id, payload jsonb, created_at, read_at)
 notification_pref (upn, kind, muted)
@@ -331,45 +341,95 @@ audit_log       (id, at, actor_upn, actor_role, entity, entity_id, before jsonb,
 
 Write path: validate, then write the domain rows and an outbox row (`litellm_write`) in one transaction, then a worker applies the outbox to LiteLLM (5.3).
 
+Ordered actions (9.3) chain their outbox rows through `depends_on`: the worker applies a row only after the row it depends on is `applied`. While the earlier row is pending or failed, the later row stays `pending` (held). Retrying the failed row releases the chain. Rows whose target must not follow later state changes (`/team/member_delete` of the old group, `/key/delete`, `/user/delete`, `/jwt/key/mapping/delete`) keep the payload fixed at enqueue time. All other rows are rebuilt from the desired state when they are applied.
+
 ---
 
-## 9. Active Directory sync
+## 9. User lifecycle: onboarding and manual actions
 
-### 9.1 Source data
-- Dedicated AD security groups for budget groups, under a configured OU (for example `OU=LLM-Budget-Groups`). Each maps to one Team. One per department is the department staff group.
-- Department of a group: an attribute on the AD group or its parent OU (configurable).
-- Role groups: department representatives, PMO staff, group heads and platform admins, per scope.
-- Read through LDAPS with a read-only service account.
+Owner decision 20/10/2026: there is no automatic AD sync. An employee is provisioned once, on first login, through the onboarding portal. Every later change is a manual action with a reason, an Idempotency-Key, audit, outbox and sync badges (5.3, 5.4).
 
-### 9.2 Algorithm
-Full desired-state reconciliation, not event-driven. Default interval 15 minutes, plus on-demand. Single instance (database advisory lock).
+### 9.1 Directory lookup at onboarding
+- Budget groups are dedicated AD security groups (for example under `OU=LLM-Budget-Groups`), each mapped to one Team (`grp.ad_group_dn`). One per department is the department staff group. A department is identified by `department.ad_group_dn`.
+- On the first `POST /onboarding` for an unknown upn, the Wallet Manager reads that user's AD groups once, through the Directory interface (LDAPS with a read-only service account, `ldap3`; a fixture directory in development). It never reads AD again for that user.
+- Placement:
+  - Exactly one active budget group → provision into it (9.3 Onboarding).
+  - No budget group → `pending_placement`, reason `no_budget_group`, department = the user's department group if exactly one matches, else unknown.
+  - Two or more budget groups → `pending_placement`, reason `multiple_budget_groups`, department = their common department, else unknown.
+  - User not found in AD → `pending_placement`, reason `not_in_directory`, department unknown.
+- If AD is unreachable, return 503 `DIRECTORY_UNAVAILABLE` and write nothing.
 
-1. Read AD: users in scope, their budget-group membership, enabled or disabled, role groups.
-2. Build desired state: employee → group → department, roles.
-3. Read actual state from the Wallet Manager database and LiteLLM (read-only database access).
-4. Diff into actions (9.3).
-5. Safety gate: abort and alert if removals or moves exceed a threshold (default 5% of employees), or if AD returned zero users for any group that had members.
-6. Apply through the outbox. Record a `sync_run` with stats.
+### 9.2 Onboarding portal authentication and response
+The onboarding portal is an external web app. It calls `POST /onboarding` (11.1) server to server with two ADFS JWTs. Both are validated against the ADFS JWKS (RS256 only, issuer = the ADFS issuer, `exp`/`nbf` with 60 s skew). Default per D14:
+- `Authorization: Bearer <portal token>`: the portal's own client-credentials token. `aud` = the Wallet Manager API identifier (`ONBOARDING_AUDIENCE`). Its client id claim (`appid`, else `client_id`, else `azp`) must be in `ONBOARDING_CLIENT_IDS`. It must not carry `upn`. A wrong client gives 403 `FORBIDDEN`.
+- `X-User-Assertion: <user ADFS JWT>`: `aud` in `ONBOARDING_USER_AUDIENCES`, with a `upn` claim. The upn comes only from this token; the body never names a user.
+- Missing, invalid or expired tokens give 401 `UNAUTHENTICATED`. Session cookies are ignored on these endpoints, and CSRF does not apply (no cookies). Tokens are never logged.
+- In development only (`DEV_AUTH=1`), HS256 tokens signed with `DEV_JWT_SECRET` are also accepted. The API refuses to start with `DEV_JWT_SECRET` set and `DEV_AUTH` off.
 
-Dry-run mode produces the action list and report without applying. Dry-run is the default for the first weeks after go-live. A platform admin can approve a dry-run or an aborted run from the UI (12.5.5).
+Idempotency: per upn, and per `Idempotency-Key` (required). If the employee already exists, the call changes nothing and returns the current status. Concurrent first calls for the same upn are serialized by a per-employee advisory lock; the second returns the first's result. The audit actor is the upn, with role `onboarding_portal` and the portal client id in the audit context.
 
-### 9.3 Actions
+Response (201 when the employee was created now, else 200):
+```json
+{"upn": "dani@corp.example", "status": "ready | provisioning | pending_placement | blocked",
+ "reason": null, "group": {"id": 1, "name": "Group A1"}, "department": {"id": 1, "name": "Department D1"},
+ "install": {"litellm_base_url": "https://litellm.corp.example", "auth": "adfs_jwt",
+             "env": {"ANTHROPIC_BASE_URL": "https://litellm.corp.example",
+                     "ANTHROPIC_AUTH_TOKEN": "<the user's ADFS JWT, printed by the portal's login helper>"},
+             "notes": ["..."]},
+ "request_id": "..."}
+```
+- `status`, derived from the employee and their outbox rows:
+  - `ready`: active, and every outbox row for the employee is applied.
+  - `provisioning`: active, with pending rows, or with failed rows (reason `provisioning_failed`).
+  - `pending_placement`: reason as in 9.1.
+  - `blocked`: kicked (reason `kicked`) or deleted (reason `deleted`).
+- `install` is present only when `ready`. The `env` values are text for the snippet; `ANTHROPIC_AUTH_TOKEN` is a placeholder, never a secret.
+- Key delivery (D15): the personal key secret is never returned (NFR5). The client authenticates to LiteLLM with the user's own ADFS JWT, which LiteLLM maps to the personal key through the upn mapping (3.2). There is nothing to lose and nothing to re-issue, so there is no rotate action. The plaintext from `/key/generate` is dropped by the worker; only the hash is stored.
 
-| AD event | Actions, in order |
-|---|---|
-| Joiner | `/user/new` (user_id = upn) → `/team/member_add` with the group's default cap → `/key/generate` (user_id, team_id, max_parallel_requests, rpm_limit, model_tpm_limit) → `/jwt/key/mapping/new` (claim `upn`) |
-| Move within or across departments | Close the employee's active grant shares with reason `move`, returning unused money to the PMO pool (FR-P6) → `/team/member_add` to the new group, default cap → `/key/update` with the new `team_id` → `/team/member_delete` from the old group |
-| Leaver or disabled account | `/key/block` immediately → set the JWT mapping inactive → after a grace period (default 30 days): close shares, `/team/member_delete` |
-| Re-enabled account | Unblock the key, re-activate the mapping, re-add membership if it was removed |
-| New budget group in AD | `/team/new` with `organization_id` and `max_budget = 0`. Notify the department representative |
-| Group moved to another department in AD | No automatic action. Mark the group `pending_dept_move` and notify both representatives and the platform admin |
-| Group removed from AD | No automatic action. Flag for review |
-| Employee in two budget groups | No change. Flag for review |
-| Role group change | `/team/member_update` role, `/organization/member_update` role |
+### 9.3 Actions and their order
+Each action's LiteLLM calls run in this order, chained through `litellm_write.depends_on` (8.2). A failed step holds the later steps until it is retried; deletes treat "not found" as applied.
 
-The order in a move (add, repoint the key, remove) guarantees the key never points to a group the employee is not a member of.
+| Action | Wallet Manager change | LiteLLM calls, in order |
+|---|---|---|
+| Onboarding / place | Employee `active` in the group, base cap = the group's default member cap (D4) | `/user/new` (user_id = upn) → `/team/member_add` with the group's default cap → `/key/generate` (user_id, team_id, max_parallel_requests, rpm_limit, model_tpm_limit) → `/jwt/key/mapping/new` (claim `upn`) |
+| Pending placement | Employee `pending_placement`, no group | None |
+| Kick | Status `blocked` | `/key/block` → `/jwt/key/mapping/update` inactive |
+| Restore | Status `active` | `/key/unblock` → `/jwt/key/mapping/update` active |
+| Move within or across departments | Close the employee's active grant shares with reason `move` (FR-P6; a no-op until Phase 2) → group = the new group, base cap = its default cap, personal model caps cleared, key limits kept | `/team/member_add` to the new group, default cap → `/key/update` with the new `team_id` → `/team/member_delete` from the old group (old team id fixed at enqueue) |
+| Delete | Close active shares with reason `manual` (no-op until Phase 2) → status `left`, `left_at` set, model caps removed | `/jwt/key/mapping/delete` → `/key/delete` → `/team/member_delete` → `/user/delete` (D16) |
+| New budget group | Created by the platform admin with a zero base | `/team/new` with `organization_id` and `max_budget = 0` |
 
-Access revocation does not depend on this job. A disabled AD account cannot obtain an ADFS JWT, so access stops when the current token expires.
+The order in a move (add, repoint the key, remove) and in a delete (remove the key before the membership) guarantees that the key never points to a team the employee is not a member of. This holds at every step, including partial failure and retry.
+
+Access revocation does not depend on this system. A disabled AD account cannot obtain an ADFS JWT, so access stops when the current token expires. Kick stops it at once.
+
+### 9.4 Manual action rules
+- Every action needs a reason and an Idempotency-Key, writes audit and outbox rows in one transaction, and returns sync status per entity (5.3).
+- Self-targeting is rejected with `SELF_ALLOCATION_FORBIDDEN` (FR-G5 spirit). Nobody kicks, restores, moves, places or deletes themselves.
+- Target tiers:
+  - A group head acts only on plain members of their own group, not on co-heads.
+  - A department representative acts on members and group heads of their own department, not on other representatives or platform admins.
+  - Otherwise the response is `SCOPE_FORBIDDEN`.
+- Who can do what:
+
+| Action | Group head | Department representative | Platform admin |
+|---|---|---|---|
+| Kick, restore | Own group | Own department | Everyone |
+| Move | | Between groups of own department | Any, including across departments |
+| Place | | Pending employees of own department, into its groups | Any, including unknown department |
+| Delete | | | Everyone (UI requires typing the upn) |
+
+- State rules:
+  - Kick needs `active`; restore needs `blocked`; move needs `active` or `blocked` and a different active target group; place needs `pending_placement` (admin: also `left`, to re-onboard). Otherwise 409 `MEMBER_STATE_CONFLICT`.
+  - Move, delete and place are rejected with 409 `LIFECYCLE_IN_PROGRESS` while the employee has pending or failed outbox rows.
+- Moving a group head does not change their AD role groups; the role still comes from AD at login.
+
+### 9.5 Pending placement
+- Pending employees have no LiteLLM user, membership or key, so model requests with their JWT are rejected (A10).
+- They are listed:
+  - on the department's pending list for the department representative, when the department is known;
+  - on the platform list for platform admins, always, including the unknown-department ones.
+- Place resolves an entry into a group and provisions as in onboarding. The next `GET /onboarding` returns `provisioning`, then `ready`.
 
 ---
 
@@ -383,10 +443,10 @@ Writes use a dedicated LiteLLM proxy-admin key, stored as an OpenShift secret.
 | Department roles | `POST /organization/member_add`, `PATCH /organization/member_update` | `user_id`, `role` (`org_admin`) |
 | Group | `POST /team/new`, `POST /team/update` | `team_id`, `team_alias`, `organization_id`, `max_budget`, `budget_duration`, `model_max_budget`, `tpm_limit`, `model_tpm_limit` (stored in `metadata`), `team_member_budget`, `team_member_budget_duration`, `team_member_model_max_budget` |
 | Membership | `POST /team/member_add`, `POST /team/member_update`, `POST /team/member_delete` | `team_id`, `user_id`, `role`, `max_budget_in_team`, `budget_duration`, `temp_budget_increase`, `temp_budget_expiry` (both together), `model_max_budget`, `tpm_limit`, `rpm_limit` |
-| User | `POST /user/new`, `POST /user/update` | `user_id`, `sso_user_id`, `user_email` |
-| Personal key | `POST /key/generate`, `POST /key/update`, `POST /key/block`, `POST /key/unblock` | `user_id`, `team_id`, `max_parallel_requests`, `rpm_limit`, `model_tpm_limit` (stored in `metadata`) |
+| User | `POST /user/new`, `POST /user/update`, `POST /user/delete` | `user_id`, `sso_user_id`, `user_email`; delete: `user_ids` |
+| Personal key | `POST /key/generate`, `POST /key/update`, `POST /key/block`, `POST /key/unblock`, `POST /key/delete` | `user_id`, `team_id`, `max_parallel_requests`, `rpm_limit`, `model_tpm_limit` (stored in `metadata`); block/unblock: `key`; delete: `keys` (V7) |
 | Service key | `POST /key/service-account/generate` | `team_id`, `max_budget`, `max_parallel_requests`, `rpm_limit`, `models` |
-| SSO mapping | `POST /jwt/key/mapping/new`, `/update`, `/delete`, `GET /jwt/key/mapping/list` | `jwt_issuer`, `jwt_claim_name`, `jwt_claim_value`, `key` or `token` |
+| SSO mapping | `POST /jwt/key/mapping/new`, `/update`, `/delete`, `GET /jwt/key/mapping/list` | `jwt_issuer`, `jwt_claim_name`, `jwt_claim_value`, `key` or `token`; update: active flag for kick and restore (V6) |
 | Info | `GET /team/info`, `GET /organization/info`, `GET /key/list` | |
 
 Required LiteLLM configuration (exact placement per V4):
@@ -400,7 +460,7 @@ Required LiteLLM configuration (exact placement per V4):
 
 ## 11. Wallet Manager API
 
-REST, JSON, OpenAPI generated. Authentication: session cookie issued by the BFF after ADFS OIDC login (12.8); service-to-service calls use ADFS JWT. Roles per section 6. Every write accepts `Idempotency-Key` and a required `reason`, and returns the affected entities with their sync status.
+REST, JSON, OpenAPI generated. Authentication: session cookie issued by the BFF after ADFS OIDC login (12.8). The onboarding endpoints accept only the onboarding portal's ADFS token plus the user's ADFS JWT (9.2); they ignore session cookies. Roles per section 6. Every write accepts `Idempotency-Key` and a required `reason`, and returns the affected entities with their sync status.
 
 ### 11.1 Endpoints
 
@@ -416,7 +476,7 @@ GET    /departments, /departments/{id}/summary?period=
 PUT    /departments/{id}/budget                 {budget, budget_period}
 PUT    /departments/{id}/split                  {groups:[{group_id, base}], pmo_pool, reserve}
 PUT    /departments/{id}/model-allowances       {model: amount}
-GET    /departments/{id}/review-items           sync items, new groups at zero budget, pending moves
+GET    /departments/{id}/pending-placements     [{upn, display_name, reason, pending_since}]   rep, admin (9.5)
 
 # Groups
 GET    /groups/{id}/summary?period=
@@ -427,6 +487,19 @@ GET    /groups/{id}/members?period=
 PUT    /groups/{id}/members/caps                [{upn, base_cap}]        bulk, single transaction
 PUT    /groups/{id}/members/{upn}/model-caps    {model: amount}
 PUT    /groups/{id}/members/{upn}/limits        {max_parallel, rpm_limit, model_tpm_limits}
+
+# Member lifecycle (9.3, 9.4). Reason and Idempotency-Key as every write. Response: write response with
+# entities [{entity: "employee", id: upn, sync_status, values: {status, group_id, base_cap}}]
+POST   /groups/{id}/members/{upn}/kick          {}                        head (own group), rep (dept), admin
+POST   /groups/{id}/members/{upn}/restore       {}                        head (own group), rep (dept), admin
+GET    /groups/{id}/members/{upn}/move-targets  [{group_id, name, department_id, department_name}]  groups the actor may move to
+POST   /groups/{id}/members/{upn}/move          {to_group_id}             rep (same department), admin (any)
+POST   /groups/{id}/members/{upn}/delete        {confirm_upn}             admin; confirm_upn must equal upn
+GET    /pending-placements?department=          all pending; department=none for unknown department   admin
+POST   /pending-placements/{upn}/place          {group_id}                rep (user's and group's department), admin
+# Errors: 401 UNAUTHENTICATED, 403 FORBIDDEN (no role on the URL scope), 404 NOT_FOUND,
+# 422 SELF_ALLOCATION_FORBIDDEN | SCOPE_FORBIDDEN | CONFIRMATION_MISMATCH | INVALID_REQUEST,
+# 409 MEMBER_STATE_CONFLICT | LIFECYCLE_IN_PROGRESS
 
 # PMO and grants
 GET    /departments/{id}/pmo-pool?period=
@@ -447,12 +520,8 @@ POST   /production/departments/{id}/systems     {name, budget}
 
 # Platform
 GET    /policies | PUT /policies
-POST   /sync/run?dry_run=true
-GET    /sync/runs, /sync/runs/{id}
-POST   /sync/runs/{id}/approve
-POST   /sync/actions/{id}/resolve               {decision, note}
 GET    /outbox?status=failed | POST /outbox/{id}/retry
-GET    /status                                  LiteLLM reachability, Redis status from LiteLLM health, last sync, outbox depth
+GET    /status                                  LiteLLM reachability, Redis status from LiteLLM health, outbox depth, pending placements count
 
 # Reports and audit
 GET    /reports/allocation?level=&id=&period=
@@ -461,10 +530,25 @@ GET    /reports/grants?department=&project_ref=
 GET    /reports/overallocation
 GET    /reports/concurrency-peaks?scope=&id=&from=&to=
 GET    /audit?entity=&id=&actor=&from=&to=
+
+# Onboarding (called by the onboarding portal, server to server; 9.2)
+POST   /onboarding        Authorization: Bearer <portal token>; X-User-Assertion: <user ADFS JWT>; Idempotency-Key (required)
+                          body {} → 201 created | 200 exists: {upn, status, reason, group, department, install, request_id}
+GET    /onboarding        same two tokens → 200 current status, never writes; 404 NOT_FOUND for an unknown upn
+# Errors: 401 UNAUTHENTICATED (missing, invalid or expired token), 403 FORBIDDEN (portal client not allow-listed),
+# 422 INVALID_REQUEST (no Idempotency-Key), 503 DIRECTORY_UNAVAILABLE (nothing written)
 ```
 
 ### 11.2 Error contract
 Validation failures return 422 with a machine-readable code and the numbers involved: requested, available, parent total. Codes: `PARENT_OVERALLOCATED`, `PMO_POOL_INSUFFICIENT`, `SHARE_EXCEEDS_GRANT`, `SHARE_EXPIRY_AFTER_GRANT`, `LIMIT_OUT_OF_POLICY`, `SELF_ALLOCATION_FORBIDDEN`, `SCOPE_FORBIDDEN`, `GRANT_BELOW_SHARED`. The UI maps each code to a Hebrew message (12.6).
+
+Lifecycle and onboarding codes, same envelope:
+- 409 `MEMBER_STATE_CONFLICT`: the action does not fit the employee's state; `details = {status}`.
+- 409 `LIFECYCLE_IN_PROGRESS`: earlier outbox rows for the employee are not applied; `details = {pending, failed}`.
+- 422 `CONFIRMATION_MISMATCH`: `confirm_upn` differs from the target.
+- 503 `DIRECTORY_UNAVAILABLE`: AD could not be read at onboarding.
+
+A replay of the same Idempotency-Key returns 200 with the stored result before any state check.
 
 ### 11.3 Over-allocation checks against live LiteLLM values
 
@@ -517,6 +601,10 @@ The PMO pool is not in LiteLLM, so the first query should allow `allocated ≤ d
 | מענקים (grants, group view) | | Share to members | Create, change, close | View | Edit all | View scope |
 | גוף פרויקטים (PMO) | | | Edit | View, set pool size | Edit all | View scope |
 | המחלקה (department) | | | View | Edit split, pots, group heads' personal values | Edit all | View scope |
+| Member actions (kick, restore) | | Own group's members | | Department's members and group heads | All | |
+| Member actions (move, place) | | | | Within own department | All, across departments | |
+| Member delete | | | | | All | |
+| ממתינים לשיבוץ (pending placement) | | | | Own department | All, including unknown department | |
 | ייצור (production) | | | | View own department | Edit | |
 | פלטפורמה (platform) | | | | | Edit | |
 | דוחות (reports) | Own | Own group | Own department grants | Own department | All | Scope |
@@ -560,7 +648,9 @@ Other components:
 | Blocked by parent | Own remaining > 0 but group or department remaining ≤ 0 | Danger, "חסום: תקציב הקבוצה נוצל" or "תקציב המחלקה נוצל" |
 | Over-allocated | Allocated to children > total | Warning on the allocating level |
 | Pending sync | Outbox rows not applied | Info badge per entity |
-| Left or blocked key | AD leaver or disabled | Muted row with reason |
+| Kicked | Status `blocked` (9.4) | Muted row, badge "מושעה", restore action for permitted roles |
+| Deleted | Status `left` | Hidden from tables; visible in history |
+| Pending placement | Status `pending_placement` | Row in the pending list with the reason, badge "ממתין לשיבוץ" |
 
 ### 12.5 Screens per role
 
@@ -581,7 +671,12 @@ Actions: none in this version except notification preferences. A "request more b
 #### 12.5.2 Group head: הקבוצה
 Tabs:
 1. Overview: group wallet card, per-model pots with used, grants received summary, top consumers this period, members near or at limit, pending sync items.
-2. Members: table with name, base cap, active shares, total, used, percent, model caps, concurrency, rpm, status badge. Actions: edit base caps inline with the remaining-to-allocate footer; "distribute evenly" and "copy previous period" helpers that fill the table but still go through the change summary; edit a member's model caps and limits in a side panel; set defaults for new members. The group head's own row is read-only (DR9).
+2. Members: table with name, base cap, active shares, total, used, percent, model caps, concurrency, rpm, status badge. Actions: edit base caps inline with the remaining-to-allocate footer; "distribute evenly" and "copy previous period" helpers that fill the table but still go through the change summary; edit a member's model caps and limits in a side panel; set defaults for new members. The group head's own row is read-only (DR9). The member side panel has an "פעולות" (actions) section, showing only the actions the server allows for that row:
+- "השעיה" (kick) and "החזרה" (restore);
+- "העברה לקבוצה אחרת" (move), for the representative and admin, with a target group list from `move-targets`;
+- "מחיקה" (delete), admin only, with a second confirmation that requires typing the upn.
+
+Each action asks for a reason, then shows the sync badge on the row. Kicked members show as muted rows with "מושעה".
 3. Grants: grants received from the PMO with amount, shared, unshared, used, expiry. Action: share a grant: choose members, amounts and expiry (default the grant's expiry, never later), see the unshared remainder update, confirm. Change or close an existing share.
 4. Models: group pots per model (read-only, set by the department) and the sum of member caps per model against each pot.
 5. Service keys: list with alias, budget, concurrency, used, status. Actions: create (the secret is shown once with a copy button and a warning), rotate, revoke.
@@ -603,16 +698,17 @@ Tabs:
 2. Split: allocation table of group bases, PMO pool and reserve, with the remaining-to-allocate footer. The department staff group appears as a regular row.
 3. Models: department allowance per model and group pots per model, with remaining per model.
 4. Group heads: personal values of each group head (base cap, model caps, limits, shares), editable here and only here (DR9).
-5. Review: items from sync for this department: new groups at zero budget (with a shortcut to allocate), groups pending a department move, employees in two budget groups, removed groups. Each item has resolve actions and a note.
+5. ממתינים לשיבוץ (pending placement): employees of the department waiting for a budget group, with reason (no budget group, several budget groups) and waiting since. Action: "שיבוץ" (place) into a group of the department, with a reason; the employee is then provisioned with the group's default cap and shows sync badges.
 6. Production: read-only view of the department's production organization, its systems and their spend.
 7. History: audit timeline for the department.
 
 #### 12.5.5 Platform admin: פלטפורמה
 - Departments: create, set budget and period, assign representatives (from AD), create the production organization and systems.
-- Sync: list of runs with stats, dry-run action lists, aborted runs with the reason, approve or discard; review queue across departments.
+- Pending placement: every pending employee across departments, including those with an unknown department; place into any group.
+- Member actions across departments: move across departments and delete, from the group screens.
 - Outbox and reconciliation: pending and failed writes with error text and retry; drift corrections log.
-- Policies: concurrency minimum, default and maximum; rpm default; over-allocation factors; safety gate threshold; leaver grace period; notification thresholds.
-- Status: LiteLLM reachability, last successful sync, outbox depth, spend data freshness.
+- Policies: concurrency minimum, default and maximum; rpm default; over-allocation factors; notification thresholds.
+- Status: LiteLLM reachability, outbox depth, pending placements, spend data freshness.
 - Personal values of department representatives (DR9).
 - Audit search across everything.
 
@@ -643,21 +739,44 @@ F4. Employee is blocked:
 2. The binding constraint line says which level blocked them: their cap, the group, or the department.
 3. The screen names who can change it, with contact details from AD.
 
-F5. Employee moves to another group (from sync):
-1. Sync closes the employee's shares in the old group. The PMO and the old group head see the returned amounts.
-2. The employee appears in the new group with the default cap. The new group head is notified.
-3. The employee's wallet shows the new group from the next refresh.
+F5. Employee moves to another group (manual, 9.3):
+1. The department representative (within the department) or platform admin (across departments) opens the employee in the Members tab and chooses "העברה לקבוצה אחרת", a target group and a reason.
+2. The system closes the employee's shares in the old group (Phase 2). Then it adds the employee to the new group with the default cap, repoints the key, and removes the old membership, in that order. The row shows `ממתין לסנכרון`, then `עודכן`.
+3. If a step fails, the badge shows `נכשל`. The key stays on a group where the employee is a member, and an admin retry completes the move.
+4. The employee's wallet shows the new group from the next refresh. The new group head is notified (Phase 2 notifications).
 
 F6. A manager's own cap:
 1. A group head opens their own row: it is read-only and names the department representative as the owner.
 2. The representative changes it from the Group heads tab.
 
-F7. Sync review:
-1. The representative sees a review item, for example "employee in two budget groups".
-2. They choose the primary group or mark it for the platform admin. The decision is recorded and the next sync run applies it.
+F7. Pending placement:
+1. A new employee has no budget group in AD, or more than one. Onboarding records them as pending.
+2. The department representative sees them under "ממתינים לשיבוץ". An unknown department appears only on the platform list.
+3. They choose a group and a reason and confirm. The employee is provisioned with the group's default cap, and the onboarding portal shows `ready` on its next check.
+
+F8. First login (onboarding portal):
+1. The employee signs in to the onboarding portal with ADFS. The portal calls `POST /onboarding` with its own token and the employee's ADFS JWT.
+2. With one budget group: `provisioning`, then `ready`, with the base URL and the install snippet text. No secret is returned.
+3. Otherwise: `pending_placement`, and the portal says who will place them.
+4. Any later call changes nothing and returns the current status.
+
+F9. Kick and restore:
+1. A group head (own group), representative (department) or admin chooses "השעיה" on a member, with a reason.
+2. The key is blocked and the JWT mapping set inactive. The row is muted with "מושעה".
+3. "החזרה" reverses both.
+
+F10. Delete:
+1. A platform admin chooses "מחיקה", enters a reason, and types the employee's upn to confirm.
+2. The mapping, key, membership and user are removed in order (9.3). The employee leaves the tables and stays in history.
 
 ### 12.7 Error messages
 Every API error code maps to a Hebrew message with the numbers, for example `PARENT_OVERALLOCATED` → "חילקת 620,000 מתוך 600,000. יש להפחית 20,000 לפני שמירה". Messages name the next step, never only the failure.
+
+New codes:
+- `MEMBER_STATE_CONFLICT` → "העובד כבר במצב הזה. יש לרענן את הדף ולבדוק את המצב הנוכחי".
+- `LIFECYCLE_IN_PROGRESS` → "פעולה קודמת על העובד עדיין ממתינה לסנכרון. יש להמתין לסיומה, או לבקש ממנהל הפלטפורמה לנסות שוב".
+- `CONFIRMATION_MISMATCH` → "שם המשתמש שהוקלד אינו תואם. יש להקליד בדיוק dani@corp.example כדי למחוק".
+- `SELF_ALLOCATION_FORBIDDEN` (on an action) → "אי אפשר לבצע פעולה זו על עצמך. הפעולה שמורה ל<owner>".
 
 ### 12.8 Wireframes
 Layout is mirrored for RTL in the product. Labels here are in English for clarity; UI text is in Hebrew.
@@ -723,21 +842,22 @@ React with TypeScript and Vite; a component library with RTL support; TanStack Q
 ## 13. Non-functional requirements
 
 - NFR1. Airgapped. No calls to the internet at build or run time. Dependencies come from the internal package mirrors.
-- NFR2. Backend stack: Python 3.12, FastAPI, SQLAlchemy 2 (async) with asyncpg, Alembic, httpx, ldap3, Pydantic v2. PostgreSQL. Deploy on OpenShift: API as a Deployment, outbox worker and scheduler as separate Deployments, AD sync as a CronJob.
+- NFR2. Backend stack: Python 3.12, FastAPI, SQLAlchemy 2 (async) with asyncpg, Alembic, httpx, ldap3, Pydantic v2. PostgreSQL. Deploy on OpenShift: API as a Deployment, outbox worker and scheduler as separate Deployments. `ldap3` is used only for the one-time onboarding lookup, owner names and login roles; there is no sync CronJob.
 - NFR3. LiteLLM client isolated in one module with typed request models per endpoint, so a LiteLLM upgrade touches one place. Pin the LiteLLM version, with a contract test suite that runs against it (15.2).
 - NFR4. Idempotent writes. Retries with exponential backoff. The outbox survives restarts.
-- NFR5. No secret material in logs. The proxy-admin key is read from a secret at startup. Personal keys' plaintext is never stored. Personal keys are never shown to employees. Service key secrets are shown once.
+- NFR5. No secret material in logs. The proxy-admin key is read from a secret at startup. Personal keys' plaintext is never stored. Personal keys are never shown to employees or to the onboarding portal (9.2). ADFS JWTs presented to the onboarding endpoints are never logged. Service key secrets are shown once.
 - NFR6. Read access to the LiteLLM database uses a read-only database role.
-- NFR7. Observability: structured logs, Prometheus metrics (outbox depth, sync actions per run, reconciliation drift count, validation rejections, spend snapshot age), health and readiness endpoints.
+- NFR7. Observability: structured logs, Prometheus metrics (outbox depth, held outbox rows, member lifecycle actions by kind, onboarding calls by resulting status, pending placements, reconciliation drift count, validation rejections, spend snapshot age), health and readiness endpoints.
 - NFR8. All times in UTC in storage and APIs. Budget periods and UI display use a configured timezone.
 - NFR9. Web security: CSRF protection on all writes, strict Content Security Policy, server-side authorization on every endpoint regardless of what the UI shows.
+- NFR10. Public repository. The source repository will be public. Never commit secrets, tokens, keys, certificates, real hostnames, IP ranges or internal corporate names (organizations, departments, people, AD DNs). Use placeholders: `corp.example`, `litellm.corp.example`, `adfs.corp.example`, `DC=corp,DC=example`. `.env` stays gitignored, with `.env.example` holding placeholders only. Tests and dev scripts generate dummy secrets at run time (for example `secrets.token_urlsafe`). A repository hygiene test scans tracked files. Real values live only in OpenShift secrets and config maps.
 
 ---
 
 ## 14. Later phases (not in scope now)
 
 - Per-employee per-model concurrency through a LiteLLM `async_pre_call_hook` with a Redis gauge keyed by key and model group, released on success, failure and disconnect.
-- JWT-triggered moves: a LiteLLM hook compares the group claim in the JWT with `key.team_id` and enqueues a move, in place of LDAP polling.
+- JWT-triggered move suggestions: a LiteLLM hook compares the group claim in the JWT with `key.team_id` and raises a move suggestion for the department representative, in place of discovering movers by hand.
 - Self-service requests: an employee asks for a top-up, the group head approves, the PMO approves grant-backed requests.
 - Forecasting: projected spend to the end of the period per wallet.
 
@@ -746,7 +866,7 @@ React with TypeScript and Vite; a component library with RTL support; TanStack Q
 ## 15. Testing and acceptance
 
 ### 15.1 Unit tests
-Validation rules, attribution formula (7.3.1), earliest-expiry recomputation (FR-P4), self-allocation rule (FR-G5), wallet formulas (12.3), sync diffing (9.3), safety gate.
+Validation rules, attribution formula (7.3.1), earliest-expiry recomputation (FR-P4), self-allocation rule (FR-G5), wallet formulas (12.3), placement lookup (9.1), portal token validation (9.2), member action target and state rules (9.4), outbox chain ordering (9.3).
 
 ### 15.2 Contract and integration tests against a real LiteLLM
 Docker Compose or an OpenShift test namespace: pinned LiteLLM version, PostgreSQL, Redis, a fake model backend (mock OpenAI-compatible server with controllable latency), two LiteLLM replicas.
@@ -763,10 +883,12 @@ Acceptance scenarios (phase 0 must pass V1 to V5 first):
 | A6 | `model_max_budget` set on a personal key (negative test) | Confirms R6: the team pot is skipped. The Wallet Manager never does this |
 | A7 | Organization `model_max_budget` (negative test) | Confirms R5 on this version |
 | A8 | Team `max_parallel_requests` (negative test) | Confirms V2 on this version |
-| A9 | Move an employee with an active share | Share closed, unused amount back in the PMO pool, key on the new team, membership in the old team removed, no failed request during the move |
+| A9 | Move an employee (manual, 9.3); with an active share from Phase 2 | Key on the new team, membership in the old team removed, no failed request during the move; from Phase 2 also: share closed, unused amount back in the PMO pool |
 | A10 | JWT for an unmapped upn | 403 |
 | A11 | Concurrent PMO grants that together exceed the pool | One succeeds, the other gets `PMO_POOL_INSUFFICIENT` |
-| A12 | AD returns an empty result for a populated group | Sync aborts at the safety gate, nothing applied |
+| A12 | Move with a failure injected before each sub-step, then retry | After every drain the key's team has the employee as a member; the retry completes the move |
+| A14 | Kick, then restore | After kick, requests with the employee's JWT are rejected; after restore they succeed |
+| A15 | First login of a new employee, twice, concurrently | One user, one membership, one key, one mapping; requests with the JWT succeed; no secret in any response or log |
 | A13 | Claude Code session with subagents against a key with the policy's default concurrency | Session completes, 429s are retried by the client |
 
 ### 15.3 UI end-to-end tests (Playwright)
@@ -781,6 +903,10 @@ Acceptance scenarios (phase 0 must pass V1 to V5 first):
 | U6 | User with two roles | Scope switcher lists both scopes and the personal wallet; permissions follow the selected scope |
 | U7 | Viewer | No action buttons; write endpoints return 403 |
 | U8 | RTL rendering | Numbers and model names render correctly inside Hebrew text; tables mirror |
+| U9 | Group head kicks and restores a member | Row muted with "מושעה", badge pending then applied; restore reverses; no move or delete action shown; own row has no actions |
+| U10 | Representative moves a member within the department; admin moves across departments | Member appears in the target group with sync badges; the representative is not offered groups outside the department |
+| U11 | Admin deletes a member | Confirm disabled until the typed upn matches; the member leaves the table |
+| U12 | Representative places a pending employee; admin places an unknown-department one from the platform view | Entry leaves the list; employee appears in the group with pending then applied |
 
 ---
 
@@ -790,8 +916,9 @@ Acceptance scenarios (phase 0 must pass V1 to V5 first):
 |---|---|---|---|
 | 0 | LiteLLM configuration, contract tests, verify V1 to V5 | | A1 to A8 and A10 pass |
 | 1 | Data model, LiteLLM client, outbox, departments, groups, members, limits, validation, self-allocation rule, audit, BFF login | Shell, scope switcher, My wallet, Group (Overview, Members, History), Department (Overview, Split) | FR-D, FR-G, FR-E, FR-V, FR-A; A2, A3, A5; U1, U2, U3, U4, U6, U7, U8 |
-| 2 | Grants and shares, scheduler for expiry and recomputation, reconciliation, notifications | PMO screens, Group Grants tab, Department Group heads tab | FR-P, FR-RC, FR-N; A1, A9 (manual move), A11; U5 |
-| 3 | AD sync with dry-run and safety gate, role mirroring, service keys, production | Department Review and Production tabs, Group Service keys tab, Platform screens | Section 9, FR-K; A9, A12 |
+| 1b | Onboarding API for the onboarding portal (9.1, 9.2), pending placement, manual member actions kick, restore, move, delete, place (9.3 to 9.5), chained outbox, fake LiteLLM lifecycle endpoints | Member actions in Group Members and the side panel, pending placement lists on the Department page and the Platform view | Section 9; A12, A14, A15 (fake), A9 without shares; U9 to U12; NFR10 hygiene test |
+| 2 | Grants and shares, scheduler for expiry and recomputation, reconciliation, notifications, share closing on move and delete | PMO screens, Group Grants tab, Department Group heads tab | FR-P, FR-RC, FR-N; A1, A9 (with a share), A11; U5 |
+| 3 | `ldap3` directory (onboarding lookup, owner names, login roles), service keys, production | Department Production tab, Group Service keys tab, Platform screens | FR-K; directory contract test against a test LDAP |
 | 4 | Reports and alerts | Reports screens, usage charts at every level | FR-R; concurrency peaks from SpendLogs |
 
 ---
@@ -809,10 +936,22 @@ Acceptance scenarios (phase 0 must pass V1 to V5 first):
 | D7 | Who may raise an employee's concurrency above default | Group head within policy max; platform admin above it |
 | D8 | Production Organization: one global or one per department | One per department |
 | D9 | Internal price list per model, including cached input tokens | Required before go-live (section 18) |
-| D10 | Grace period before removing a leaver's membership | 30 days |
+| D10 | Leavers | No automatic handling (owner decision 20/10/2026). A disabled AD account loses access when its JWT expires; kick blocks at once; delete is manual |
 | D11 | Who sees employee-level usage | Group head for their group; department representative for the department; PMO only per share of their grants; viewers only aggregates |
 | D12 | Notification channel | In-app always; email if an internal relay exists |
 | D13 | Department staff group | One per department, created by the platform admin at setup |
+| D14 | Onboarding portal authentication | Two ADFS JWTs checked against the ADFS JWKS: the portal's client-credentials token (allow-listed client id, WM audience) plus the user's ADFS JWT (`upn`, allow-listed audiences). Dev: HS256 test-signed tokens only with `DEV_AUTH=1` |
+| D15 | Personal key delivery to the onboarding portal | Never. The client uses the user's ADFS JWT, mapped by upn (NFR5), so nothing can be lost and no rotate action exists. Alternative if needed: return the secret once, plus an explicit rotate action |
+| D16 | Delete order | Mapping delete → key delete → member delete → user delete, so the key never points to a team without membership (the owner's draft order removed the membership first) |
+| D17 | Department representative kick and restore | Yes, for members and group heads of their department; not for other representatives |
+| D18 | Over-allocation when onboarding, placing or moving adds a default cap | Accepted with the full default cap (D4); the group shows "Over-allocated" (12.4) |
+| D19 | Pending employees with unknown department | Platform admin only |
+| D20 | A deleted employee who calls onboarding again | `blocked` (reason `deleted`); only a platform admin can re-place them |
+| D21 | Personal model caps on move | Cleared; key limits (concurrency, rpm) kept |
+| D22 | JWT mapping inactive flag absent in LiteLLM (V6) | Kick deletes the mapping, restore recreates it |
+| D23 | Move, delete or place while earlier changes are unapplied | Rejected with 409 `LIFECYCLE_IN_PROGRESS`; kick and restore are always accepted and apply in order |
+| D24 | User-assertion audiences accepted from the onboarding portal | Configured list `ONBOARDING_USER_AUDIENCES`; empty means onboarding is disabled |
+| D25 | Public repository | Placeholders only (NFR10); scan the full git history for secrets and internal names before publishing |
 
 ---
 

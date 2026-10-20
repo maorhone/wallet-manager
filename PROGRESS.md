@@ -1,7 +1,8 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 (Steps 1–13) done. `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
+Phase 1 done; Phase 1b planned (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Step 1b.1.
+Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
@@ -66,7 +67,13 @@ Phase 1 (Steps 1–13) done. `./scripts/test.sh` green (pytest 217 passed, 4 ski
   Phase 1 acceptance table in PLAN §3 checked: every listed test exists and passes.
 
 ## Next
-- Phase 2 (PLAN §4): grants and expiry (A1, A9 manual move, A11; U5). Start with its first step.
+- Phase 1b (PLAN §2b), one step per session, in order:
+  - Step 1b.1: schema, fake LiteLLM lifecycle endpoints, client methods, chained outbox, repo hygiene test.
+  - Step 1b.2: kick, restore, move, delete and their permissions (backend).
+  - Step 1b.3: onboarding API, pending placement, place (backend).
+  - Step 1b.4: UI member actions in Group Members and the side panel.
+  - Step 1b.5: UI pending placement lists; Phase 1b wrap-up.
+- Then Phase 2 (PLAN §4): grants and expiry (A1, A9 with a share, A11; U5).
 
 ## Blockers
 - None.
@@ -166,6 +173,17 @@ Phase 1 (Steps 1–13) done. `./scripts/test.sh` green (pytest 217 passed, 4 ski
 8. **Team `budget_duration`.** It is listed in §10 but not in §8.1; it is set to the department period so team spend resets. Calendar-month alignment of `"1mo"` is re-checked in Phase 0 (V4).
 9. **Organization `models`.** It is not sent in Phase 1, because sending it would restrict the models a department can use.
 10. **D6 concurrency and rpm policy.** Placeholder values (concurrency 1/4/8, rpm 1/120/600) until pilot measurements exist.
+11. **Onboarding portal authentication (D14).** Two ADFS JWTs against the ADFS JWKS: the portal's client-credentials token (allow-listed `ONBOARDING_CLIENT_IDS`, WM audience) and the user's ADFS JWT (`upn`, `ONBOARDING_USER_AUDIENCES`; empty disables onboarding). Dev: HS256 only with `DEV_AUTH=1`. Please confirm the client id claim (`appid` vs `azp`) and the user token audience.
+12. **Key delivery (D15).** The personal key secret is never returned; Claude Code uses the user's ADFS JWT mapped by upn, so no rotate action. A static key handed out by the portal would need "show once" plus rotate and reverses NFR5.
+13. **Delete order (D16).** Mapping → key → membership → user. The owner's draft removed the membership first, which would leave the key on a team without membership.
+14. **Department representative kick and restore (D17).** Yes for members and group heads of their department; not for other representatives.
+15. **Over-allocation from default caps (D18).** Onboarding, place and move add the full default cap; the group shows the warning, the action is not rejected.
+16. **Unknown-department pending users (D19)** are handled by the platform admin only. **A deleted user calling onboarding again (D20)** gets `blocked`; only an admin can re-place them.
+17. **Move details (D21).** Personal model caps cleared, concurrency/rpm kept. Moving a group head does not change their AD role.
+18. **JWT mapping inactive flag (D22, V6).** If LiteLLM has no such flag, kick deletes the mapping and restore recreates it.
+19. **In-progress guard (D23).** Move, delete and place return 409 `LIFECYCLE_IN_PROGRESS` while earlier changes are unapplied; kick and restore are always queued in order.
+20. **Public repository (D25, NFR10).** Placeholders only; hygiene test scans tracked files. Before publishing, scan the full git history and provide internal names via a gitignored `.public-denylist`.
+21. **F5/F6 wording.** F6 (a manager's own cap, DR9) is unrelated to sync and is kept; F5 and F7 are replaced, F8–F10 added.
 
 - Step 10: Chromium (headless shell) launches here without extra system libraries; no `.cache/pwlibs` workaround needed.
 - Step 10: `eslint-formatter-unix` is a root devDependency because the lint hook calls `eslint -f unix`.

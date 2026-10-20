@@ -13,6 +13,7 @@ Allocates model budgets, per-model allowances and concurrency down an org hierar
 ## Rules
 - Work only inside this directory. Never use sudo, tunnels, tailscale, or ANTHROPIC_* variables.
 - Ports: UI 4100, API 4101, fake LiteLLM 4102 — bind 0.0.0.0. Never commit secrets; .env (gitignored) + .env.example.
+- Repo will be public: never commit secrets, tokens, real hostnames or internal corporate names; use placeholders (corp.example).
 - One PLAN.md step per session. Before stopping, update PROGRESS.md (done / next / blockers).
 - Small commits; push only to origin; never force-push.
 - Don't delete, skip, or weaken tests. Fix the root cause.
@@ -24,7 +25,7 @@ Allocates model budgets, per-model allowances and concurrency down an org hierar
 - Backend: Python FastAPI + SQLAlchemy async + Alembic + Pydantic v2 + PostgreSQL (pgembed for local/tests).
 - Frontend: React + TypeScript + Vite, RTL Hebrew, TanStack Query, Playwright.
 - `app/litellm_client/`: typed client to LiteLLM management API. Local fake server in `fake_litellm/` implements section-10 endpoints.
-- Auth: real OIDC via config; `DEV_AUTH=1` enables seeded-user login. AD sync is later (phase 3).
+- Auth: real OIDC via config; `DEV_AUTH=1` enables seeded-user login. No automatic AD sync (owner decision 20/10/2026): users are created by the onboarding API and moved/kicked/deleted manually.
 
 ## Compact instructions
 Preserve: current PLAN.md step, modified files, failing test names, test command.
