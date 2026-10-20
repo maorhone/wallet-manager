@@ -145,7 +145,7 @@ class Grant(Base):
     created_by: Mapped[str | None] = mapped_column(Text)
     closed_at: Mapped[datetime | None] = mapped_column(TS)
     used: Mapped[Decimal] = mapped_column(SPEND, server_default="0")
-    returned: Mapped[Decimal] = mapped_column(ALLOC, server_default="0")
+    returned: Mapped[Decimal] = mapped_column(SPEND, server_default="0")
 
 
 class GrantShare(Base):
@@ -163,7 +163,7 @@ class GrantShare(Base):
     expires_at: Mapped[datetime | None] = mapped_column(TS)
     status: Mapped[str] = mapped_column(Text, server_default="active")
     used: Mapped[Decimal] = mapped_column(SPEND, server_default="0")
-    returned: Mapped[Decimal] = mapped_column(ALLOC, server_default="0")
+    returned: Mapped[Decimal] = mapped_column(SPEND, server_default="0")
     closed_reason: Mapped[str | None] = mapped_column(Text)
 
 

@@ -2,10 +2,32 @@
 
 ## Status
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Next = Phase 2 (PLAN §4).
-Latest `./scripts/test.sh` (Step 2.4): green; pytest 417 passed (5 skipped real-target cases); vitest 24; Playwright 27; Playwright 2.0 min.
+Latest `./scripts/test.sh` (Codex review fixes for 2.1-2.4): green; pytest 435 passed (5 skipped real-target cases); vitest 24; Playwright 27; total 4m25s (pytest 2m23s, Playwright 1.8 min).
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Codex review fixes for 2.1-2.4: verified all thirteen MAJOR findings against the code and
+  reproduced them with failing regression tests before fixing their shared paths.
+  - M1: share close now checks self-targeting, target tier and current membership, just like share writes.
+  - M2: closure attributes against every eligible active and closed share, then stores only the requested closures.
+  - M3: attribution is restricted to the current group/team and membership boundary from lifecycle
+    audit, including a move away and back into the same team in one period.
+  - M4: lifecycle takes the group lock before membership validation and share reads, even with no shares;
+    closure refreshes share rows under row locks, preventing stale objects from returning money twice.
+  - M5: expiry queues member recomputation in the closure transaction; restart no longer depends on an in-memory set.
+  - M6: a transaction-scoped request lock now precedes replay lookup for every shared write-path request.
+  - M7: closed grants retain their spent contribution in the closing budget month in desired team budgets,
+    model pots and wallet summaries; only unused money is removed.
+  - M8: historical attribution reads each local month's UTC window separately instead of interpreting UTC dates as local months.
+  - M9: displayed attribution includes stored closed usage before allocating remaining spend to active shares.
+  - M10: notification usage adds only active-share attribution after summing stored closed usage.
+  - M11: grant lists, project summaries and the PMO card combine active snapshot attribution with stored usage.
+  - M12: migration 0004 widens share/grant returns to NUMERIC(18,4), repairs rounded closed returns,
+    and rebuilds grant return totals; regression asserts conservation after committed rows are reloaded.
+  - M13: desired team updates explicitly send an empty model budget map, clearing the last removed pot.
+  - Validation: relevant API/scheduler/unit subset: 75 passed. Final `./scripts/test.sh`: green,
+    pytest 435 passed / 5 skipped, vitest 24, Playwright 27; ruff, frontend lint/typecheck and
+    formatting pass. Total 4m25s in this sandbox. No E2E ports/env handling or test scripts changed.
 - Scaffold: CLAUDE.md, hooks, settings, .gitignore
 - Full SPEC.md v0.2 + litellm_wallets_erd.mmd; PLAN.md v2 (13 Phase 1 steps)
 - Step 1: pyproject/uv.lock, `app/{config,db,models,errors,main}.py`, `app/schemas/common.py` (Money),
@@ -126,6 +148,16 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Review 2.1-2.4: m1 deferred as requested. Plan: insert an email-delivery outbox row in the
+  notification transaction, with a stable notification delivery key; deliver only committed rows,
+  retry separately, and test rollback/retry with email enabled.
+- Review 2.1-2.4: FR-P6's explicit unused-only reduction takes precedence over PLAN Step 2.1's
+  active-only team formula (and SPEC §8.1's shorthand). Spent credit remains in the closing month's
+  team ceiling/model pot; closing a grant must not consume the group's base headroom a second time.
+  Return amounts use spend precision rather than PLAN §1's two-decimal allocation precision.
+- Review 2.1-2.4: the old Step 2.3 note about a crash losing member recomputation is superseded:
+  each closing transaction now queues its own recomputation. A member touched by multiple closing
+  transactions can have multiple safe, latest-state member updates; no volatile final phase is required.
 - Step 2.4: `pending_placement` is written only by onboarding (`place` always resolves a pending user, it never leaves one pending). Scans use the snapshot (`Spend`) and the wallet views
   (`_Group`), so a notification appears after the next spend snapshot; dedupe keys are `emp:<period>:80|100` (per person and kind), `grp:<id>:<period>:80|100`, `grant:<id>:expiring|underused|received`,
   `pending:<upn>:<since>`, `moved:<upn>:<request_id>`, `outbox:<write_id>`. A grant is "underused" when Σ shares' attributed/stored used < 20% of the amount (no shares = 0). Notification

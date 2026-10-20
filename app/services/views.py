@@ -22,6 +22,7 @@ from app.models import (
     Grp,
     Policy,
 )
+from app.outbox.desired import contributing_grants
 from app.permissions import (
     ADMIN,
     HEAD,
@@ -79,10 +80,12 @@ async def _thresholds(db: AsyncSession) -> dict[str, Decimal]:
     return {"near": Decimal(str(value["near"])), "full": Decimal(str(value["full"]))}
 
 
-async def _grants_by_group(db, group_ids: list[int]) -> dict[int, Decimal]:
+async def _grants_by_group(
+    db, group_ids: list[int], timezone: str = "Asia/Jerusalem", period: str | None = None
+) -> dict[int, Decimal]:
     rows = await db.execute(
         select(Grant.group_id, func.sum(Grant.amount - Grant.returned))
-        .where(Grant.status == "active", Grant.group_id.in_(group_ids))
+        .where(contributing_grants(timezone, period), Grant.group_id.in_(group_ids))
         .group_by(Grant.group_id)
     )
     return dict(rows.all())
@@ -127,7 +130,9 @@ class _Group:
         self.values, self.shares, self.card, self.dept_card = values, shares, card, dept_card
 
     @classmethod
-    async def load(cls, db, group: Grp, spend: Spend, at, th) -> "_Group":
+    async def load(
+        cls, db, group: Grp, spend: Spend, at, th, timezone: str = "Asia/Jerusalem"
+    ) -> "_Group":
         dept = await db.get(Department, group.department_id)
         dept_card = (await _dept(db, dept, spend, at, th))["card"]
         members = list(
@@ -152,7 +157,9 @@ class _Group:
         base_live = {str(group.id): {"base_budget": group.base_budget}}
         base = (await values_as_of(db, "group", base_live, at))[str(group.id)]["base_budget"]
         shares = {upn: amount for _, upn, amount in await _shares(db, [group.id])}
-        grants = (await _grants_by_group(db, [group.id])).get(group.id, ZERO)
+        grants = (await _grants_by_group(db, [group.id], timezone, spend.period)).get(
+            group.id, ZERO
+        )
         active = [m.upn for m in members if m.status != "left"]
         card = wallet.group_wallet(
             base, grants, sum((values[u]["base_cap"] for u in active), ZERO),
@@ -204,7 +211,7 @@ async def me_wallet(
         raise ApiError(404, "NOT_FOUND", "Wallet not found")
     pc, th = period_ctx(settings, raw), await _thresholds(db)
     spend = await Spend.load(db, pc["period"])
-    g = await _Group.load(db, group, spend, pc["at"], th)
+    g = await _Group.load(db, group, spend, pc["at"], th, settings.app_timezone)
     row = next(r for r in g.rows(spend, th) if r["upn"] == emp.upn)
     share_rows = await db.execute(
         select(GrantShare, Grant)
@@ -212,7 +219,14 @@ async def me_wallet(
         .where(GrantShare.upn == emp.upn, GrantShare.status == "active")
         .order_by(GrantShare.expires_at, GrantShare.id)
     )
-    share_used = await displayed_used(db, emp.upn, emp.base_cap, spend.used("employee", emp.upn))
+    share_used = await displayed_used(
+        db,
+        emp.upn,
+        emp.base_cap,
+        spend.used("employee", emp.upn),
+        spend.period,
+        settings.app_timezone,
+    )
     shares = [
         {
             "id": s.id, "share_id": s.id, "grant_id": s.grant_id, "project_ref": g.project_ref,
@@ -282,7 +296,7 @@ async def members_list(
     group = await db.get(Grp, group_id)
     pc, th = period_ctx(settings, raw), await _thresholds(db)
     spend = await Spend.load(db, pc["period"])
-    g = await _Group.load(db, group, spend, pc["at"], th)
+    g = await _Group.load(db, group, spend, pc["at"], th, settings.app_timezone)
     heads = {p["upn"] for p in await holders(db, directory, HEAD, "group", group_id)}
     syncs = await sync_status(db, "employee", [m.upn for m in g.members])
     members = {m.upn: m for m in g.members}
@@ -325,9 +339,22 @@ async def group_summary(
         see_members = False  # D11: PMO and viewers get aggregates only
     pc, th = period_ctx(settings, raw), await _thresholds(db)
     spend = await Spend.load(db, pc["period"])
-    g = await _Group.load(db, group, spend, pc["at"], th)
+    g = await _Group.load(db, group, spend, pc["at"], th, settings.app_timezone)
 
-    pots = await db.scalars(select(GroupModelPot).where(GroupModelPot.group_id == group_id))
+    pots = {
+        p.model: p.amount
+        for p in await db.scalars(select(GroupModelPot).where(GroupModelPot.group_id == group_id))
+    }
+    contributions = list(
+        await db.scalars(
+            select(Grant).where(
+                Grant.group_id == group_id, contributing_grants(settings.app_timezone, spend.period)
+            )
+        )
+    )
+    for grant in contributions:
+        if grant.model:
+            pots[grant.model] = pots.get(grant.model, ZERO) + grant.amount - grant.returned
     caps_sum: dict[str, Decimal] = defaultdict(lambda: ZERO)
     caps = await db.execute(
         select(EmployeeModelCap.model, EmployeeModelCap.amount)
@@ -365,12 +392,12 @@ async def group_summary(
         "wallet": {k: g.card[k] for k in (*CARD, "base", "grants")},
         "pots": [
             {
-                "model": p.model,
-                "amount": p.amount,
-                "used": used_by_model.get(p.model, ZERO),
-                "members_caps_sum": caps_sum.get(p.model, ZERO),
+                "model": model,
+                "amount": amount,
+                "used": used_by_model.get(model, ZERO),
+                "members_caps_sum": caps_sum.get(model, ZERO),
             }
-            for p in sorted(pots, key=lambda p: p.model)
+            for model, amount in sorted(pots.items())
         ],  # fmt: skip
         "grants": [
             {
@@ -403,7 +430,7 @@ async def department_summary(
     spend = await Spend.load(db, pc["period"])
     d = await _dept(db, dept, spend, pc["at"], th)
     card, ids = d["card"], [g.id for g in d["groups"]]
-    grants = await _grants_by_group(db, ids)
+    grants = await _grants_by_group(db, ids, settings.app_timezone, spend.period)
     member_caps = dict(
         (
             await db.execute(

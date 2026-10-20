@@ -76,11 +76,14 @@ async def close_member_shares(
     """
     from app.services.shares import close_shares  # shares imports this module
 
+    emp = await ctx.db.get(Employee, upn)
+    if emp.group_id is not None:
+        await ctx.lock(LockKind.GROUP, emp.group_id)
     rows = (
         await ctx.db.execute(
             select(GrantShare, Grant.group_id).join(Grant, Grant.id == GrantShare.grant_id)
             .where(GrantShare.upn == upn, GrantShare.status == "active")
-            .order_by(GrantShare.id)
+            .order_by(GrantShare.id).execution_options(populate_existing=True)
         )
     ).all()  # fmt: skip
     for group_id in sorted({g for _, g in rows}):
@@ -150,7 +153,10 @@ async def _begin(ctx, principal, directory: Directory, group_id: int, upn: str, 
     if emp is None or emp.group_id != group_id:
         raise scope_forbidden("Target is not a member of the group")
     await ctx.lock(LockKind.EMPLOYEE, employee_lock_id(upn))
+    await ctx.lock(LockKind.GROUP, group_id)
     await ctx.db.refresh(emp)
+    if emp.group_id != group_id:
+        raise scope_forbidden("Target is not a member of the group")
     return role, group, emp
 
 

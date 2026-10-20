@@ -27,6 +27,7 @@ from app.services.attribution import (
     attribute_periods,
     displayed_used,
     member_spend_by_period,
+    membership_shares,
 )
 from app.services.lifecycle import check_target
 from app.services.spend import Spend, month_bounds
@@ -66,6 +67,8 @@ async def _check_row(
     tier = await target_tier(ctx.db, directory, upn)
     check_target(role, principal.upn, upn, tier, "share")
     emp = await ctx.db.get(Employee, upn)
+    if emp is not None:
+        await ctx.db.refresh(emp)
     if emp is None or emp.group_id != g.group_id:
         raise scope_forbidden("Target is not a member of the grant's group")
     if emp.status != "active":
@@ -170,22 +173,18 @@ async def close_shares(
     tz = ZoneInfo(ctx.settings.app_timezone)
     by_upn: dict[str, list[GrantShare]] = defaultdict(list)
     for s in shares:
+        await ctx.db.refresh(s, with_for_update=True)
         if s.status == "active":
             by_upn[s.upn].append(s)
     closed, groups = [], {}
     for upn, mine in by_upn.items():
         emp = await ctx.db.get(Employee, upn)
-        rows = (
-            await ctx.db.execute(
-                select(GrantShare, Grant).join(Grant, Grant.id == GrantShare.grant_id)
-                .where(GrantShare.upn == upn)
-            )
-        ).all()  # fmt: skip
+        rows, joined = await membership_shares(ctx.db, upn, emp.group_id)
         grants = {g.id: g for _, g in rows}
         group = await ctx.db.get(Grp, grants[mine[0].grant_id].group_id)
-        since = min(
-            grants[s.grant_id].starts_at for s, _ in rows if s in mine or s.status == "closed"
-        )
+        since = min(g.starts_at for s, g in rows)
+        if joined is not None:
+            since = max(since, joined)
         spend = await member_spend_by_period(
             ctx.db, client, reader, upn, group.litellm_team_id, since, now, tz
         )
@@ -199,7 +198,6 @@ async def close_shares(
                 )
                 for s, g in rows
                 if g.starts_at < end and (s.expires_at or g.expires_at) > start
-                and (s.status == "closed" or s in mine)
             ]  # fmt: skip
         used = attribute_periods(spend, emp.base_cap, by_period)
         for s in mine:
@@ -223,12 +221,18 @@ async def close_shares(
 
 async def close_share(
     ctx: WriteContext, principal: Principal, clock: Clock, grant_id: int, share_id: int,
-    client, reader,
+    client, reader, directory: Directory,
 ) -> list[dict]:  # fmt: skip
     g, role = await _load(ctx, principal, grant_id)
     s = await _own_share(ctx, g, share_id)
     if s.status != "active":
         raise invalid_request("The share is already closed", {"status": s.status})
+    check_target(role, principal.upn, s.upn, await target_tier(ctx.db, directory, s.upn), "share")
+    emp = await ctx.db.get(Employee, s.upn)
+    if emp is not None:
+        await ctx.db.refresh(emp)
+    if emp is None or emp.group_id != g.group_id:
+        raise scope_forbidden("Target is not a member of the grant's group")
     await close_shares(ctx, [s], clock.now(), "manual", client, reader, role)
     await ctx.db.flush()
     return [
@@ -259,7 +263,16 @@ async def list_shares(
     out = []
     for s in shares:
         e = emps[s.upn]
-        used = (await displayed_used(db, s.upn, e.base_cap, spend.used("employee", s.upn)))[s.id]
+        used = (
+            await displayed_used(
+                db,
+                s.upn,
+                e.base_cap,
+                spend.used("employee", s.upn),
+                spend.period,
+                settings.app_timezone,
+            )
+        )[s.id]
         can = s.status == "active" and g.status == "active" and manage is not None
         if can:
             try:

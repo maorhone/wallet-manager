@@ -20,7 +20,7 @@ from app.errors import (
     scope_forbidden,
     share_expiry_after_grant,
 )
-from app.models import Department, Grant, GrantShare, Grp
+from app.models import Department, Employee, Grant, GrantShare, Grp
 from app.permissions import (
     ADMIN,
     HEAD,
@@ -34,7 +34,8 @@ from app.permissions import (
 from app.schemas.grants import GrantIn, GrantPatchIn
 from app.services import notifications, wallet
 from app.services import shares as shares_service
-from app.services.spend import month_bounds
+from app.services.attribution import displayed_used
+from app.services.spend import Spend, month_bounds
 from app.services.views import period_ctx
 from app.writes import WriteContext, sync_status
 
@@ -70,14 +71,37 @@ async def pool_available(db: AsyncSession, dept: Department, settings: Settings,
     return dept.pmo_pool - live - closed_used
 
 
-async def _shares(db: AsyncSession, grant_ids: list[int]) -> dict[int, tuple[Decimal, Decimal]]:
+async def _shares(
+    db: AsyncSession,
+    grant_ids: list[int],
+    spend: Spend | None = None,
+    timezone: str = "Asia/Jerusalem",
+) -> dict[int, tuple[Decimal, Decimal]]:
     """grant id -> (Σ amount of all shares, Σ used of all shares)."""
     rows = await db.execute(
         select(GrantShare.grant_id, func.sum(GrantShare.amount), func.sum(GrantShare.used))
         .where(GrantShare.grant_id.in_(grant_ids))
         .group_by(GrantShare.grant_id)
     )
-    return {gid: (shared, used) for gid, shared, used in rows.all()}
+    out = {gid: (shared, used) for gid, shared, used in rows.all()}
+    if spend is not None:
+        active = list(
+            await db.scalars(
+                select(GrantShare).where(
+                    GrantShare.grant_id.in_(grant_ids), GrantShare.status == "active"
+                )
+            )
+        )
+        for upn in {s.upn for s in active}:
+            emp = await db.get(Employee, upn)
+            shown = await displayed_used(
+                db, upn, emp.base_cap, spend.used("employee", upn), spend.period, timezone
+            )
+            for s in active:
+                if s.upn == upn:
+                    shared, used = out[s.grant_id]
+                    out[s.grant_id] = shared, used + max(shown.get(s.id, ZERO) - s.used, ZERO)
+    return out
 
 
 def _values(g: Grant) -> dict:
@@ -242,10 +266,15 @@ async def _visible(db: AsyncSession, principal: Principal, grants: list[Grant]) 
 
 
 async def _rows(
-    db: AsyncSession, principal: Principal, grants: list[Grant], now: datetime
+    db: AsyncSession,
+    principal: Principal,
+    grants: list[Grant],
+    now: datetime,
+    timezone: str = "Asia/Jerusalem",
 ) -> list[dict]:
     groups = {g.id: g for g in await db.scalars(select(Grp))}
-    sums = await _shares(db, [g.id for g in grants])
+    spend = await Spend.load(db, now.astimezone(ZoneInfo(timezone)).strftime("%Y-%m"))
+    sums = await _shares(db, [g.id for g in grants], spend, timezone)
     sync = await sync_status(db, "group", sorted({str(g.group_id) for g in grants}))
     rows = []
     for g in grants:
@@ -272,6 +301,7 @@ async def _rows(
 async def list_grants(
     db: AsyncSession, principal: Principal, clock: Clock, department: int | None = None,
     group: int | None = None, status: str | None = None, project_ref: str | None = None,
+    timezone: str = "Asia/Jerusalem",
 ) -> list[dict]:  # fmt: skip
     if group is not None:
         g = await db.get(Grp, group)
@@ -288,7 +318,7 @@ async def list_grants(
         if value is not None:
             q = q.where(column == value)
     grants = await _visible(db, principal, list(await db.scalars(q)))
-    return await _rows(db, principal, grants, clock.now())
+    return await _rows(db, principal, grants, clock.now(), timezone)
 
 
 async def pmo_pool(
@@ -307,11 +337,13 @@ async def pmo_pool(
             Grant.closed_at >= start, Grant.closed_at < end,
         )
     )  # fmt: skip
-    share_used = await db.scalar(
-        select(func.coalesce(func.sum(GrantShare.used), 0))
-        .join(Grant, Grant.id == GrantShare.grant_id)
-        .where(Grant.department_id == department_id, Grant.status == "active")
+    active_ids = list(
+        await db.scalars(
+            select(Grant.id).where(Grant.department_id == department_id, Grant.status == "active")
+        )
     )
+    sums = await _shares(db, active_ids, await Spend.load(db, period), settings.app_timezone)
+    share_used = sum((used for _, used in sums.values()), ZERO)
     card = wallet.pmo_wallet(dept.pmo_pool, live, closed_used, closed_used + share_used)
     return {
         "department_id": department_id, "period": period, "pool": card["total"],
@@ -322,9 +354,13 @@ async def pmo_pool(
 
 
 async def project_summary(
-    db: AsyncSession, principal: Principal, clock: Clock, project_ref: str
+    db: AsyncSession,
+    principal: Principal,
+    clock: Clock,
+    project_ref: str,
+    timezone: str = "Asia/Jerusalem",
 ) -> dict:
-    rows = await list_grants(db, principal, clock, project_ref=project_ref)
+    rows = await list_grants(db, principal, clock, project_ref=project_ref, timezone=timezone)
     if not rows:
         raise ApiError(404, "NOT_FOUND", "Project not found")
     totals = {k: sum((r[k] for r in rows), ZERO) for k in ("amount", "shared", "used", "returned")}

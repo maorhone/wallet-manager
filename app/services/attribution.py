@@ -4,12 +4,13 @@ import logging
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models import GrantShare, SpendSnapshot
+from app.models import AuditLog, Employee, Grant, GrantShare, SpendSnapshot
 from app.services.spend import month_bounds
 
 log = logging.getLogger(__name__)
@@ -54,13 +55,70 @@ def attribute_periods(
     }
 
 
-async def displayed_used(db, upn: str, base_cap: Decimal, spend: Decimal) -> dict[int, Decimal]:
+async def membership_shares(db, upn: str, group_id: int):
+    """Shares in this membership, excluding earlier visits to the same team.
+
+    Lifecycle audit timestamps are the membership boundaries. Closed shares from before the
+    latest move/place belong to the old membership's spend, even when the team id is reused.
+    """
+    joined = await db.scalar(
+        select(func.max(AuditLog.at)).where(
+            AuditLog.entity == "employee",
+            AuditLog.entity_id == upn,
+            AuditLog.after["action"].astext.in_(("move", "place")),
+        )
+    )
+    rows = (
+        await db.execute(
+            select(GrantShare, Grant)
+            .join(Grant, Grant.id == GrantShare.grant_id)
+            .where(GrantShare.upn == upn, Grant.group_id == group_id)
+        )
+    ).all()
+    if joined is not None:
+        closed_here = set(
+            await db.scalars(
+                select(AuditLog.entity_id).where(
+                    AuditLog.entity == "grant_share",
+                    AuditLog.entity_id.in_([str(s.id) for s, _ in rows]),
+                    AuditLog.at >= joined,
+                    AuditLog.after["status"].astext == "closed",
+                )
+            )
+        )
+        rows = [(s, g) for s, g in rows if s.status == "active" or str(s.id) in closed_here]
+    return rows, joined
+
+
+async def displayed_used(
+    db,
+    upn: str,
+    base_cap: Decimal,
+    spend: Decimal,
+    period: str | None = None,
+    timezone: str = "Asia/Jerusalem",
+) -> dict[int, Decimal]:
     """Display attribution from one period's snapshot spend; closed shares show what they stored."""
-    shares = list(await db.scalars(select(GrantShare).where(GrantShare.upn == upn)))
-    out = {s.id: s.used for s in shares if s.status == "closed"}
+    rows = (
+        await db.execute(
+            select(GrantShare, Grant)
+            .join(Grant, Grant.id == GrantShare.grant_id)
+            .where(GrantShare.upn == upn)
+        )
+    ).all()
+    emp = await db.get(Employee, upn)
+    eligible, _ = await membership_shares(db, upn, emp.group_id)
+    start, end = month_bounds(
+        period or datetime.now(UTC).astimezone(ZoneInfo(timezone)).strftime("%Y-%m"),
+        ZoneInfo(timezone),
+    )
+    out = {s.id: s.used for s, _ in rows if s.status == "closed"}
     out |= attribute(
         spend, base_cap,
-        [ShareSpan(s.id, s.amount, s.expires_at) for s in shares if s.status == "active"],
+        [ShareSpan(s.id, s.amount, s.expires_at or g.expires_at,
+                   s.used if s.status == "closed" else None)
+         for s, g in eligible
+         if g.starts_at < end and (s.expires_at or g.expires_at) > start],
     )  # fmt: skip
     return out
 
@@ -92,12 +150,16 @@ async def member_spend_by_period(
             if m.user_id == upn:
                 out[current] = Decimal(str(m.spend))
         if len(periods) > 1:
-            start, _ = month_bounds(periods[0], tz)
-            end, _ = month_bounds(current, tz)
-            for r in await reader.spend_rows(start, end):
-                if r.team_id == team_id and r.user == upn:
-                    key = r.day.isoformat()[:7]
-                    out[key] = out.get(key, ZERO) + r.spend
+            for period in periods[:-1]:
+                start, end = month_bounds(period, tz)
+                out[period] = sum(
+                    (
+                        r.spend
+                        for r in await reader.spend_rows(start, end)
+                        if r.team_id == team_id and r.user == upn
+                    ),
+                    ZERO,
+                )
         return out
     except Exception:
         log.warning("attribution: LiteLLM unreachable; using the spend snapshot for %s", upn)

@@ -29,7 +29,7 @@ async def _wallets(db, directory: Directory, settings: Settings, period: str, ou
     th, spend = await _thresholds(db), await Spend.load(db, period)
     levels = (("80", th["near"]), ("100", th["full"]))
     for group in await db.scalars(select(Grp).where(Grp.status != "archived").order_by(Grp.id)):
-        g = await _Group.load(db, group, spend, None, th)
+        g = await _Group.load(db, group, spend, None, th, settings.app_timezone)
         heads = await heads_of(db, directory, group.id)
         for level, limit in levels:
             if g.card["percent"] >= limit:
@@ -53,14 +53,16 @@ async def _wallets(db, directory: Directory, settings: Settings, period: str, ou
                     )  # fmt: skip
 
 
-async def _grant_used(db, g: Grant, spend: Spend) -> Decimal:
+async def _grant_used(db, g: Grant, spend: Spend, timezone: str = "Asia/Jerusalem") -> Decimal:
     """Σ used of the grant's shares: stored for closed ones, attributed for active ones."""
     shares = list(await db.scalars(select(GrantShare).where(GrantShare.grant_id == g.id)))
     total = sum((s.used for s in shares if s.status == "closed"), Decimal(0))
-    ids = {s.id for s in shares}
+    ids = {s.id for s in shares if s.status == "active"}
     for upn in {s.upn for s in shares if s.status == "active"}:
         e = await db.get(Employee, upn)
-        shown = await displayed_used(db, upn, e.base_cap, spend.used("employee", upn))
+        shown = await displayed_used(
+            db, upn, e.base_cap, spend.used("employee", upn), spend.period, timezone
+        )
         total += sum((v for sid, v in shown.items() if sid in ids), Decimal(0))
     return total
 
@@ -85,7 +87,7 @@ async def _grants(
             db, to, "grant_expiring", "grant", g.id, base, f"grant:{g.id}:expiring",
             settings=settings,
         )  # fmt: skip
-        used = await _grant_used(db, g, spend)
+        used = await _grant_used(db, g, spend, settings.app_timezone)
         if used < UNDERUSED * g.amount:
             out["grant_underused"] += await notify(
                 db, to, "grant_underused", "grant", g.id,

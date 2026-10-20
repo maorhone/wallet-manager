@@ -16,7 +16,7 @@ from app.clock import Clock
 from app.config import Settings
 from app.db import LockKind
 from app.directory import Directory
-from app.models import AuditLog, Employee, Grant, GrantShare
+from app.models import AuditLog, Grant, GrantShare
 from app.services import grants as grants_service
 from app.services import notify_scan
 from app.services import shares as shares_service
@@ -83,9 +83,7 @@ async def _expire_share(
         )  # fmt: skip
         if s is None:
             return None
-        await shares_service.close_shares(
-            ctx, [s], now, "expiry", client, reader, ROLE, member_update=False
-        )
+        await shares_service.close_shares(ctx, [s], now, "expiry", client, reader, ROLE)
         await db.commit()
         return s.upn
 
@@ -113,26 +111,9 @@ async def _expire_grant(
                 )
             )
         )
-        await grants_service._close_grant(
-            ctx, g, now, ROLE, "expiry", client, reader, member_update=False
-        )
+        await grants_service._close_grant(ctx, g, now, ROLE, "expiry", client, reader)
         await db.commit()
         return upns
-
-
-async def _recompute(sf, settings: Settings, upn: str, now: datetime) -> bool:
-    """FR-P4: one ``/team/member_update``; the temp fields are rebuilt when it is applied."""
-    async with sf() as db:
-        e = await db.get(Employee, upn)
-        if e is None or e.status not in ("active", "blocked") or e.group_id is None:
-            return False
-        ctx = WriteContext(
-            db, settings, ACTOR, request_id("employee", upn, f"recompute:{now.isoformat()}"),
-            "temporary budget recompute",
-        )  # fmt: skip
-        await ctx.enqueue("employee", upn, "/team/member_update")
-        await db.commit()
-        return True
 
 
 async def run_grants(sf, client, clock: Clock, *, reader, settings: Settings) -> GrantsResult:
@@ -168,8 +149,7 @@ async def run_grants(sf, client, clock: Clock, *, reader, settings: Settings) ->
             out.grants_closed += 1
             touched.update(upns)
 
-    for upn in sorted(touched):
-        out.members_recomputed += await _recompute(sf, settings, upn, now)
+    out.members_recomputed = len(touched)
     return out
 
 

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.session import CurrentPrincipal, Db
 from app.config import Settings
-from app.db import LockKind, lock_parent
+from app.db import LockKind, employee_lock_id, lock_parent
 from app.errors import invalid_request
 from app.models import AuditLog, LitellmWrite
 from app.outbox.enqueue import enqueue
@@ -91,6 +91,7 @@ async def write_context(request: Request, principal: CurrentPrincipal, db: Db) -
     request.state.request_id = rid
     if not reason:
         raise invalid_request("X-Change-Reason header is required")
+    await lock_parent(db, LockKind.REQUEST, employee_lock_id(rid))
     exists = await db.scalar(select(AuditLog.id).where(AuditLog.request_id == rid).limit(1))
     if exists:
         raise ReplayError(rid)

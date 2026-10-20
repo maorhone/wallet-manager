@@ -37,6 +37,7 @@ class LockKind(enum.IntEnum):
     PMO = 3  # Phase 2
     EMPLOYEE = 4  # member lifecycle actions on one person (id = employee_lock_id(upn))
     JOB = 5  # scheduler job locks (session-level, one replica per job)
+    REQUEST = 6  # serialize replay lookup and the entire request transaction
 
 
 def employee_lock_id(upn: str) -> int:

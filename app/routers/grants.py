@@ -80,6 +80,7 @@ async def close_share(
         share_id,
         app.state.litellm,
         app.state.litellm_reader,
+        app.state.directory,
     )
     return await write_response(ctx, entities)
 
@@ -90,7 +91,16 @@ async def list_grants(
     group: int | None = None, status: str | None = None, project_ref: str | None = None,
 ):  # fmt: skip
     clock = request.app.state.clock
-    return await grants.list_grants(db, principal, clock, department, group, status, project_ref)
+    return await grants.list_grants(
+        db,
+        principal,
+        clock,
+        department,
+        group,
+        status,
+        project_ref,
+        request.app.state.settings.app_timezone,
+    )
 
 
 @router.get("/departments/{department_id}/pmo-pool")
@@ -106,4 +116,6 @@ async def pmo_pool(
 
 @router.get("/projects/{project_ref}/summary")
 async def project_summary(project_ref: str, request: Request, principal: CurrentPrincipal, db: Db):
-    return await grants.project_summary(db, principal, request.app.state.clock, project_ref)
+    return await grants.project_summary(
+        db, principal, request.app.state.clock, project_ref, request.app.state.settings.app_timezone
+    )

@@ -60,6 +60,13 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 
 ### 4.4 Grants and shares (FR-P) - Phase 2: In progress
 
+- Review fixes (2.1-2.4): closing shares enforces the same self and hierarchy restrictions as
+  creating/changing them. Usage attribution accounts for earlier active/closed shares within the
+  relevant team and local budget months. Grant/project/PMO usage figures include active shares'
+  snapshot usage. Closing a grant removes only unused credit, retaining spent credit in the team's
+  ceiling and model pot for the closing month. Returns preserve four decimal places, conserving
+  fractional spend. Expiry and member recomputation commit together; concurrent retries do not
+  create duplicate future grants. Removing the last model pot clears it in LiteLLM.
 - PMO pool, create/change/close grants, project summary - Done (Step 2.1).
 - Shares (Step 2.2, Done, backend): head, representative or admin shares part of an active grant with an employee
   (`POST /grants/{id}/shares`, bulk and all-or-nothing). Rejections: sum above grant (`SHARE_EXCEEDS_GRANT`), expiry after

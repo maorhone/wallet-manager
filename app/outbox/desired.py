@@ -5,6 +5,7 @@ outbox row's endpoint. ``DesiredUnavailable`` means the state it needs does not 
 """
 
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ from app.models import (
     Grp,
     Policy,
 )
+from app.services.spend import month_bounds
 
 
 class DesiredUnavailable(Exception):
@@ -66,11 +68,24 @@ async def _org_fields(session: AsyncSession, entity_id: str) -> dict:
     }  # fmt: skip
 
 
-async def _team_fields(session: AsyncSession, entity_id: str) -> dict:
+def contributing_grants(timezone: str = "Asia/Jerusalem", period: str | None = None):
+    """Closed spending still occupies the team's ceiling until the local month resets."""
+    if period is not None:
+        start, end = month_bounds(period, ZoneInfo(timezone))
+        closed = (Grant.closed_at >= start) & (Grant.closed_at < end)
+    else:
+        start = func.date_trunc("month", func.timezone(timezone, func.now())).op("AT TIME ZONE")(
+            timezone
+        )
+        closed = (Grant.closed_at >= start) & (Grant.closed_at <= func.now())
+    return (Grant.status == "active") | ((Grant.status == "closed") & closed)
+
+
+async def _team_fields(session: AsyncSession, entity_id: str, timezone: str) -> dict:
     g = await _get(session, Grp, entity_id)
     dept = await session.get(Department, g.department_id)
     period = dept.budget_period
-    active = (Grant.group_id == g.id, Grant.status == "active")
+    active = (Grant.group_id == g.id, contributing_grants(timezone))
     effective = Grant.amount - Grant.returned
     grants = await session.scalar(select(func.coalesce(func.sum(effective), 0)).where(*active))
     pots = {
@@ -85,7 +100,8 @@ async def _team_fields(session: AsyncSession, entity_id: str) -> dict:
     fields = {
         "team_alias": g.name, "organization_id": dept.litellm_org_id,
         "max_budget": float(g.base_budget + grants), "budget_duration": period,
-        "model_max_budget": _models(pots, period) or None, "tpm_limit": g.tpm_limit,
+        "model_max_budget": _models({m: a for m, a in pots.items() if a}, period),
+        "tpm_limit": g.tpm_limit,
         "metadata": {"model_tpm_limit": g.model_tpm_limits} if g.model_tpm_limits else None,
         "team_member_budget": float(g.default_member_cap), "team_member_budget_duration": period,
         "team_member_model_max_budget": _models(
@@ -120,9 +136,9 @@ async def build(session: AsyncSession, settings: Settings, endpoint: str, entity
         case "/organization/update":
             return OrganizationUpdate(**await _org_fields(session, entity_id))
         case "/team/new":
-            return TeamNew(**await _team_fields(session, entity_id))
+            return TeamNew(**await _team_fields(session, entity_id, settings.app_timezone))
         case "/team/update":
-            return TeamUpdate(**await _team_fields(session, entity_id))
+            return TeamUpdate(**await _team_fields(session, entity_id, settings.app_timezone))
         case "/user/new":
             e = await _get(session, Employee, entity_id)
             return UserNew(user_id=e.upn, sso_user_id=e.upn, user_email=e.upn)
