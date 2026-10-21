@@ -3,8 +3,8 @@
 ## Status
 Step 4.6 done: UI Grants-by-project and Blocked tabs.
 Next = Step 4.7 (not started).
-Latest `./scripts/test.sh` (Step 4.6): green; pytest 518 passed / 5 existing skips (207.66 s),
-vitest 46 passed, Playwright 37 passed (2.5 min); ruff, formatting, frontend lint/typecheck pass.
+Latest `./scripts/test.sh` (Step 4.4 review fixes): green; pytest 518 passed / 5 existing skips (190.90 s),
+vitest 48 passed, Playwright 37 passed (2.6 min); ruff, formatting, frontend lint/typecheck pass.
 Required Playwright test was written first and observed failing on the missing PMO Reports link.
 No blockers or new owner questions; no commit/push. E2E scripts/default ports/env handling unchanged.
 
@@ -13,6 +13,13 @@ Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped r
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.4 review fixes: confirmed the major per-model remaining clamp finding and removed it from
+  the shared Allocation adapter, so report and child model tables show negative balances for overspent caps.
+  Added two rendering regressions covering overspent, exact, under, zero and uncapped models;
+  both failed on the clamped zero before the fix. No findings rejected. PRD updated.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 48 passed,
+  Playwright 37 passed; ruff format/check and frontend lint/typecheck pass.
+  Next remains Step 4.7. No blockers; no commit/push.
 - Step 4.6: Grants-by-project report with project rows and aggregate counts/money totals; PMO's
   Reports link opens its department grants with the PMO scope retained and only the Grants tab.
   Blocked report shows daily base/model exhaustion, current cap, month-to-date/day spend for the

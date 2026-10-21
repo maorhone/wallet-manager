@@ -17,7 +17,7 @@ const modelsForTable = (models: ModelAllocation[]) =>
     model: m.model,
     cap: m.allocation,
     used: m.spend,
-    remaining: m.allocation === null ? null : Math.max(0, m.allocation - m.spend),
+    remaining: m.allocation === null ? null : m.allocation - m.spend,
   }));
 
 export default function Allocation({

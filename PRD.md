@@ -84,7 +84,8 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 - Reports shell, Allocation and Over-allocation UI - Done (Step 4.4).
   The Hebrew “דוחות” link opens `/report/:kind/:id/:tab` for the selected own-wallet, group, department or global scope.
   Allocation shows the shared wallet card with snapshot freshness, child allocation/spend/remaining/status rows and model
-  allocations/spend; global scope lists department reports. The shared period selector loads that period's values,
+  allocations/spend/remaining; model remaining stays negative when spend exceeds the cap, including child rows,
+  while uncapped models show no remaining value. Global scope lists department reports. The shared period selector loads that period's values,
   and past periods remain read-only. Department and global scopes also have an Over-allocation tab showing source,
   level, entity/model, allocated amount, ceiling and a warning badge. These findings are explicitly current-only,
   independent of the selected period. Existing server permissions apply: member reports require member visibility,
