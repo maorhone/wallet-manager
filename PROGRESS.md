@@ -200,6 +200,23 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 3.4 cleanup-timeout triage (2026-10-22): the supplied run timed out in
+  `tests/test_truncate_retry.py::test_leaked_session_is_dropped_so_the_clean_up_does_not_hang`
+  after 60 s, with the event loop waiting in `selectors.EpollSelector.select` /
+  `self._selector.poll(timeout, max_ev)`. That traceback does not identify the pending
+  coroutine's DB operation. The cleanup helper, retry implementation and fixtures are
+  unchanged by Step 3.4. All four `tests/test_truncate_retry.py` tests passed together in
+  4.07 s; one full `./scripts/test.sh` attempt then passed pytest (540 passed, 6 skipped,
+  210.06 s), including the reported test, plus ruff, frontend lint/typecheck and Vitest (43).
+  Classified the supplied failure as an intermittent cleanup timeout unrelated to this
+  step; the underlying stall is not established (sandbox contention remains a suspicion).
+  The same full attempt subsequently hit an unrelated Playwright timeout in
+  `frontend/e2e/group.spec.ts:70`, `U2 own row read-only naming the department representative`:
+  `openMembers` hung at line 31 waiting for `allocation-table`; the saved error context
+  shows only the loading indicator and a 30 s test timeout (reporter duration 10.1 min).
+  Stopped the run without rerunning per the owner's timeout instruction. Full gate is
+  not green; next is builder verification when the intermittent stalls clear. No product
+  behavior, tests, timeouts, Platform UI or PRD entries changed; no commit or push.
 - Step 3.4 failure triage (2026-10-21): `frontend/e2e/member-actions.spec.ts:29`,
   `U9 head kicks and restores a member`, exceeded 30 s while setting up Playwright's built-in
   `context` fixture (browser context creation, before the test body). The saved
