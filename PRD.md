@@ -132,7 +132,7 @@ group (the new group head), a grant created (the group heads). 100% and outbox-f
 the others can (`PUT /me/notification-prefs`). API: `GET /me/notifications?unread=`, `POST /me/notifications/{id}/read`.
 Optional email copy (`NOTIFY_EMAIL_ENABLED`, off by default, needs an internal relay). UI Done in Step 2.10: a bell in the
 header shows the unread count and opens a drawer with the list (mark read, link to the scope: a grant opens the group's Grants
-tab); "My wallet" has a preferences card with a checkbox per kind, critical kinds shown checked and disabled.
+tab; employee 80%/100% alerts open My wallet; a pending placement opens the department's Pending tab, or the Platform page when the department is unknown; unread alerts older than the newest 100 stay reachable); "My wallet" has a preferences card with a checkbox per kind, critical kinds shown checked and disabled.
 The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 
 ### 4.8 UI screens - Phase 1/1b: Done; Phase 2: Planned

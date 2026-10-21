@@ -1,7 +1,7 @@
 import { ActionIcon, Anchor, Badge, Drawer, Group, Indicator, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMarkRead, useNotifications } from '../api/queries';
+import { useMarkRead, useNotifications, useUnreadNotifications } from '../api/queries';
 import type { AppNotification } from '../api/types';
 import { he } from '../i18n/he';
 import { DateText } from './DateText';
@@ -9,6 +9,9 @@ import { EmptyState } from './EmptyState';
 
 /** Where a notification's scope lives in the UI; grants point at the receiving group's Grants tab. */
 export function notificationLink(n: AppNotification): string | null {
+  if (n.kind === 'employee_80' || n.kind === 'employee_100') return '/wallet';
+  if (n.kind === 'pending_placement')
+    return n.scope_id != null ? `/department/${n.scope_id}/pending` : '/platform';
   const groupId =
     n.scope_kind === 'group' ? n.scope_id : (n.payload.group_id as number | undefined);
   switch (n.scope_kind) {
@@ -34,8 +37,15 @@ function detail(n: AppNotification): string {
 export function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const { data } = useNotifications();
+  const unreadList = useUnreadNotifications();
   const markRead = useMarkRead();
   const unread = data?.unread_count ?? 0;
+  // The recent list is capped; unread alerts older than the cap come from the unread view.
+  const items = [
+    ...new Map(
+      [...(unreadList.data?.items ?? []), ...(data?.items ?? [])].map((n) => [n.id, n]),
+    ).values(),
+  ].sort((a, b) => b.id - a.id);
   return (
     <>
       <Indicator
@@ -60,8 +70,8 @@ export function NotificationsBell() {
         position="left"
       >
         <Stack data-testid="notification-list">
-          {!data?.items.length && <EmptyState />}
-          {data?.items.map((n) => {
+          {!items.length && <EmptyState />}
+          {items.map((n) => {
             const link = notificationLink(n);
             return (
               <Stack

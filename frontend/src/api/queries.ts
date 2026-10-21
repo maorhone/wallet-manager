@@ -41,6 +41,7 @@ export const keys = {
   members: (id: string, period: string) => ['group', id, 'members', period] as const,
   policies: ['policies'] as const,
   notifications: ['notifications'] as const,
+  notificationsUnread: ['notifications', 'unread'] as const,
   audit: (entity: string, id: string) => ['audit', entity, id] as const,
 };
 
@@ -88,6 +89,13 @@ export const useNotifications = () =>
   useQuery({
     queryKey: keys.notifications,
     queryFn: () => apiFetch<NotificationsList>('/me/notifications'),
+    refetchInterval: 30000,
+  });
+
+export const useUnreadNotifications = () =>
+  useQuery({
+    queryKey: keys.notificationsUnread,
+    queryFn: () => apiFetch<NotificationsList>('/me/notifications?unread=true'),
     refetchInterval: 30000,
   });
 
