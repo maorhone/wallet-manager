@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-
 import { useMe } from '../../api/queries';
 import { he } from '../../i18n/he';
 import Departments from './Departments';
+import Operations from './Operations';
 import Pending from './Pending';
 
 const TABS = ['pending', 'departments', 'operations', 'policies', 'audit'];
@@ -30,7 +31,7 @@ export default function PlatformPage() {
               key={key}
               value={key}
               data-testid={`tab-${key}`}
-              disabled={key !== 'pending' && key !== 'departments'}
+              disabled={key === 'policies' || key === 'audit'}
             >
               {he.platformPage.tabs[key]}
             </Tabs.Tab>
@@ -39,6 +40,7 @@ export default function PlatformPage() {
       </Tabs>
       {tab === 'pending' && <Pending />}
       {tab === 'departments' && <Departments />}
+      {tab === 'operations' && <Operations />}
     </Stack>
   );
 }

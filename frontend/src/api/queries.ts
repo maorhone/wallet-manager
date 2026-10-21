@@ -5,7 +5,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { apiFetch, apiPatch, apiPost, apiPut } from './client';
+import { apiFetch, apiPatch, apiPost, apiPut, type WriteOptions } from './client';
 import type {
   AuditEntry,
   DepartmentSummary,
@@ -29,10 +29,12 @@ import type {
   MyWallet,
   NotificationPref,
   NotificationsList,
+  OutboxEntry,
   PendingPlacement,
   PmoPool,
   Policies,
   Status,
+  SyncStatus,
   UsagePoint,
   WriteResponse,
 } from './types';
@@ -83,10 +85,25 @@ export function applyWriteResponse<T>(
   qc.setQueryData<T>(key, (old) => (old === undefined ? old : merge(old, response)));
 }
 
+export const useOutbox = (status: SyncStatus | '') =>
+  useQuery({
+    queryKey: ['outbox', status],
+    queryFn: () => apiFetch<OutboxEntry[]>(`/outbox${status ? `?status=${status}` : ''}`),
+    refetchInterval: 2000,
+  });
+
+export const useReconciliationAudit = () =>
+  useQuery({
+    queryKey: ['audit', 'reconcile'],
+    queryFn: () => apiFetch<AuditEntry[]>('/audit?actor=system:reconcile'),
+    refetchInterval: 5000,
+  });
+
 export const useRetryOutbox = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number | string) => apiPost(`/outbox/${id}/retry`, undefined),
+    mutationFn: ({ id, ...write }: WriteOptions & { id: number | string }) =>
+      apiPost(`/outbox/${id}/retry`, undefined, write),
     onSuccess: () => qc.invalidateQueries(),
   });
 };

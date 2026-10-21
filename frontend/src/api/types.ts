@@ -34,12 +34,27 @@ export interface Me {
 
 export interface Status {
   litellm_reachable: boolean;
+  redis: 'not_configured' | 'connected' | 'unreachable' | 'unknown';
+  litellm_version: string | null;
+  pending_placements: number | null;
   outbox: { pending: number; failed: number; oldest_pending_at: string | null };
   spend_taken_at: string | null;
   last_sync: string | null;
 }
 
 export type SyncStatus = 'pending' | 'applied' | 'failed';
+
+export interface OutboxEntry {
+  id: number;
+  entity: string;
+  entity_id: string;
+  endpoint: string;
+  status: SyncStatus;
+  attempts: number;
+  last_error: string | null;
+  idempotency_key: string;
+  created_at: string;
+}
 
 export interface WriteEntity {
   entity: string;

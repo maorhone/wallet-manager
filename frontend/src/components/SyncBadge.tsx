@@ -23,7 +23,11 @@ export function SyncBadge({
         <span aria-hidden="true">{ICON[status]}</span> {he.sync[status]}
       </Badge>
       {status === 'failed' && isAdmin && outboxId !== undefined && (
-        <Button size="compact-xs" variant="default" onClick={() => retry.mutate(outboxId)}>
+        <Button
+          size="compact-xs"
+          variant="default"
+          onClick={() => retry.mutate({ id: outboxId, reason: he.retry })}
+        >
           {he.retry}
         </Button>
       )}

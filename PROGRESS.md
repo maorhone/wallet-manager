@@ -1,11 +1,21 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Step 3.7 (Platform shell and Departments UI) done on phase-3b. Next = Step 3.8.
-Latest `./scripts/test.sh` (Step 3.7): green; pytest 527 passed / 6 skipped, Vitest 43 passed, Playwright 35 passed; ruff, frontend lint/typecheck and formatting pass. Pytest 200.70 s, Playwright 2.1 min (new acceptance test 6.6 s). Run used the supplied E2E ports 4150–4152; no scripts, default ports or env handling changed.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Steps 3.7 (Platform shell and Departments UI) and 3.8 (Operations tab) done on phase-3b. Next = Step 3.9.
+Latest `./scripts/test.sh` (Step 3.8): green; pytest 526 passed / 6 skipped / 1 xfailed in 194.51 s (the owner-approved date-dependent share-expiry xfail; see Notes), Vitest 43 passed, Playwright 36 passed (2.6 min; new Operations test 3.7 s). Ruff/format, frontend lint and typecheck pass. This run used E2E ports 4150–4152; no scripts, default ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.8: enabled `/platform/operations` for platform admins with LiteLLM reachability, all Redis
+  states (including `לא מוגדר`), outbox depth/counts, pending placements and spend freshness/timestamp.
+  The outbox table filters pending/failed/applied/all writes and shows errors; pending and failed writes
+  retry through `ChangeSummaryDialog` with a required reason and Idempotency-Key, then poll to applied.
+  Reconciliation corrections use `/audit?actor=system:reconcile` and the existing `HistoryTimeline`.
+  The new Playwright acceptance test was written first and failed on the disabled Operations tab;
+  it now passes, covering real fakeFail → failed → UI retry → applied, filters, status, drift rendering,
+  headers and access restrictions. Full-gate outcome and separate frontend counts are in Status.
+  No implementation blockers or new owner questions; full gate green with the owner-approved xfail.
+  Step 3.9 was not started.
 - Step 3.7: Platform shell at `/platform/:tab`, `/platform` redirects to Pending; the existing pending-placement UI and tests stay intact.
   Departments lists current budgets and periods, supports department and regular/staff-group creation, and edits budgets/periods through the existing API.
   `RoleBindingsEditor` edits AD group DNs per role and displays resolved names; all changes use `ChangeSummaryDialog` with a required reason and Idempotency-Key.
@@ -184,12 +194,41 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.8: Platform Operations tab (status with Redis, outbox, drift log).
+- Step 3.9: Platform Policies and Audit search tabs; Phase 3 wrap-up on the phase-3b track.
 
 ## Blockers
-- None.
+- None for Step 3.8. The known date-dependent backend test is marked xfail on this branch
+  as instructed by the owner; its fix remains on main and must be resolved at merge.
 
 ## Notes
+- Step 3.8 resumed verification: applied the owner's branch-only marker to
+  `tests/e2e_backend/test_a1_wm.py::test_a1_share_expiry_blocks_then_scheduler_closes_and_returns`:
+  `@pytest.mark.xfail(strict=False, reason="time-dependent; fixed on main, resolved at merge")`.
+  Its assertions remain intact; no backend/fake fix was attempted. This supersedes the prior
+  full-gate blocker below. Step 3.9 has not been started.
+- Step 3.8 earlier full-gate retry (before the owner-approved xfail): pytest stopped at
+  `tests/e2e_backend/test_a1_wm.py::test_a1_share_expiry_blocks_then_scheduler_closes_and_returns`
+  with 307 passed / 6 skipped / 1 failed in 136.65 s. The same test fails alone in 2.08 s:
+  `used=2002.0000, returned=998.0000`, expected `used=1001, returned=1999`.
+  The wall clock is 2026-10-21 23:13 UTC (2026-10-22 in APP_TIMEZONE); the test's ten-day
+  expiry and eleven-day scheduler advance cross into November. The fake retains membership
+  spend across months, while attribution also reads October SpendLogs, counting the same spend
+  in both periods for this share. No backend, fake, existing test or clock changes were made:
+  fixing monthly fake budget reset behavior is outside the explicitly requested UI-only step.
+- Step 3.8 verification: the first full gate stopped after 119 pytest passes with a 60 s
+  fixture timeout in `tests/api/test_member_limits.py::test_get_policies_readable_by_any_user`.
+  It hung in `seeded` → `seed` → `_upsert` while SQLAlchemy built a column comparison
+  (`sql/type_api.py` → `enum.OperatorClass.__and__`), before the test body; elapsed suite time
+  was 621.33 s, including a long environment stall. No backend code/fixtures/timeouts changed.
+  Limited follow-up to one focused check and one full-gate retry, per the owner's timeout rule.
+  The isolated test passed in 1.77 s.
+- Step 3.8: no SPEC/PLAN differences. Reused the existing backend APIs; `/status`, `/outbox` and
+  `/audit` are already in the Vite proxy regex, so no new prefix or proxy change was needed.
+  The retry hook now sends write options (the existing SyncBadge retry supplies a reason too).
+  The acceptance test supplies the drift audit read model to avoid waiting for the five-minute
+  scheduler; failed-write creation and retry use the real API/worker/fake. Spend freshness uses
+  a real snapshot of seeded test spend. No Steps 3.3–3.6 code, stubs or tabs were added; Policies
+  and Audit search stay disabled. Test scripts, default E2E ports and env handling are unchanged.
 - Step 3.7 backend-timeout investigation (2026-10-22): the reported `./scripts/test.sh` run
   stopped at `tests/api/test_status_outbox.py::test_retry_failed_row` during async fixture setup,
   before the test body, with `pytest-timeout` (>60 s; 262 passed, 1 setup error in 766.14 s).

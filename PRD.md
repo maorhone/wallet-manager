@@ -158,6 +158,16 @@ to its staff group's Members screen for representatives' personal values (DR9). 
 DNs per department role and shows resolved member names; changes require a reason in the shared change summary.
 Past-period selection disables changes. Operations, Policies and Audit tabs are reserved for subsequent steps.
 
+### 4.8.2 Platform Operations tab - Step 3.8: Done
+
+Platform admins open `/platform/operations` to see LiteLLM reachability, Redis status (including
+"לא מוגדר" when Redis is not configured), outbox depth with pending and failed counts, pending placements,
+and spend freshness with its timestamp. The outbox table defaults to failed writes and can show
+pending, applied or all writes, including error text. Pending and failed writes can be retried
+through the shared change summary with a required reason and Idempotency-Key; polling updates
+their status after application. The drift log uses the existing reconciliation audit filter and
+shared history timeline. Policies and Audit search remain reserved for Step 3.9.
+
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned
 
 Production organizations, service keys, rotate/revoke.

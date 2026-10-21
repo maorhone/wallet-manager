@@ -1,6 +1,108 @@
-import { expect, loginAs, resetData, test } from './fixtures';
+import { apiAs, expect, fake, fakeFail, loginAs, resetData, test } from './fixtures';
 
 test.beforeEach(() => resetData());
+
+test('Admin sees Redis not configured, retries a failed outbox row and it turns applied', async ({
+  page,
+}) => {
+  await fake('/_test/spend', {
+    team_id: 'A1',
+    user_id: 'dani@corp.example',
+    model: 'gpt-4',
+    amount: 1,
+  });
+  const admin = await apiAs('admin@corp.example');
+  let failedId: number;
+  try {
+    await fakeFail('/organization/update', 1, 400);
+    const write = await admin.put('/departments/1/budget', {
+      budget: 1100000,
+      budget_period: '1mo',
+    });
+    expect(write.ok()).toBeTruthy();
+    await expect
+      .poll(async () => (await (await admin.get('/outbox?status=failed')).json()).length)
+      .toBe(1);
+    failedId = (await (await admin.get('/outbox?status=failed')).json())[0].id;
+    await expect
+      .poll(async () => (await (await admin.get('/status')).json()).spend_taken_at)
+      .not.toBeNull();
+  } finally {
+    await admin.dispose();
+  }
+
+  // The scheduler's five-minute drift scan is covered by backend tests. Supply its read model
+  // here to verify the actor filter and shared timeline without waiting for a scheduler tick.
+  await page.route('**/audit?actor=system:reconcile', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 900001,
+          at: new Date().toISOString(),
+          actor_upn: 'system:reconcile',
+          actor_role: 'platform_admin',
+          entity: 'department',
+          entity_id: '1',
+          before: { max_budget: 900000 },
+          after: { max_budget: 1100000 },
+          reason: 'Reconcile drift',
+          request_id: null,
+          litellm_calls: [
+            {
+              endpoint: '/organization/update',
+              status: 'applied',
+              attempts: 0,
+              last_error: null,
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  await loginAs(page, 'admin@corp.example');
+  await page.goto('/platform');
+  await page.getByRole('tab', { name: 'תפעול', exact: true }).click();
+  const status = page.getByTestId('operations-status');
+  await expect(status.getByTestId('redis-status')).toHaveText('לא מוגדר');
+  await expect(status.getByTestId('litellm-status')).toHaveText('זמין');
+  await expect(status.getByTestId('outbox-failed')).toHaveText('1');
+  await expect(status.getByTestId('pending-placements')).toHaveText('2');
+  await expect(status.getByTestId('spend-freshness')).not.toHaveText('אין נתונים');
+  await expect(page.getByTestId('history-timeline')).toContainText('system:reconcile');
+  await expect(page.getByTestId('history-timeline')).toContainText('900000 → 1100000');
+
+  const row = page.getByTestId(`outbox-row-${failedId}`);
+  await expect(row).toContainText('/organization/update');
+  await expect(row.getByTestId('outbox-error')).toContainText('injected failure');
+  await expect(row.getByTestId('sync-badge')).toHaveAttribute('data-status', 'failed');
+  await row.getByRole('button', { name: 'ניסיון חוזר' }).click();
+  await expect(page.getByTestId('confirm-change')).toBeDisabled();
+  await page.getByTestId('change-reason').fill('ניסיון חוזר לאחר תיקון התקלה');
+  const retried = page.waitForResponse(
+    (res) => res.url().endsWith(`/outbox/${failedId}/retry`) && res.request().method() === 'POST',
+  );
+  await page.getByTestId('confirm-change').click();
+  const response = await retried;
+  expect(response.ok()).toBeTruthy();
+  expect(decodeURIComponent(response.request().headers()['x-change-reason'])).toBe(
+    'ניסיון חוזר לאחר תיקון התקלה',
+  );
+  expect(response.request().headers()['idempotency-key']).toBeTruthy();
+  await expect(row).toHaveCount(0);
+  await page.getByLabel('סינון לפי מצב').selectOption('applied');
+  await expect(row.getByTestId('sync-badge')).toHaveAttribute('data-status', 'applied');
+  await expect(row.getByRole('button', { name: 'ניסיון חוזר' })).toHaveCount(0);
+  await expect(status.getByTestId('outbox-failed')).toHaveText('0');
+  await page.getByLabel('סינון לפי מצב').selectOption('pending');
+  await expect(row).toHaveCount(0);
+  await page.getByLabel('סינון לפי מצב').selectOption('');
+  await expect(row).toBeVisible();
+
+  await loginAs(page, 'rep@corp.example');
+  await page.goto('/platform/operations');
+  await expect(page.getByText('הגישה לפלטפורמה מוגבלת למנהלי פלטפורמה')).toBeVisible();
+  await expect(page.getByTestId('operations-status')).toHaveCount(0);
+});
 
 test('Admin creates a department, its staff group and a representative binding; the new group shows sync applied at zero budget', async ({
   page,
