@@ -1598,6 +1598,623 @@ Every Phase 2 step follows these rules: the §1 conventions, the write contract,
 
 ---
 
+## 2d. Steps (Phase 3: directory, service keys, production)
+
+Every Phase 3 step follows the §1 conventions, the write contract (reason in `X-Change-Reason`, optional Idempotency-Key, `{request_id, status, entities}`), the §11.2 envelope, and `./scripts/test.sh` as the only gate.
+- **Ports.** Do not change the e2e ports (4120–4122). `scripts/e2e_stack.py` must keep working with its default ports (live preview: UI 4100, API 4111, fake 4112).
+- **Time budget.** Phases 3 and 4 together may add at most about 90 s of pytest and about 10 Playwright tests. Phase 3 takes 6 of them.
+- **Clock.** Nothing in `app/` calls `datetime.now()`. Use `app.state.clock` or the job's `clock`.
+- **No AD sync anywhere** (owner decision 20/10/2026). The `ldap3` directory is used for exactly three things:
+  - the one-time onboarding lookup;
+  - owner names (FR-E3) and role holders;
+  - login roles, only when the OIDC token has no groups claim.
+
+  It has no sync, dry-run, safety gate, role mirroring or leaver grace period. `FixtureDirectory` stays the dev and test default.
+- **No external services.** Tests need no LDAP server (ldap3 `MOCK_SYNC`), no Redis server (the fake reports Redis state), and no paid API.
+- **Secrets (NFR5).** A service key secret is returned once, in the create or rotate response only. It is never stored, logged, audited or put into an outbox payload; only the LiteLLM token hash is kept. Responses that carry a secret send `Cache-Control: no-store`.
+- **Public repo (NFR10).** Use placeholders only (`ldaps://dc.corp.example`, `DC=corp,DC=example`). `test_repo_hygiene.py` must keep passing. Tests generate dummy passwords with `secrets.token_urlsafe`.
+- **No Enterprise features.**
+  - Rotation is generate-new plus delete-old. It does not use `/key/regenerate`.
+  - Redis status comes from LiteLLM's `/health/readiness`.
+- **Order.** Backend Steps 3.1–3.4 come first. UI Steps 3.5–3.9 are small: one tab each.
+
+### Step 3.1: ldap3 Directory with an offline contract test, OIDC role fallback
+**Spec:** §5.1 Directory lookup; §9.1; §5.4 (AD unreachable); FR-E3; §6 (roles at login); NFR2 (ldap3, no sync CronJob); NFR5; NFR10; §16 Phase 3 (directory contract test).
+
+**Files:**
+- `pyproject.toml` and `uv.lock`: add `ldap3`. If `uv add ldap3` cannot reach an index, stop and record a blocker in PROGRESS.md.
+- `app/directory.py`: `LdapDirectory`, `make_directory`.
+- `app/config.py` and `.env.example`.
+- `app/main.py`: `create_app(..., directory: Directory | None = None)`.
+- `app/errors.py`: an exception handler mapping `DirectoryUnavailable` to 503 `DIRECTORY_UNAVAILABLE`.
+- `app/services/owners.py`.
+- `app/auth/oidc.py`.
+- `app/auth/dev.py`: keeps a `FixtureDirectory` for the dev user list.
+- `tests/directory/__init__.py`, `tests/directory/ldap_mock.py`, `tests/directory/test_ldap_directory.py`, `tests/directory/test_directory_contract.py` (all new).
+- `tests/auth/test_oidc.py`, `tests/api/test_onboarding.py`.
+
+**Build:**
+- **Settings.**
+  - `directory_backend: Literal["fixture","ldap"] = "fixture"`
+  - `ldap_url = ""` (example `ldaps://dc.corp.example`)
+  - `ldap_bind_dn = ""` and `ldap_bind_password = ""` (`.env` only, never logged)
+  - `ldap_user_base = ""` (example `OU=Users,DC=corp,DC=example`)
+  - `ldap_timeout_s = 5`, `ldap_cache_ttl_s = 300`
+- **`make_directory(settings) -> Directory`.**
+  - `fixture` returns `FixtureDirectory(settings.seed_file)`.
+  - `ldap` returns `LdapDirectory(settings)`. A missing url or base raises `RuntimeError` at startup.
+- **`LdapDirectory`.** Signature: `LdapDirectory(settings, connect: Callable[[], ldap3.Connection] | None = None, now=time.monotonic)`. It is synchronous like the Protocol and keeps the Protocol unchanged.
+  - `groups_of(upn)`: search `(&(objectClass=user)(userPrincipalName=<escaped>))` and read `memberOf`. Direct membership only. Not cached, because it is the one-time onboarding read.
+  - `members_of(dn)`: search `(&(objectClass=user)(memberOf=<escaped dn>))` and return `userPrincipalName`. Cached for the TTL.
+  - `display_name(upn)`: read `displayName`. Returns `None` when the user is not found. Only positive results are cached, so `not_in_directory` is never stale.
+  - Values are escaped with `ldap3.utils.conv.escape_filter_chars`.
+  - Any `ldap3.core.exceptions.LDAPException` or `OSError` (including a failed bind) raises `DirectoryUnavailable` with no credentials in the message.
+- **Callers.**
+  - Onboarding already maps the error to 503 and writes nothing.
+  - Writes that need `target_tier` now fail closed with 503 `DIRECTORY_UNAVAILABLE` through the new handler.
+  - `owners.holders` catches `DirectoryUnavailable` and returns `[]`, so the wallet still renders with the owner's role but no names.
+- **OIDC login roles.** If the token's groups claim is missing or empty, use `directory.groups_of(upn)`. On `DirectoryUnavailable`, log a warning without the upn's groups and create an employee-only session (least privilege).
+- **Contract test without a server.** `tests/directory/ldap_mock.py: mock_connect(yaml_path) -> Callable[[], Connection]` does the following:
+  - builds `Server("mock.corp.example", get_info=ldap3.OFFLINE_AD_2012_R2)` and `Connection(..., client_strategy=ldap3.MOCK_SYNC)`;
+  - adds a bind entry with a password generated at run time;
+  - loads `seed/dev.yaml` users as `user` entries (`userPrincipalName`, `displayName`, `memberOf`).
+
+  The same dataset backs both implementations.
+- **Not built:** an LDAP sync job, mirroring, or a dry-run.
+
+**Tests:**
+- `tests/directory/test_directory_contract.py::test_contract[fixture]` and `::test_contract[ldap]`, covering `groups_of`, `members_of` and `display_name` (known, unknown, no groups).
+- `tests/directory/test_ldap_directory.py`:
+  - `test_filter_values_escaped`
+  - `test_bind_failure_raises_directory_unavailable`
+  - `test_socket_error_raises_directory_unavailable`
+  - `test_members_of_cached_until_ttl`
+  - `test_unknown_user_not_cached`
+  - `test_make_directory_selects_backend_and_refuses_missing_config`
+  - `test_real_ldap[real]`: skipped unless `LDAP_TEST_URL` is set.
+- `tests/auth/test_oidc.py`:
+  - `test_login_without_groups_claim_uses_directory`
+  - `test_login_directory_down_employee_only`
+- `tests/api/test_onboarding.py::test_ldap_directory_down_503_nothing_written` (an `LdapDirectory` whose `connect` raises).
+- `tests/api/test_me_wallet.py::test_owner_names_degrade_when_directory_down`.
+
+**test.sh after:** unchanged. `uv sync` installs ldap3.
+
+### Step 3.2: Platform backend: PUT /policies, Redis status, department and group creation, role bindings
+**Spec:** §11.1 Platform (`GET|PUT /policies`, `/status`); §12.5.5 (Departments, Policies, Status); §9.3 "New budget group"; D13; FR-D1; §8.2 `policy`, `role_binding`; §5.4 Redis row; §10 Info and health.
+
+**Files:**
+- `app/routers/policies.py`, `app/routers/platform.py`, `app/routers/departments.py`.
+- `app/routers/role_bindings.py` (new; register it in `app/main.py`).
+- `app/services/platform.py` (new; policies, department and group create, bindings).
+- `app/schemas/platform.py` (new).
+- `app/litellm_client/{client,models}.py`: `health_readiness()`, `HealthReadiness`.
+- `fake_litellm/main.py`: `GET /health/readiness`.
+- `fake_litellm/controls.py`: the `Config.redis` field.
+- `app/permissions.py`.
+- `frontend/vite.config.ts`: proxy `/role-bindings`.
+- `tests/api/test_policies_put.py`, `tests/api/test_platform_create.py`, `tests/api/test_role_bindings.py` (new); `tests/api/test_status_outbox.py`; `tests/litellm/test_client_vs_fake.py`.
+
+**Build:**
+- **`PUT /policies`** (admin; others 403).
+  - Body: a partial map of the policy keys `GET /policies` returns today, plus `overalloc_factors: {"<group_id>": number}`, which writes `grp.overalloc_factor` within `[1.0, 2.0]`.
+  - Errors, all 422 `INVALID_REQUEST`:
+    - an unknown key or a `member_defaults.*` key gives `details.key`;
+    - `min ≤ default ≤ max` violated gives `details.field`;
+    - an unknown group id gives `details.group_id`.
+  - One audit row per changed key or group (entity `policy` or `group`). No LiteLLM call.
+  - Existing key limits outside the new range are left alone (the Q4 rule).
+- **`GET /status`** adds the following fields:
+  - `redis`, one of `"connected" | "unreachable" | "not_configured" | "unknown"`;
+  - `litellm_version`;
+  - `pending_placements` (an integer for admins, null for everyone else).
+
+  `client.health_readiness()` calls LiteLLM `GET /health/readiness` and parses `{status, db, cache, litellm_version}`. Mapping:
+  - `cache` null gives `not_configured`;
+  - `cache == "redis"` with `status == "healthy"` gives `connected`;
+  - a readiness 503 or an unhealthy status with `cache` set gives `unreachable`;
+  - LiteLLM unreachable gives `unknown`.
+
+  One call serves both reachability and Redis, through the existing 10 s cache in `_reachable`.
+
+  In the fake, `/health/readiness` is unauthenticated. `/_test/config` gains `redis: Literal["none","ok","down"] = "none"`, and `"down"` returns 503 with `cache: "redis"`. No Redis server is used anywhere.
+- **`POST /departments`** (admin).
+  - Body: `{name, litellm_org_id, ad_group_dn, budget, budget_period="1mo"}`.
+  - Enqueues `/organization/new` through the existing builder.
+  - A duplicate `litellm_org_id` or `ad_group_dn` gives 422 `INVALID_REQUEST` with `details.field`.
+  - The entity is `department`.
+- **`POST /departments/{id}/groups`** (admin).
+  - Body: `{name, litellm_team_id, ad_group_dn, kind: "regular"|"department_staff", default_member_cap=0}`.
+  - It creates `grp` with `base_budget=0` and status `active`, and enqueues `/team/new` (organization_id, `max_budget=0`, §9.3).
+  - Errors: 404 unknown department; 422 `INVALID_REQUEST` for a duplicate team id or DN, or a second `department_staff` group (D13).
+- **`GET /role-bindings?scope_kind=&scope_id=`** and **`PUT /role-bindings`** (admin).
+  - Body: `{scope_kind: "global"|"department"|"group", scope_id, role, ad_group_dns: [dn]}`. It replaces the set for that (scope, role).
+  - Allowed roles:
+    - `department`: rep, PMO, viewer;
+    - `group`: group head, viewer;
+    - `global`: admin, viewer.
+
+    Use the role constants in `app/permissions.py`.
+  - Removing the last global admin binding gives 422 `INVALID_REQUEST`.
+  - GET rows carry `members: [{upn, display_name}]` through `owners.holders`-style lookups.
+  - Changes take effect at the next login (existing behavior).
+  - Audit entity `role_binding`. Nothing is mirrored into LiteLLM (§6).
+
+**Tests:**
+- `tests/api/test_policies_put.py`:
+  - `test_admin_updates_concurrency_range_and_audits`
+  - `test_min_above_max_invalid`
+  - `test_unknown_key_invalid`
+  - `test_non_admin_403`
+  - `test_overalloc_factor_per_group_then_caps_check_uses_it`
+- `tests/api/test_status_outbox.py`:
+  - `test_status_redis_not_configured_by_default`
+  - `test_status_redis_connected_and_down`
+  - `test_status_litellm_down_redis_unknown`
+  - `test_pending_placements_count_admin_only`
+- `tests/api/test_platform_create.py`:
+  - `test_create_department_enqueues_organization_new`
+  - `test_create_group_team_new_zero_budget_after_drain`
+  - `test_second_staff_group_invalid`
+  - `test_duplicate_team_id_invalid`
+  - `test_non_admin_403`
+- `tests/api/test_role_bindings.py`:
+  - `test_replace_department_rep_binding_takes_effect_on_next_login`
+  - `test_last_admin_binding_cannot_be_removed`
+  - `test_role_not_allowed_for_scope_invalid`
+- `tests/litellm/test_client_vs_fake.py::test_health_readiness_shapes`
+
+**test.sh after:** unchanged.
+
+### Step 3.3: Production organizations and systems
+**Spec:** FR-K1, FR-K2 (systems); §4 (Production tree), DR4, D8; §11.1 `POST /production/departments/{id}/systems`; §12.5.4 tab 6; §12.5.5 (create the production organization and systems); §10 Department and Group rows.
+
+**Files:**
+- `alembic/versions/0005_production_service_keys.py` (new).
+- `app/models.py`, `tests/test_schema.py`.
+- `app/db.py`: `LockKind.PRODUCTION`, the next free value.
+- `app/services/production.py`, `app/schemas/production.py`, `app/routers/production.py` (new; register in `app/main.py`).
+- `app/outbox/desired.py` and `app/outbox/worker.py`: new entities `production_org` and `production_system`.
+- `app/services/spend.py`: snapshot `scope_kind="system"` from team spend of production teams.
+- `app/services/views.py`: department summary `actions.view_production`, `actions.edit_production`.
+- `app/permissions.py`.
+- `frontend/vite.config.ts`: proxy `/production`.
+
+**Build:**
+- **Migration 0005** (it also covers Step 3.4):
+  - `department.prod_litellm_org_id text NULL UNIQUE`
+  - `department.prod_budget numeric(18,2) NULL`
+  - `department.prod_budget_period text NOT NULL DEFAULT '1mo'`
+  - table `production_system (id bigint identity PK, department_id bigint FK, litellm_team_id text UNIQUE, name text, budget numeric(18,2) DEFAULT 0, status text CHECK IN ('active','archived') DEFAULT 'active', created_at timestamptz)`
+  - on `service_key`:
+    - `CHECK owner_kind IN ('group','system')` and `CHECK status IN ('pending','active','failed','revoked')`;
+    - add `created_at timestamptz`, `created_by text`;
+    - partial unique index on `litellm_token_hash WHERE litellm_token_hash IS NOT NULL`;
+    - index `(owner_kind, owner_id)`.
+
+  `tests/test_schema.py` adds the table and columns, with a comment pointing to owner question 1.
+- **`PUT /production/departments/{id}`** (admin).
+  - Body: `{budget, budget_period?}`.
+  - The first call sets `prod_litellm_org_id = f"{litellm_org_id}-prod"` and enqueues `/organization/new` (alias `"<name> production"`). Later calls enqueue `/organization/update`.
+  - Lowering the budget below Σ systems is accepted (Q4); the GET then shows `over_allocated: true`.
+  - Entity `production_org` (id = department id).
+- **`POST /production/departments/{id}/systems`** (admin; spec body `{name, budget}`).
+  - It takes `lock(PRODUCTION, id)` before reading any sums.
+  - Errors: 404 department; 422 `INVALID_REQUEST` with `details.reason="no_production_org"`; Σ system budgets + budget > `prod_budget` gives 422 `PARENT_OVERALLOCATED` `{requested, available, parent_total}`.
+  - It inserts the row with `litellm_team_id = f"sys-{id}"` and enqueues `/team/new` (`organization_id` = the production org, `max_budget`, `budget_duration`).
+  - The team never belongs to the department org (DR4).
+- **`GET /production/departments/{id}`** (admin; rep of the department; others 403 per the §12.2 production row).
+  - Returns `{department_id, org: {litellm_org_id, budget, budget_period, used, over_allocated, sync_status} | null, systems: [{id, name, litellm_team_id, budget, used, keys_count, sync_status}], spend_taken_at, actions: {edit}}`.
+  - `used` comes from the snapshot (§12.9).
+- Production objects are not reconciled. FR-RC covers the §8.1 fields only.
+
+**Tests:**
+- `tests/api/test_production.py`:
+  - `test_create_production_org_then_update_budget`
+  - `test_system_team_in_production_org_not_department_org_dr4`
+  - `test_systems_over_production_budget_422_with_numbers`
+  - `test_system_without_production_org_invalid`
+  - `test_rep_reads_viewer_and_head_403`
+  - `test_non_admin_writes_403`
+  - `test_replay_same_idempotency_key_200`
+- `tests/api/test_production_concurrency.py::test_concurrent_systems_one_parent_overallocated`
+- `tests/test_spend_snapshot.py::test_system_spend_snapshotted`
+
+**test.sh after:** unchanged.
+
+### Step 3.4: Service keys: create (secret shown once), rotate, revoke, list
+**Spec:** FR-K2 (system keys), FR-K3, FR-K4; NFR5; §11.1 `POST /service-keys`, `/service-keys/{id}/rotate | /revoke`; §10 Service key row; §12.5.2 tab 5; §6 (group head manages group service keys); FR-A1; FR-G4 and D7 for limits.
+
+**Files:**
+- `app/litellm_client/{client,models}.py`: `key_service_account_generate(body: ServiceAccountKeyGenerate) -> KeyGenerateResponse`.
+- `fake_litellm/main.py`: `POST /key/service-account/generate`.
+- `fake_litellm/db.py`: a `models` column on `LiteLLM_VerificationToken`. An existing dev fake DB needs `scripts/dev_db.py` to reset it, as in 1b.1.
+- `fake_litellm/enforcement.py`: enforce the key's `models` and `max_budget` for `user_id=null` keys.
+- `app/services/service_keys.py`, `app/schemas/service_keys.py`, `app/routers/service_keys.py` (new).
+- `app/services/validation.py`: `group_allocated(db, group)`.
+- `app/services/members.py`: the FR-G1 sum uses it.
+- `app/services/views.py`: group summary `actions.service_keys {view, manage}`, and `allocated` includes key budgets.
+- `app/services/spend.py`: snapshot `scope_kind="service_key"` keyed by `api_key` = token hash.
+- `app/permissions.py`: `can_manage_service_keys`, `can_view_service_keys`.
+- `app/errors.py`: `LITELLM_UNAVAILABLE`.
+- `frontend/vite.config.ts`: proxy `/service-keys`.
+
+**Build:**
+- **`POST /service-keys`** with the spec body `{owner_kind: group|system, owner_id, alias, max_budget, max_parallel, rpm_limit, models}`.
+  1. Permission check. Group keys: group head of that group, or admin. System keys: admin. Otherwise 403, or 404 for an unknown owner.
+  2. Lock: `lock(GROUP, id)` or `lock(PRODUCTION, department_id)`.
+  3. Validation:
+     - group: `group_allocated + max_budget > base × overalloc_factor` gives 422 `PARENT_OVERALLOCATED`, where `group_allocated` = Σ member base caps + Σ active group key budgets;
+     - system: Σ active key budgets + max_budget > system budget gives 422 `PARENT_OVERALLOCATED`;
+     - `max_parallel` and `rpm_limit` go through the existing `check_limit` with the policy ranges (admin may exceed the max, D7); failures give 422 `LIMIT_OUT_OF_POLICY`;
+     - an owner whose `/team/new` row is not applied gives 422 `INVALID_REQUEST` with `details.sync_status`.
+  4. First transaction: insert the `service_key` row (`pending`), the audit row, and a `litellm_write` row for `/key/service-account/generate` with status `pending`. That payload contains no secret, because LiteLLM generates it. Commit.
+  5. Call `app.state.litellm.key_service_account_generate(team_id, key_alias=f"wm-sk-{id}", max_budget, max_parallel_requests, rpm_limit, models)` synchronously. It cannot be queued without storing the secret.
+  6. Second transaction:
+     - on success, store `token` in `litellm_token_hash`, set status `active`, mark the write row `applied`;
+     - on a LiteLLM error, set the key and the write row to `failed` (with `last_error`) and return 503 `LITELLM_UNAVAILABLE`.
+  7. Response: the write response with entity `service_key` (values `{alias, max_budget, max_parallel, rpm_limit, models, status}`), plus top-level `secret`, plus `Cache-Control: no-store`.
+
+  An idempotent replay returns 200 without `secret`.
+- **`POST /service-keys/{id}/rotate`** `{}` (same permissions).
+  - Status must be `active`, otherwise 422 `INVALID_REQUEST` with `details.status`.
+  - It generates a new key synchronously with the same values, swaps the hash, and enqueues `/key/delete {keys: [old_hash]}` with a payload fixed at enqueue (§8.2).
+  - It returns the new `secret` once.
+- **`POST /service-keys/{id}/revoke`** `{}`.
+  - `active` becomes `revoked`, and it enqueues `/key/delete` with a fixed payload.
+  - Revoking an already revoked key gives 422 `INVALID_REQUEST`.
+- **`GET /service-keys?owner_kind=&owner_id=`** (view: head, rep or viewer of the group or its department, and admin for group keys; rep and admin for system keys).
+  - Row fields: `{id, owner_kind, owner_id, alias, max_budget, max_parallel, rpm_limit, models, status, used, sync_status, created_at, actions: {rotate, revoke}}`.
+  - `failed` keys are listed (they still count toward nothing). Hashes are never returned.
+- **NFR5.** The secret must not reach logging. The client already avoids logging. Neither the routers nor the services log request or response bodies.
+
+**Tests:**
+- `tests/api/test_service_keys.py`:
+  - `test_head_creates_group_key_secret_once_hash_stored`
+  - `test_secret_absent_from_db_audit_outbox_and_logs` (scans `service_key`, `audit_log`, `litellm_write` text and `caplog`)
+  - `test_replay_returns_200_without_secret`
+  - `test_group_keys_plus_caps_over_base_parent_overallocated`
+  - `test_member_caps_check_counts_key_budgets`
+  - `test_limits_out_of_policy_422_admin_above_max_ok`
+  - `test_litellm_down_503_key_failed_nothing_usable`
+  - `test_rotate_new_secret_old_key_deleted_after_drain`
+  - `test_revoke_deletes_key_twice_invalid`
+  - `test_rep_viewer_list_no_actions_and_write_403`
+  - `test_system_key_admin_only_and_within_system_budget`
+- `tests/contract/test_service_keys.py::test_service_key_budget_parallel_and_models[fake]` (`[real]` with env).
+- `tests/e2e_backend/test_service_keys_wm.py::test_group_key_spend_draws_from_team_budget`
+- `tests/litellm/test_client_vs_fake.py::test_service_account_generate_returns_key_and_hash`
+
+**test.sh after:** unchanged.
+
+### Step 3.5: UI: Group Service keys tab (small UI step)
+**Spec:** §12.5.2 tab 5; FR-K3, FR-K4; NFR5; §12.1; §12.7.
+
+**Files:**
+- `frontend/src/pages/group/ServiceKeys.tsx` (new; `/group/:id/service-keys`).
+- `frontend/src/pages/group/GroupPage.tsx`: `TABS` gains `service-keys`, shown when `actions.service_keys.view`.
+- `frontend/src/components/ServiceKeyList.tsx` (new; reused by Step 3.6).
+- `frontend/src/components/ServiceKeyDialog.tsx` (new; create form plus reason, through `ChangeSummaryDialog`).
+- `frontend/src/components/SecretOnceModal.tsx` (new). It shows the secret with a copy button and a warning. The secret lives only in component state from the mutation result and is never in the TanStack Query cache. Closing it clears the secret, and it cannot be reopened.
+- `frontend/src/api/{queries,types}.ts`: `useServiceKeys(ownerKind, ownerId)`, `useServiceKeyWrite()`.
+- `frontend/src/i18n/{he,errors}.ts`: `he.serviceKeys`, plus `LITELLM_UNAVAILABLE`.
+- `frontend/e2e/service-keys.spec.ts`.
+
+**Tests:**
+- Vitest `SecretOnceModal.test.tsx`: `secret cleared after close`, `copy button copies the secret`.
+- Playwright:
+  - `Group head creates a service key, sees the secret once, rotates and revokes it`
+  - `Viewer sees the service keys tab without actions and POST /service-keys returns 403`
+
+**test.sh after:** unchanged. Two Playwright tests are added.
+
+### Step 3.6: UI: Department Production tab (small UI step)
+**Spec:** §12.5.4 tab 6; §12.2 production row (rep views, admin edits); FR-K1, FR-K2; §12.3 wallet card.
+
+**Files:**
+- `frontend/src/pages/department/Production.tsx` (new; `/department/:id/production`):
+  - the org `WalletCard`;
+  - a systems table (budget, used, keys, sync);
+  - for admin: "set production budget" and "add system" dialogs with reason, and a per-system keys drawer reusing `ServiceKeyList`, `ServiceKeyDialog` and `SecretOnceModal` with `owner_kind=system`.
+- `frontend/src/pages/department/DepartmentPage.tsx`: tab shown when `actions.view_production`.
+- `frontend/src/api/queries.ts`: `useProduction(deptId)`, `useProductionWrite()`.
+- `frontend/src/i18n/he.ts`, `frontend/e2e/department.spec.ts`.
+
+**Tests:**
+- Playwright: `Admin creates the production organization and a system with a key; the representative sees the Production tab read-only`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 3.7: UI: Platform shell and Departments tab (small UI step)
+**Spec:** §12.5.5 Departments (create, budget and period, representatives from AD); §9.3 New budget group; D13; DR9 (representatives' personal values).
+
+**Files:**
+- `frontend/src/pages/platform/PlatformPage.tsx` (new; replaces `frontend/src/pages/Platform.tsx`).
+  - Route `/platform/:tab` with tabs `pending|departments|operations|policies|audit`.
+  - `/platform` redirects to `pending`, so the existing `pending.spec.ts` stays unchanged.
+- `frontend/src/pages/platform/{Pending,Departments}.tsx` (new). `Pending` holds the current `PendingPlacementsTable`.
+- `frontend/src/components/RoleBindingsEditor.tsx` (new). Per role, AD group DNs with the resolved member names; the reason goes through `ChangeSummaryDialog`.
+- `frontend/src/routes.tsx`, `frontend/src/scopes.ts` (the platform scope goes to `/platform`).
+- `frontend/src/api/queries.ts`: `useCreateDepartment`, `useCreateGroup`, `useRoleBindings`, `useRoleBindingsWrite`.
+- `frontend/src/i18n/he.ts`, `frontend/e2e/platform.spec.ts` (new).
+
+**Build:**
+- The Departments table lists the department budget and period through the existing `PUT /departments/{id}/budget`.
+- It has "create department" and "create group" dialogs (kind regular or staff).
+- A "representatives' personal values" link opens `/group/<staff group id>/members` (DR9: admin edits there).
+
+**Tests:**
+- Playwright: `Admin creates a department, its staff group and a representative binding; the new group shows sync applied at zero budget`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 3.8: UI: Platform Operations tab: status with Redis, outbox, drift log (small UI step)
+**Spec:** §12.5.5 Outbox and reconciliation, Status; §11.1 `/status`, `/outbox`, `/outbox/{id}/retry`; FR-RC2 (drift corrections log); §5.4 Redis row.
+
+**Files:**
+- `frontend/src/pages/platform/Operations.tsx` (new):
+  - status card: LiteLLM reachability, Redis (`לא מוגדר` when `not_configured`), outbox depth, pending placements, spend freshness;
+  - outbox table with a status filter and retry;
+  - drift corrections from `GET /audit?actor=system:reconcile`, rendered by `HistoryTimeline`.
+- `frontend/src/api/queries.ts`: `useOutbox(status)`, `useRetryOutbox`; extend `useStatus`.
+- `frontend/src/i18n/he.ts`, `frontend/e2e/platform.spec.ts`.
+
+**Tests:**
+- Playwright: `Admin sees Redis not configured, retries a failed outbox row and it turns applied` (uses `fakeFail`).
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 3.9: UI: Platform Policies and Audit search tabs; Phase 3 wrap-up (small UI step)
+**Spec:** §12.5.5 Policies, Audit search; §11.1 `PUT /policies`, `GET /audit`; §16 Phase 3 exit.
+
+**Files:**
+- `frontend/src/pages/platform/{Policies,Audit}.tsx` (new).
+  - `Policies` edits the concurrency and rpm ranges, thresholds and per-group over-allocation factors, through `ChangeSummaryDialog` with a reason.
+  - `Audit` is a search form (entity, id, actor, from, to) showing results in `HistoryTimeline`.
+- `frontend/src/api/queries.ts`: `usePoliciesWrite`, `useAuditSearch`.
+- `frontend/src/i18n/he.ts`, `frontend/e2e/platform.spec.ts`, `PROGRESS.md`, `PRD.md`.
+
+**Tests:**
+- Vitest `Audit.test.tsx`: `builds the query from the filters`.
+- Playwright: `Admin lowers the concurrency maximum; a head saving a limit above it gets LIMIT_OUT_OF_POLICY`.
+
+**Wrap-up:**
+- Every test in the mapping below exists and passes, and `test_repo_hygiene.py` passes.
+- Record in PROGRESS.md: the run time (pytest growth so far, plus 6 Playwright tests), the new questions, and Next = Phase 4.
+
+**test.sh after:** unchanged. Run it fully and record the time.
+
+### Phase 3 acceptance mapping
+
+| Criterion | Step | Test(s) |
+|---|---|---|
+| FR-K1 production Organization with its own budget | 3.3, 3.6 | `test_production.py::test_create_production_org_then_update_budget`; `department.spec.ts` "Admin creates the production organization…" |
+| FR-K2 system Team and service keys via `/key/service-account/generate` | 3.3, 3.4, 3.6 | `test_production.py::test_system_team_in_production_org_not_department_org_dr4`, `::test_systems_over_production_budget_422_with_numbers`; `test_service_keys.py::test_system_key_admin_only_and_within_system_budget`; `test_client_vs_fake.py::test_service_account_generate_returns_key_and_hash` |
+| FR-K3 group service keys draw from the group budget | 3.4, 3.5 | `test_service_keys.py::test_group_keys_plus_caps_over_base_parent_overallocated`, `::test_member_caps_check_counts_key_budgets`; `test_service_keys_wm.py::test_group_key_spend_draws_from_team_budget`; contract `test_service_key_budget_parallel_and_models[fake]` |
+| FR-K4 rotate and revoke | 3.4, 3.5 | `test_service_keys.py::test_rotate_new_secret_old_key_deleted_after_drain`, `::test_revoke_deletes_key_twice_invalid`; `service-keys.spec.ts` "Group head creates…" |
+| FR-K4 and NFR5: secret shown once, only the hash stored | 3.4, 3.5 | `test_service_keys.py::test_head_creates_group_key_secret_once_hash_stored`, `::test_secret_absent_from_db_audit_outbox_and_logs`, `::test_replay_returns_200_without_secret`; `SecretOnceModal.test.tsx` |
+| DR4 production keys outside the department org | 3.3 | `test_production.py::test_system_team_in_production_org_not_department_org_dr4` |
+| Permissions: head manages group keys, rep views production, viewer read-only | 3.3–3.5 | `test_service_keys.py::test_rep_viewer_list_no_actions_and_write_403`; `test_production.py::test_rep_reads_viewer_and_head_403`; `service-keys.spec.ts` "Viewer…" |
+| ldap3 Directory: onboarding lookup, owner names, login roles | 3.1 | `test_directory_contract.py::test_contract[ldap]`; `test_oidc.py::test_login_without_groups_claim_uses_directory`; `test_me_wallet.py::test_owner_names_degrade_when_directory_down` |
+| `DirectoryUnavailable` on LDAP errors, 503, nothing written | 3.1 | `test_ldap_directory.py::test_bind_failure_raises_directory_unavailable`, `::test_socket_error_raises_directory_unavailable`; `test_onboarding.py::test_ldap_directory_down_503_nothing_written` |
+| Directory contract test without a real LDAP | 3.1 | `test_directory_contract.py::test_contract[fixture]` and `[ldap]` (MOCK_SYNC); `test_real_ldap[real]` with `LDAP_TEST_URL` |
+| No AD sync | all | no job, endpoint or setting reads the directory except for onboarding, names, role holders and the login fallback |
+| `PUT /policies` | 3.2, 3.9 | `test_policies_put.py::*`; `platform.spec.ts` "Admin lowers the concurrency maximum…" |
+| Redis status in `/status`, works without Redis | 3.2, 3.8 | `test_status_outbox.py::test_status_redis_not_configured_by_default`, `::test_status_redis_connected_and_down`, `::test_status_litellm_down_redis_unknown`; `platform.spec.ts` "Admin sees Redis not configured…" |
+| Group creation by admin, `/team/new` at zero budget (§9.3) | 3.2, 3.7 | `test_platform_create.py::test_create_group_team_new_zero_budget_after_drain`; `platform.spec.ts` "Admin creates a department…" |
+| Department Production tab | 3.6 | `department.spec.ts` "Admin creates the production organization…" |
+| Group Service keys tab | 3.5 | `service-keys.spec.ts` (2 tests) |
+| Platform screens: Departments, representatives, Operations, Policies, Audit search, Pending (Phase 1b) | 3.7–3.9 | `platform.spec.ts` (3 tests); `Audit.test.tsx`; the existing `pending.spec.ts` is unchanged |
+| FR-V1 locks on new parents | 3.3, 3.4 | `test_production_concurrency.py::test_concurrent_systems_one_parent_overallocated` |
+| NFR10 hygiene | all | `test_repo_hygiene.py::test_tracked_files_have_no_secrets_or_internal_names` |
+
+
+## 2e. Steps (Phase 4: reports)
+
+The Phase 3 rules apply: §1 conventions, §11.2 envelope, injectable clock, the same ports, public repo, no external services. Additional rules:
+- **Time budget.** Phase 4 may add 4 Playwright tests and the remainder of the 90 s pytest budget.
+- **Data sources.** Reports read spend from `spend_snapshot`, including the day snapshots `/me/usage` already reads (§12.9). The only live read is concurrency peaks. That read goes through the read-only `LiteLLMReader` on `LiteLLM_SpendLogs`, with a range of at most 31 days.
+- **Permissions** follow the §12.2 reports row plus D11 and Q7:
+  - department-level aggregates for admin, rep and viewer;
+  - member-level rows only where `can_view_members` passes (head, rep, admin);
+  - employees see their own data;
+  - PMO sees grants of their department only.
+- **Period rules.** `period=YYYY-MM` follows §1, and future periods give 422. `from`/`to` are dates in `APP_TIMEZONE`. If `from > to`, or the range is too long, the result is 422 `INVALID_REQUEST`.
+- **SPA route.** The UI route is `/report/...` because `/reports` is an API prefix (§1).
+- **Order.** Backend Steps 4.1–4.3, then UI Steps 4.4–4.7.
+
+### Step 4.1: Allocation-versus-spend and grants reports (backend)
+**Spec:** FR-R1, FR-R2; §11.1 `GET /reports/allocation`, `GET /reports/grants`; §12.3 formulas; D11; §12.2 reports row.
+
+**Files:**
+- `app/services/reports.py` (new). It reuses `app/services/{views,wallet,grants,spend}.py`.
+- `app/schemas/reports.py` (new), `app/routers/reports.py`.
+- `tests/api/test_reports_allocation.py`, `tests/api/test_reports_grants.py` (new).
+
+**Build:**
+- **`GET /reports/allocation?level=department|group|employee&id=&period=`.** Returns `{level, id, name, period, total, allocated, spend, remaining, pct, state, models: [{model, allocation, spend, pct}], rows: [...], spend_taken_at}`.
+  - `rows` are the children: groups, PMO pool and reserve for a department; members for a group, with base cap, shares, total, spend and per-model caps; none for an employee.
+  - Rows use the §12.3 formulas, reusing the existing summary builders rather than new math.
+  - Permissions: department level uses `can_view_department` (PMO gets 403); group level uses `can_view_members`; employee level is self or `can_view_members` on the employee's group. Unknown entities give 404.
+- **`GET /reports/grants?department=&project_ref=`.** Returns `{rows: [{project_ref, departments, groups, grants, amount, shared, unshared, used, returned}], totals}`.
+  - It aggregates `grants.list_grants` rows, so visibility is inherited: PMO and rep of the department, group heads for their group's grants, viewer, admin.
+
+**Tests:**
+- `tests/api/test_reports_allocation.py`:
+  - `test_department_rows_groups_pmo_reserve_and_models`
+  - `test_group_rows_members_with_shares_and_model_caps`
+  - `test_employee_level_self_and_head_only`
+  - `test_viewer_group_level_403_department_ok`
+  - `test_past_period_uses_that_period_snapshot`
+  - `test_future_period_422`
+- `tests/api/test_reports_grants.py`:
+  - `test_by_project_totals_match_project_summary`
+  - `test_pmo_other_department_hidden`
+  - `test_head_sees_own_group_only`
+
+**test.sh after:** unchanged.
+
+### Step 4.2: Usage series, concurrency peaks, blocked spend (backend, fake SpendLogs times)
+**Spec:** FR-R1 (history), FR-R4, FR-R5; §11.1 `GET /reports/usage`, `GET /reports/concurrency-peaks`; §12.3 usage chart; D6.
+
+**Files:**
+- `fake_litellm/controls.py`:
+  - `/_test/spend` gains `start`, `end` (default `at`) and `api_key`;
+  - new `POST /_test/spend/bulk` (a list of the same rows in one transaction).
+- `fake_litellm/enforcement.py`: confirm it records real `startTime` and `endTime` per request.
+- `app/litellm_client/readonly.py`: `concurrency_peaks(start, end, *, team_ids=None, users=None) -> list[PeakRow(user, day, peak, at)]`.
+  - One SQL statement: `+1` at `startTime` and `−1` at `endTime`, a running `SUM() OVER (PARTITION BY user ORDER BY t, delta)` with ends before starts at the same instant (half-open), then the max per user per day, plus a `user IS NULL` global row.
+- `app/services/reports.py`, `app/routers/reports.py`, `frontend/e2e/fixtures.ts` (`fakeSpend(rows)` helper).
+
+**Build:**
+- **`GET /reports/usage?scope=employee|group|department|global&id=&from=&to=&granularity=day|week|month&by=model|member`.**
+  - Returns `{series: [{bucket, key, spend}], cap, taken_at}` from the day snapshots, bucketed in `APP_TIMEZONE`.
+  - Range at most 400 days.
+  - `by=member` needs `can_view_members` (viewer and PMO get 403).
+  - `global` is admin or global viewer only.
+  - If group- or department-level day snapshots are missing, extend the snapshot job in `app/services/spend.py` to write them.
+- **`GET /reports/concurrency-peaks?scope=global|department|group|employee&id=&from=&to=`.**
+  - Returns `{daily: [{day, peak, at}], members: [{upn, display_name, peak, at, max_parallel}]}`, sorted by peak, top 100.
+  - Range at most 31 days.
+  - Viewers get `daily` only.
+- **`GET /reports/blocked?scope=&id=&from=&to=`** (FR-R5).
+  - Returns `rows: [{day, upn, display_name, group_id, kind: "base"|"model", model, cap, period_spend_to_date, day_spend}]`.
+  - A row appears for each day an employee's cumulative period spend has reached ≥ 100% of their current total (base cap + active shares) or of a model cap.
+  - Same member visibility as usage `by=member`.
+
+**Tests:**
+- `tests/litellm/test_readonly_peaks.py`:
+  - `test_overlaps_counted_half_open`
+  - `test_peak_per_user_and_global`
+  - `test_rows_outside_window_ignored`
+- `tests/api/test_reports_usage.py`:
+  - `test_group_by_model_daily_series_matches_snapshot`
+  - `test_by_member_viewer_403`
+  - `test_week_and_month_buckets_in_app_timezone`
+  - `test_range_validation_422`
+- `tests/api/test_reports_peaks.py`:
+  - `test_peaks_per_employee_and_global_from_spendlogs`
+  - `test_department_scope_filters_teams`
+  - `test_range_over_31_days_422`
+- `tests/api/test_reports_blocked.py`:
+  - `test_employee_at_base_cap_listed_per_day_with_day_spend`
+  - `test_model_cap_reached_listed`
+  - `test_below_cap_not_listed`
+
+**test.sh after:** unchanged.
+
+### Step 4.3: Alerts: over-allocation breach and concurrency at the key limit
+**Spec:** FR-V2 ("alerts on any breach"), FR-R3; §5.1 Scheduler (scheduled reports); FR-N1 and FR-N2 conventions; NFR7; D6.
+
+**Files:**
+- `app/services/notifications.py`: `KINDS` gains `overallocation` (critical) and `concurrency_at_limit` (non-critical).
+- `app/services/overallocation.py`: `scheduled_check` notifies.
+- `app/scheduler/jobs.py` and `app/scheduler/loop.py`: `run_report_alerts(session_factory, client, clock)`, daily, `scheduler_report_alerts_interval_s = 86400`, under the existing job-lock pattern.
+- `app/config.py`, `app/metrics.py`: `wm_concurrency_peak{scope="global"}`, `wm_blocked_employees`.
+- `frontend/src/i18n/he.ts`: `he.notifications.kinds`.
+
+**Build:**
+- **Over-allocation alert.** Each finding notifies platform admins and the reps of its department.
+  - Kind `overallocation`, dedupe key `overalloc:<level>:<entity>:<model>:<YYYY-MM-DD>` through `uq_notification_dedupe`.
+  - It is critical, so it cannot be muted.
+- **Concurrency alert.** `run_report_alerts` reads yesterday's peaks. A member whose peak reached their key `max_parallel` triggers one `concurrency_at_limit` notification per day to admins, carrying the count and the top members. This is pilot input for D6.
+- **Metrics.** Both gauges are updated by the same job.
+- No migration: notification kinds are text.
+
+**Tests:**
+- `tests/scheduler/test_report_alerts_job.py`:
+  - `test_overallocation_alert_to_admins_and_rep_once_per_day`
+  - `test_concurrency_at_limit_alert_to_admins`
+  - `test_run_twice_no_duplicates`
+- `tests/api/test_notifications.py::test_mute_overallocation_critical_422`
+
+**test.sh after:** unchanged.
+
+### Step 4.4: UI: Reports page shell, Allocation and Over-allocation tabs (small UI step)
+**Spec:** §12.2 reports row; FR-R1, FR-R3; §12.1 (period selector, past read-only, freshness).
+
+**Files:**
+- `frontend/src/pages/reports/{ReportsPage,Allocation,Overallocation}.tsx` (new).
+  - Route `/report/:kind/:id/:tab`, where `kind` is `me|group|department|global`.
+  - Tabs are shown from the scope: Allocation for all kinds; Over-allocation for department and global.
+- `frontend/src/routes.tsx`.
+- `frontend/src/scopes.ts`: a "דוחות" link per selected scope.
+- The shell layout file.
+- `frontend/src/api/queries.ts`: `useAllocationReport`, `useOverallocationReport`.
+- `frontend/src/i18n/he.ts`: `he.reports`.
+- `frontend/e2e/reports.spec.ts` (new).
+- Reuse `WalletCard`, `ModelTable`, `StateBadge`, `PeriodSelector`.
+
+**Tests:**
+- Playwright: `Rep opens the department allocation report with group and model rows, and a past period shows that period's values`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 4.5: UI: usage charts at every level (small UI step)
+**Spec:** §12.3 usage chart (daily, stacked by model, cap line); §12.5.2 and §12.5.4 overviews; FR-R1; §16 Phase 4 (usage charts at every level).
+
+**Files:**
+- `frontend/src/components/UsageChart.tsx`: accept a generic `series` plus `cap`, using the existing offline chart library. `MyWallet` keeps working.
+- `frontend/src/pages/reports/Usage.tsx` (new tab): by model or by member, plus granularity. The by-member toggle shows only when allowed.
+- `frontend/src/pages/group/Overview.tsx` and `frontend/src/pages/department/Overview.tsx`: add the chart.
+- `frontend/src/api/queries.ts`: `useUsageReport`.
+- `frontend/e2e/reports.spec.ts`.
+
+**Tests:**
+- Vitest `UsageChart.test.tsx`: `stacks series by key and draws the cap line`.
+- Playwright: `Group head sees the group usage chart stacked by model and switches to by member; a viewer has no by-member option`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 4.6: UI: Grants-by-project and Blocked tabs (small UI step)
+**Spec:** FR-R2, FR-R5; §12.2 (PMO: own department grants).
+
+**Files:**
+- `frontend/src/pages/reports/{Grants,Blocked}.tsx` (new tabs).
+- `frontend/src/api/queries.ts`: `useGrantsReport`, `useBlockedReport`.
+- `frontend/src/i18n/he.ts`, `frontend/e2e/reports.spec.ts`.
+
+**Tests:**
+- Playwright: `PMO sees grant totals by project; the representative sees blocked employees per day`.
+
+**test.sh after:** unchanged. One Playwright test is added.
+
+### Step 4.7: UI: Concurrency peaks tab; Phase 4 wrap-up (small UI step)
+**Spec:** FR-R4; D6; §16 Phase 4 exit.
+
+**Files:**
+- `frontend/src/pages/reports/Concurrency.tsx` (new): a daily global peak line and a top-employees table with `max_parallel`.
+- `frontend/src/api/queries.ts`: `useConcurrencyPeaks`.
+- `frontend/e2e/reports.spec.ts`: seeds overlapping SpendLogs through `fakeSpend`.
+- `PROGRESS.md`, `PRD.md`.
+
+**Tests:**
+- Playwright: `Admin sees global and per-employee concurrency peaks from SpendLogs overlaps`.
+
+**Wrap-up:**
+- All tests in the mapping below exist and pass, and `test_repo_hygiene.py` passes.
+- Record the run time against the budget (Phase 3 plus Phase 4: pytest growth at most about 90 s; 10 Playwright tests) and Next = Phase 0 (real environment).
+
+**test.sh after:** unchanged. Run it fully and record the time.
+
+### Phase 4 acceptance mapping
+
+| Criterion | Step | Test(s) |
+|---|---|---|
+| FR-R1 allocation vs spend, department / group / employee, per period, per model | 4.1, 4.4 | `test_reports_allocation.py::test_department_rows_groups_pmo_reserve_and_models`, `::test_group_rows_members_with_shares_and_model_caps`, `::test_employee_level_self_and_head_only`, `::test_past_period_uses_that_period_snapshot`; `reports.spec.ts` "Rep opens…" |
+| FR-R1 usage history | 4.2, 4.5 | `test_reports_usage.py::*`; `reports.spec.ts` "Group head sees the group usage chart…" |
+| FR-R2 grants by project | 4.1, 4.6 | `test_reports_grants.py::*`; `reports.spec.ts` "PMO sees grant totals…" |
+| FR-R3 over-allocation findings | Phase 1 Step 9, 4.4 | `test_overallocation.py::*` (existing); `reports.spec.ts` (Over-allocation tab) |
+| FR-R4 concurrency peaks per employee and global from SpendLogs overlaps | 4.2, 4.7 | `test_readonly_peaks.py::*`; `test_reports_peaks.py::test_peaks_per_employee_and_global_from_spendlogs`; `reports.spec.ts` "Admin sees global and per-employee…" |
+| FR-R5 blocked spend per day | 4.2, 4.6 | `test_reports_blocked.py::*`; `reports.spec.ts` "…blocked employees per day" |
+| Alerts: over-allocation breach (FR-V2) | 4.3 | `test_report_alerts_job.py::test_overallocation_alert_to_admins_and_rep_once_per_day`, `::test_run_twice_no_duplicates`; `test_notifications.py::test_mute_overallocation_critical_422` |
+| Alerts: concurrency at the key limit (D6) | 4.3 | `test_report_alerts_job.py::test_concurrency_at_limit_alert_to_admins` |
+| Usage charts at every level | 4.5 | `UsageChart.test.tsx`; `reports.spec.ts` "Group head sees…"; `wallet.spec.ts` (existing) |
+| Report visibility (§12.2, D11) | 4.1, 4.2 | `test_reports_allocation.py::test_viewer_group_level_403_department_ok`; `test_reports_usage.py::test_by_member_viewer_403`; `test_reports_grants.py::test_pmo_other_department_hidden` |
+| NFR10 hygiene | all | `test_repo_hygiene.py` |
+
+---
+
 ## 3. Phase 1 acceptance mapping (§16 exit criteria)
 
 | Criterion | Step | Test(s) |
@@ -1692,3 +2309,13 @@ Phase 2 questions (apply the default and keep going):
 25. **Missing LiteLLM objects found by reconciliation** (no membership, key or mapping) are reported and alerted, never recreated automatically. This avoids duplicate keys.
 26. **Pending (future-dated) grants reserve PMO pool money** from creation, so two future grants cannot overbook the pool.
 27. **F1 "group heads are notified of split changes"** is not an FR-N1 trigger and is not built in Phase 2. Should it be added?
+
+Phase 3/4 questions (apply the default and keep going):
+
+28. **Where production data is stored (FR-K1, FR-K2, D8).** §8.2 has no place for it. **Default:** three new columns on `department` plus a new `production_system` table. Production objects are not reconciled.
+29. **Service key creation needs LiteLLM to be up.** The secret can only be shown once if LiteLLM is called during the request; queuing the call would mean storing the secret. **Default:** if LiteLLM is down, return 503 `LITELLM_UNAVAILABLE` (a new error code) and create no usable key. Rotation creates a new key and deletes the old one, without `/key/regenerate`.
+30. **Group service key budgets count toward the group's allocation (FR-K3).** **Default:** member caps plus active key budgets must stay within base × factor. This applies to both the FR-G1 check and §12.3 "allocated", so it is rejected with `PARENT_OVERALLOCATED`. System keys must fit within the system budget.
+31. **Endpoints not in §11.1.** **Default:** add `POST /departments`, `POST /departments/{id}/groups`, `GET|PUT /role-bindings`, `GET|PUT /production/departments/{id}`, `GET /service-keys` and `GET /reports/blocked`. There is no PATCH for system budgets or service key limits; only rotate and revoke.
+32. **LDAP down outside onboarding.** **Default (fail closed):**
+33. **FR-R5 compares spend with current caps, not the caps in force on each day.** **Default:** use current caps (base + active shares, model caps). Historical caps from audit would come later.
+34. **Over-allocation factors in Policies (§12.5.5).** **Default:** `PUT /policies` sets `grp.overalloc_factor` per group, within [1.0, 2.0], admin only.
