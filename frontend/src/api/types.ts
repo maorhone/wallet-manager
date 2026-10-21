@@ -157,6 +157,22 @@ export interface GroupSummary extends PeriodEnvelope {
   actions: { edit_members: boolean; edit_pots_limits: boolean; edit_defaults: boolean };
 }
 
+/** One group head's personal values (DR9) with the actor's rights on them. */
+export interface GroupHead {
+  upn: string;
+  display_name: string;
+  group_id: number;
+  group_name: string;
+  base_cap: number;
+  shares: number;
+  model_caps: Record<string, number>;
+  max_parallel: number | null;
+  rpm_limit: number | null;
+  model_tpm_limits: Record<string, number>;
+  sync_status: SyncStatus;
+  actions: { edit: boolean; share: boolean };
+}
+
 export interface DepartmentSummary extends PeriodEnvelope {
   department: { id: number; name: string };
   wallet: {
@@ -188,6 +204,7 @@ export interface DepartmentSummary extends PeriodEnvelope {
     sync_status: SyncStatus;
   }[];
   allowances: { model: string; amount: number; pots_sum: number }[];
+  group_heads: GroupHead[];
   actions: { edit_split: boolean; edit_budget: boolean; edit_allowances: boolean; place: boolean };
 }
 

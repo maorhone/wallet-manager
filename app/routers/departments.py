@@ -19,7 +19,9 @@ async def department_summary(
     period: str | None = None,
 ):
     settings = request.app.state.settings
-    return await views.department_summary(db, principal, settings, department_id, period)
+    return await views.department_summary(
+        db, request.app.state.directory, principal, settings, department_id, period
+    )
 
 
 @router.get("/departments")

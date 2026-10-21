@@ -1,11 +1,13 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) done. Next = Step 2.9.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Next = Step 2.10.
 Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 2.9: UI Department Group heads tab (`/department/:id/group-heads`); `group_heads` in the department summary; Playwright +1
+  (Playwright 33 total), pytest +1 (`test_group_heads_rows_for_rep`). `./scripts/test.sh` green.
 - Step 2.8: UI Group Grants tab with share create, change and close; U5 and U2 grant half (see Notes).
 - Step 2.7: UI PMO grant actions (extend, increase, close early) and Projects tab.
 - Step 2.6: UI PMO page with Pool and Grants tabs and the create-grant wizard (see Notes).
@@ -149,12 +151,18 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 2.9: UI Department Group heads tab.
+- Step 2.10: UI notifications bell and preferences; Phase 2 wrap-up.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 2.9: `MemberSidePanel` gained `withBaseCap` (one-row `PUT /groups/{gid}/members/caps`); `ShareDialog` members type loosened.
+  The summary's head rows include `model_tpm_limits` (not in PLAN) so the panel's limits write does not clear them. Tab is shown when any
+  row has `actions.edit` (a viewer/PMO never sees it). "Own row read-only" is covered by the API test (a rep who is also a group head);
+  the Playwright test cannot log in as such a user because the dev seed has no head with department access. Two no-op Bash slips
+  (an empty `cat >>` heredoc and a `sed` on /dev/null) changed nothing. One full run hit the 60s pytest-timeout in
+  `test_lifecycle_permissions.py::test_matrix[rep_on_self-delete]` (fixture CPU starvation); it passed alone and in the next full run.
 - Flaky, unrelated to 2.8 (frontend only): `tests/api/test_grants_concurrency.py::test_a11_concurrent_grants_one_pool_insufficient`
   hit the 60s pytest-timeout in fixture setup (`fake_litellm/main.py` `key_generate`, inside SQLAlchemy cache-key generation, pure CPU)
   while the sandbox was starved; it passes alone in 2s and in the earlier full green run (458 passed).

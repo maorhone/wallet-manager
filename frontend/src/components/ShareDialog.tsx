@@ -12,7 +12,7 @@ import {
   Textarea,
 } from '@mantine/core';
 import { useRef, useState } from 'react';
-import type { Grant, GrantShare, Member } from '../api/types';
+import type { Grant, GrantShare, Member, Owner } from '../api/types';
 import { errorMessage } from '../i18n/errors';
 import { he } from '../i18n/he';
 import { todayIn, zonedInstant } from '../format';
@@ -30,7 +30,7 @@ export interface ShareRowIn {
 interface Props {
   grant: Grant;
   /** Candidates to share to (create mode). */
-  members: Member[];
+  members: (Pick<Member, 'upn' | 'display_name'> & { owner?: Owner | null })[];
   /** The actor: their own row is disabled (DR9). */
   selfUpn: string;
   /** Members that already have an active share on this grant. */

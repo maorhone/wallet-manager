@@ -96,7 +96,10 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   (default and maximum: the grant's expiry), the unshared remainder updates live and blocks above the grant; the actor's own
   row is disabled and names the owner role (DR9; the API still returns `SELF_ALLOCATION_FORBIDDEN`). Each grant opens its
   shares (amount, used, returned, expiry) with change and close (reason required). Employees see shares with days left in My wallet.
-- Department Group heads tab - Planned (Step 2.9).
+- Department Group heads tab - Done (Step 2.9): `/department/<id>/group-heads` (shown to a rep or admin when a row is editable) lists each
+  group head with group, base cap, shares, model caps, limits and sync badge. The side panel edits the base cap, model caps and limits;
+  "שיתוף מענק" offers only the head's group's active grants. A rep's own row (when also a head) and viewers' rows are read-only (DR9).
+  `GET /departments/{id}/summary` gains `group_heads`.
 
 ### 4.5 Scheduler - Phase 2: In progress (grants job Done in Step 2.3)
 
@@ -135,7 +138,7 @@ The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 RTL Hebrew React app: my wallet, group (overview, members with actions, history), department (overview, split, pending),
 scope switcher, change-summary dialog, PMO page (pool and grants with the create wizard; Done in Step 2.6; a PMO scope opens
 `/pmo/<dept>/pool`; grant actions and Projects tab Done in Step 2.7). Group Grants tab with share dialogs Done in Step 2.8.
-Planned: department group-heads tab, notifications.
+Group heads tab Done in Step 2.9. Planned: notifications.
 
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned
 

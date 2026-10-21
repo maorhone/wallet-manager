@@ -159,6 +159,7 @@ export const useGroupWrite = (groupId: string, period: string) => {
         }),
       }));
       qc.invalidateQueries({ queryKey: ['group', groupId] });
+      qc.invalidateQueries({ queryKey: ['department'] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });

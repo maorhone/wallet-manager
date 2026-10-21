@@ -150,6 +150,7 @@ export const he = {
       overview: 'סקירה',
       split: 'חלוקה',
       pending: 'ממתינים לשיבוץ',
+      'group-heads': 'ראשי קבוצות',
     } as Record<string, string>,
     budget: 'תקציב המחלקה',
     splitChart: 'חלוקת התקציב',
@@ -162,6 +163,12 @@ export const he = {
     openGroup: 'פתיחת הקבוצה',
     editBudget: 'עריכת תקציב',
     negativeRemainder: 'החלוקה גבוהה מתקציב המחלקה',
+  },
+  groupHeads: {
+    head: 'ראש קבוצה',
+    group: 'קבוצה',
+    empty: 'אין ראשי קבוצות במחלקה',
+    readOnly: 'לקריאה בלבד',
   },
   shares: {
     share: 'שיתוף מענק',

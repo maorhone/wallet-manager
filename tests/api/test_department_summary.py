@@ -1,4 +1,18 @@
-from app.models import Department, DepartmentModelAllowance, GroupModelPot
+from datetime import UTC, datetime, timedelta
+
+from app.models import (
+    Department,
+    DepartmentModelAllowance,
+    Grant,
+    GroupModelPot,
+    RoleBinding,
+)
+
+GRANT = {  # an active grant of group A2 (Noa's group)
+    "department_id": 1, "group_id": 2, "project_ref": "PRJ-T", "purpose": "t", "amount": 1000,
+    "status": "active", "starts_at": datetime.now(UTC) - timedelta(days=1),
+    "expires_at": datetime.now(UTC) + timedelta(days=30),
+}  # fmt: skip
 
 
 async def test_split_and_unallocated(login, seeded, snapshot):
@@ -49,6 +63,35 @@ async def test_over_allocated_state_and_admin_actions(login, seeded):
         "edit_allowances": True,
         "place": True,
     }
+
+
+async def test_group_heads_rows_for_rep(login, seeded, tmp_path):
+    async with seeded() as s:
+        s.add(Grant(**GRANT))
+        await s.commit()
+    rep = await login("rep")
+    body = (await rep.get("/departments/1/summary")).json()
+    heads = {h["upn"]: h for h in body["group_heads"]}
+    assert set(heads) == {"dana@corp.example", "noa@corp.example"}
+    dana = heads["dana@corp.example"]
+    assert dana["group_name"] == "Group A1" and dana["base_cap"] >= 0
+    assert dana["actions"] == {"edit": True, "share": False}  # A1 has no active grant
+    assert heads["noa@corp.example"]["actions"] == {"edit": True, "share": True}
+    for key in ("group_id", "shares", "model_caps", "max_parallel", "rpm_limit", "sync_status"):
+        assert key in dana
+    # A department viewer sees no editable rows (D11 aggregates only).
+    viewer = (await (await login("viewer")).get("/departments/1/summary")).json()
+    assert all(h["actions"] == {"edit": False, "share": False} for h in viewer["group_heads"])
+    # A representative who is also a group head cannot edit their own row (DR9).
+    staff_dn = "CN=grp-d1-staff,OU=Groups,DC=corp,DC=example"  # the rep's own group (id 4)
+    async with seeded() as s:
+        s.add(RoleBinding(ad_group_dn=staff_dn, role="group_head", scope_kind="group", scope_id=4))
+        await s.commit()
+    both = (await (await login("rep")).get("/departments/1/summary")).json()
+    own = next(h for h in both["group_heads"] if h["upn"] == "rep@corp.example")
+    assert own["actions"] == {"edit": False, "share": False}
+    other = next(h for h in both["group_heads"] if h["upn"] == "dana@corp.example")
+    assert other["actions"]["edit"] is True
 
 
 async def test_summary_scope(login):

@@ -10,8 +10,16 @@ import { Num } from './Num';
 
 const ACTIONS: MemberActionKind[] = ['kick', 'restore', 'move', 'delete'];
 
+/** A group member row, or a group head row (which also edits the base cap here, DR9). */
+type PanelMember = Pick<
+  Member,
+  'upn' | 'display_name' | 'model_caps' | 'max_parallel' | 'rpm_limit' | 'model_tpm_limits'
+> & { actions?: Member['actions']; base_cap?: number };
+
 interface Props {
-  member: Member | null;
+  member: PanelMember | null;
+  /** Show the base cap field (Group heads tab); a single-row `members/caps` write. */
+  withBaseCap?: boolean;
   groupId: string;
   period: string;
   policies: Policies | undefined;
@@ -22,7 +30,14 @@ const range = (p?: { min?: number; max?: number }) =>
   p ? `${he.groupPage.range} ${p.min ?? '–'}–${p.max ?? '–'}` : undefined;
 
 /** Model caps and limits of one member, with the allowed ranges from /policies (FR-G2, FR-G4). */
-export function MemberSidePanel({ member, groupId, period, policies, onClose }: Props) {
+export function MemberSidePanel({
+  member,
+  withBaseCap,
+  groupId,
+  period,
+  policies,
+  onClose,
+}: Props) {
   return (
     <Drawer
       opened={member !== null}
@@ -36,6 +51,7 @@ export function MemberSidePanel({ member, groupId, period, policies, onClose }: 
         <PanelBody
           key={member.upn}
           member={member}
+          withBaseCap={withBaseCap}
           groupId={groupId}
           period={period}
           policies={policies}
@@ -46,7 +62,15 @@ export function MemberSidePanel({ member, groupId, period, policies, onClose }: 
   );
 }
 
-function PanelBody({ member, groupId, period, policies, onClose }: Props & { member: Member }) {
+function PanelBody({
+  member,
+  withBaseCap,
+  groupId,
+  period,
+  policies,
+  onClose,
+}: Props & { member: PanelMember }) {
+  const [baseCap, setBaseCap] = useState<number>(member.base_cap ?? 0);
   const [caps, setCaps] = useState<Record<string, number>>(member.model_caps);
   const [parallel, setParallel] = useState<number | null>(member.max_parallel);
   const [rpm, setRpm] = useState<number | null>(member.rpm_limit);
@@ -61,8 +85,19 @@ function PanelBody({ member, groupId, period, policies, onClose }: Props & { mem
   const base = `/groups/${groupId}/members/${encodeURIComponent(member.upn)}`;
   const capsChanged = JSON.stringify(caps) !== JSON.stringify(member.model_caps);
   const limitsChanged = parallel !== member.max_parallel || rpm !== member.rpm_limit;
+  const baseChanged = !!withBaseCap && baseCap !== member.base_cap;
 
   const rows: SummaryRow[] = [
+    ...(baseChanged
+      ? [
+          {
+            key: 'base',
+            label: he.groupPage.baseCap,
+            before: <Credits value={member.base_cap ?? 0} />,
+            after: <Credits value={baseCap} />,
+          },
+        ]
+      : []),
     ...Object.keys({ ...member.model_caps, ...caps })
       .filter((m) => (caps[m] ?? 0) !== (member.model_caps[m] ?? 0))
       .map((m) => ({
@@ -87,6 +122,13 @@ function PanelBody({ member, groupId, period, policies, onClose }: Props & { mem
   ];
 
   const confirm = async (reason: string, key: string) => {
+    if (baseChanged)
+      await write.mutateAsync({
+        path: `/groups/${groupId}/members/caps`,
+        body: [{ upn: member.upn, base_cap: baseCap }],
+        reason,
+        key: `${key}:base`,
+      });
     if (limitsChanged)
       await write.mutateAsync({
         path: `${base}/limits`,
@@ -110,6 +152,16 @@ function PanelBody({ member, groupId, period, policies, onClose }: Props & { mem
       <Text size="sm" c="dimmed">
         <Num>{member.upn}</Num>
       </Text>
+      {withBaseCap && (
+        <NumberInput
+          label={he.groupPage.baseCap}
+          data-testid="panel-base-cap"
+          hideControls
+          min={0}
+          value={baseCap}
+          onChange={(v) => setBaseCap(Number(v) || 0)}
+        />
+      )}
       <Title order={6}>{he.groupPage.modelCaps}</Title>
       {Object.entries(caps).map(([m, v]) => (
         <NumberInput

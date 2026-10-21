@@ -421,8 +421,62 @@ async def group_summary(
     }
 
 
+async def _group_heads(
+    db: AsyncSession, directory: Directory, principal: Principal, settings: Settings,
+    groups: list[Grp], spend: Spend, pc: dict, th,
+) -> list[dict]:  # fmt: skip
+    """Personal values of each group head (DR9, §12.5.4 tab 4) and the actor's rights on them."""
+    with_grant = set(
+        await db.scalars(
+            select(Grant.group_id).where(
+                Grant.group_id.in_([g.id for g in groups]), Grant.status == "active"
+            )
+        )
+    )
+    out = []
+    for group in groups:
+        upns = {p["upn"] for p in await holders(db, directory, HEAD, "group", group.id)}
+        if not upns:
+            continue
+        g = await _Group.load(db, group, spend, pc["at"], th, settings.app_timezone)
+        syncs = await sync_status(db, "employee", sorted(upns))
+        members = {m.upn: m for m in g.members}
+        for r in g.rows(spend, th):
+            if r["upn"] not in upns or members[r["upn"]].status == "left":
+                continue
+            edit = False
+            if not pc["read_only"]:
+                try:
+                    authorize(
+                        principal,
+                        members[r["upn"]],
+                        group,
+                        await target_tier(db, directory, r["upn"]),
+                    )
+                    edit = True
+                except ApiError:
+                    pass
+            out.append(
+                {
+                    "upn": r["upn"], "display_name": r["display_name"], "group_id": group.id,
+                    "group_name": group.name, "base_cap": r["base_cap"],
+                    "shares": r["shares_total"], "model_caps": r["model_caps"],
+                    "max_parallel": r["max_parallel"], "rpm_limit": r["rpm_limit"],
+                    "model_tpm_limits": members[r["upn"]].model_tpm_limits or {},
+                    "sync_status": syncs[r["upn"]],
+                    "actions": {"edit": edit, "share": edit and group.id in with_grant},
+                }
+            )  # fmt: skip
+    return out
+
+
 async def department_summary(
-    db: AsyncSession, principal: Principal, settings: Settings, department_id: int, raw: str | None
+    db: AsyncSession,
+    directory: Directory,
+    principal: Principal,
+    settings: Settings,
+    department_id: int,
+    raw: str | None,
 ) -> dict:
     await can_view_department(db, principal, department_id)
     dept = await db.get(Department, department_id)
@@ -479,9 +533,11 @@ async def department_summary(
         .order_by(DepartmentModelAllowance.model)
     )
     roles = principal.department_roles(department_id)
+    heads = await _group_heads(db, directory, principal, settings, d["groups"], spend, pc, th)
     return {
         **_envelope(pc, spend),
         "department": {"id": dept.id, "name": dept.name},
+        "group_heads": heads,
         "wallet": {k: card[k] for k in CARD},
         "split": {
             "groups": [{k: r[k] for k in ("id", "name", "kind", "base")} for r in table],

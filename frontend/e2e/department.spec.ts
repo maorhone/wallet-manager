@@ -63,6 +63,30 @@ test('drill-down group is read-only for rep', async ({ page }) => {
   await expect(page.getByTestId('alloc-owner-dani@corp.example')).toBeVisible();
 });
 
+test("Rep edits a group head base cap from the Group heads tab; the head's own row stays read-only", async ({
+  page,
+}) => {
+  await loginAs(page, 'rep@corp.example');
+  const id = await departmentId(page);
+  await page.goto(`/department/${id}/group-heads`);
+  await expect(page.getByTestId('group-heads-table')).toBeVisible();
+  // The rep is no group head, so only the heads' rows exist; each has an edit button.
+  await expect(page.getByTestId('head-row-rep@corp.example')).toHaveCount(0);
+  await page.getByTestId('head-edit-dana@corp.example').click();
+  await page.getByTestId('panel-base-cap').fill('7777');
+  await page.getByTestId('panel-review').click();
+  await page.getByTestId('change-reason').fill('עדכון מכסת ראש קבוצה');
+  await page.getByTestId('confirm-change').click();
+  const row = page.getByTestId('head-row-dana@corp.example');
+  await expect(row).toContainText('7,777', { timeout: 15_000 });
+  await expect(row.getByTestId('sync-badge')).toHaveAttribute('data-status', 'applied', {
+    timeout: 60_000,
+  });
+  // A head cannot open the department screens, so the only own-row case is a rep who is also a head
+  // (covered by the API test); the other head's row keeps its own controls.
+  await expect(page.getByTestId('head-edit-noa@corp.example')).toBeVisible();
+});
+
 test('admin edits the budget inline on Split', async ({ page }) => {
   await openSplit(page, 'admin@corp.example');
   await expect(page.getByTestId('budget-edit')).toBeVisible();

@@ -4,6 +4,7 @@ import { useDepartmentSummary } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
+import GroupHeads from './GroupHeads';
 import Overview from './Overview';
 import Pending from './Pending';
 import Split from './Split';
@@ -18,7 +19,11 @@ export default function DepartmentPage() {
   const { period } = usePeriod();
   const summary = useDepartmentSummary(id, period);
 
-  const tabs = summary.data?.actions.place ? [...TABS, 'pending'] : TABS;
+  const tabs = [
+    ...TABS,
+    ...(summary.data?.group_heads.some((h) => h.actions.edit) ? ['group-heads'] : []),
+    ...(summary.data?.actions.place ? ['pending'] : []),
+  ];
   if (summary.data && !tabs.includes(tab))
     return <Navigate to={`/department/${id}/overview`} replace />;
   if (summary.isPending) return <Loader aria-label={he.loading} />;
@@ -46,6 +51,7 @@ export default function DepartmentPage() {
       </Tabs>
       {tab === 'overview' && <Overview summary={s} />}
       {tab === 'split' && <Split summary={s} />}
+      {tab === 'group-heads' && <GroupHeads summary={s} period={period} />}
       {tab === 'pending' && <Pending summary={s} />}
     </Stack>
   );
