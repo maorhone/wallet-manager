@@ -3,11 +3,11 @@
 ## Status
 Step 4.3 done: critical over-allocation alerts, daily concurrency-at-limit summary and report gauges.
 Next = Step 4.4 (not started).
-Latest `./scripts/test.sh` (Step 4.3): green; pytest 512 passed / 5 skipped (380.55 s),
-vitest 43 passed, Playwright 34 passed (2.4 min); ruff, formatting, frontend lint/typecheck pass.
+Latest `./scripts/test.sh` (Step 4.3 timeout investigation): green; pytest 512 passed / 5 skipped (184.49 s),
+vitest 43 passed, Playwright 34 passed (2.3 min); ruff, formatting, frontend lint/typecheck pass.
 10 new Step 4.3 tests; required tests observed failing before implementation. No blockers; no commit/push.
 E2E env handling, default ports and test scripts are unchanged; this run uses overrides 4140–4142.
-One unrelated pytest timeout warning was recorded under Notes; the full script exited 0.
+The prior unrelated pytest timeout warning and this investigation are recorded under Notes; the full script exited 0.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
 Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
@@ -196,6 +196,18 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 4.3 failure investigation (2026-10-21): the reported
+  `tests/api/test_lifecycle_permissions.py::test_matrix[head_on_self-move]` failure was a 60 s
+  pytest-timeout during `provisioned` fixture setup, before the test body:
+  `drain` → `build` → `_employee` → `session.get(Grp)` → SQLAlchemy
+  `coerce_to_immutabledict`. Step 4.3 changes neither this provisioning path nor these fixtures;
+  the fixture does not start the scheduler or worker loops. Classified as an unrelated intermittent
+  fixture timeout, consistent with earlier recorded failures. Focused verification passed unchanged:
+  66 tests (all lifecycle permissions, report-alert jobs and notifications) in 37.06 s.
+  No application code, tests or timeout settings changed; no retry loop.
+  One full `./scripts/test.sh` verification then exited 0: pytest 512 passed / 5 existing skips
+  (184.49 s), Vitest 43 passed, Playwright 34 passed (2.3 min); ruff lint/format and frontend
+  lint/typecheck passed. The timeout did not recur; stopped after this run as requested.
 - Step 4.3: no SPEC/PLAN conflicts. Breach dedupe dates and yesterday's alert window use APP_TIMEZONE;
   peak timestamps stay UTC. Concurrency limits use the configured employee key limit, as in Step 4.2 reports.
   `wm_blocked_employees` defaults to yesterday's distinct FR-R5 employees (see owner question); zero-activity runs reset gauges.
