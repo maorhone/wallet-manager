@@ -10,6 +10,8 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
   `notifications.spec.ts` (+1, 34 total). Prefs come from `GET /me/notifications` (no separate GET prefs endpoint). Full
   `./scripts/test.sh` about 4m40s (Playwright ~1.9 min). Phase 2 acceptance tests all exist. No new owner questions.
+  Flake: once `tests/scheduler/test_reconcile_job.py::test_key_and_mapping_corrections_block_lifecycle_and_show_sync` hit the 60 s
+  timeout in the `provisioned` fixture (`drain` → `_policy` → `session.get(Policy)`); the file passes alone (15 passed).
 - Step 2.9: UI Department Group heads tab (`/department/:id/group-heads`); `group_heads` in the department summary; Playwright +1
   (Playwright 33 total), pytest +1 (`test_group_heads_rows_for_rep`). `./scripts/test.sh` green.
 - Step 2.8: UI Group Grants tab with share create, change and close; U5 and U2 grant half (see Notes).
