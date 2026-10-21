@@ -1,11 +1,23 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Next = Phase 3.
-Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
+Step 4.1 done: allocation-versus-spend and grants reports backend. Next = Step 4.2 (not started).
+Latest `./scripts/test.sh` (Step 4.1): green; pytest 477 passed / 5 skipped (191.20 s),
+vitest 43 passed, Playwright 34 passed (2.4 min); ruff, formatting, frontend lint/typecheck pass.
+The 16 new report cases pass (6.00 s focused). E2E used env overrides 4140–4142; default ports
+4120–4122, E2E env handling and test scripts are unchanged. No new blockers or owner questions; no commit/push.
+
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
+Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.1: `GET /reports/allocation` (department/group/employee, period, snapshot spend and per-model rows)
+  and `GET /reports/grants` (visible grants by project, distinct department/group counts, grant count and money totals).
+  Reuses wallet/summary builders, period snapshots, audit history, effective model pots and the scoped grant list.
+  Department reports exclude PMO-only roles; member reports enforce D11, with self access for employees.
+  Added the nine named PLAN tests plus malformed-input, injectable-clock and closed-grant conservation coverage.
+  PRD updated; Step 4.2 untouched. No new API prefix (`reports` is already in the Vite proxy).
 - Step 2.10: UI `NotificationsBell` (header; unread count, drawer, mark read, scope link) and `NotificationPrefs` (on My wallet;
   critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
   `notifications.spec.ts` (+1, 34 total). Prefs come from `GET /me/notifications` (no separate GET prefs endpoint). Full
@@ -157,12 +169,20 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step (none; Phase 2 ends with Step 2.10). Next = Phase 3.
+- Step 4.2: Usage series, concurrency peaks, blocked spend (not started).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 4.1: no new SPEC/PLAN conflicts. The existing department-summary permission helper permits PMO;
+  reports apply the narrower §12.2 reports permission (PMO grants only) without changing summary access.
+  `departments` and `groups` in project report rows/totals are distinct counts; `grants` is a count.
+  Uncapped models with spend return null allocation/pct (as in existing wallets); percentages are fractions.
+  Historical reports inherit the existing builders: audit-backed budget/base/cap values and period spend snapshots;
+  model allowances/pots, memberships and active grant/share rows retain the existing history limitations noted below.
+  Shared period validation now accepts the injected clock and enforces exact YYYY-MM; the reused PMO pool
+  reader uses that clock too. No scheduler, test script, default E2E port/env or frontend changes.
 - Review 2.8: all 12 findings fixed (see commit "Step 2.8: review fixes"); Review 2.8 open: none.
 - Flaky (unrelated, backend): full ./scripts/test.sh intermittently hits the 60s pytest-timeout on an asyncpg call (test_rs256_via_jwks, test_restart_catches_up_on_overdue); both pass alone. Vitest also times out at 5s on cold first renders when the machine is loaded.
 - Step 2.9: `MemberSidePanel` gained `withBaseCap` (one-row `PUT /groups/{gid}/members/caps`); `ShareDialog` members type loosened.

@@ -328,7 +328,7 @@ async def pmo_pool(
     """§12.3 PMO pool card for a department and period."""
     await can_view_department(db, principal, department_id)
     dept = await db.get(Department, department_id)
-    period = period_ctx(settings, raw_period)["period"]
+    period = period_ctx(settings, raw_period, now=clock.now())["period"]
     start, end = window = _window(settings, clock.now(), period)
     live, closed_used = await _reserved(db, department_id, window)
     returned = await db.scalar(

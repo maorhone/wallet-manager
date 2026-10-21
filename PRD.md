@@ -51,6 +51,15 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 - Group and department summaries, member tables, history timeline, usage charts from a spend snapshot.
 - Over-allocation report against live LiteLLM values; status, outbox and metrics endpoints.
 - Share rows in the wallet show project, model, amount, used (attributed), expiry and days left - Done (Step 2.2).
+- Allocation and grants reports backend - Done (Step 4.1). `GET /reports/allocation?level=department|group|employee&id=&period=YYYY-MM`
+  returns allocation, snapshot spend, remaining, fraction used, wallet state, per-model allocation/spend and snapshot time.
+  Department rows include groups, PMO pool and reserve; group rows include members' base caps, active shares and model caps;
+  employees have no child rows. Past periods use their snapshots and the existing audit-based allocation history.
+  Department reports allow admin, representative and scoped viewers; member rows require head, representative or admin access;
+  each employee can read their own report. PMO report access is limited to grants.
+  `GET /reports/grants?department=&project_ref=` groups visible grants by project with distinct department/group counts,
+  grant count, amount, shared, unshared, attributed used and returned, plus totals across visible grants. Visibility matches
+  the grant list, including heads' own groups and PMO's own department. Report UI and usage/peaks endpoints remain planned.
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 
