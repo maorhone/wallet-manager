@@ -370,6 +370,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 19. **In-progress guard (D23).** Move, delete and place return 409 `LIFECYCLE_IN_PROGRESS` while earlier changes are unapplied; kick and restore are always queued in order.
 20. **Public repository (D25, NFR10).** Placeholders only; hygiene test scans tracked files. Before publishing, scan the full git history and provide internal names via a gitignored `.public-denylist`.
 21. **F5/F6 wording.** F6 (a manager's own cap, DR9) is unrelated to sync and is kept; F5 and F7 are replaced, F8–F10 added.
+22–27. **Phase 2 questions (PLAN.md §5):** the owner (Maor) approved the default answers on 20/10/2026.
 
 - Step 1b.1: SPEC §8.2 v0.3 has 16 tables (PLAN counts differently); followed the spec. A 404 on `/jwt/key/mapping/update` or `/delete` in the fake means no such mapping.
   `/_test/fail` keys on the request path and is cleared by `/_test/reset`. The fake's `LiteLLM_JWTKeyMapping.is_active` column is added by `create_all` only on a fresh fake
