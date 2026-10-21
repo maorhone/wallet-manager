@@ -190,6 +190,21 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 3.7 failure investigation: `e2e/member-actions.spec.ts:29`, `U9 head kicks and restores a member`,
+  hit Playwright's 30 s timeout while setting up the browser `context` (reported duration 2.8 min).
+  The saved `error-context.md` contains only that fixture-setup error, before login, navigation or member actions;
+  Step 3.7 does not change the Playwright configuration, fixtures or member-action flow. This is an unrelated
+  intermittent browser-context setup timeout; no application code or test timeouts/assertions were changed.
+  One verification run passed ruff/format, frontend lint/typecheck, pytest (527 passed / 6 skipped, 187.48 s)
+  and Vitest (43 passed), then hit another unrelated timeout in `e2e/department.spec.ts:66`,
+  `Rep edits a group head base cap from the Group heads tab; the head's own row stays read-only`:
+  at line 79, `getByTestId('confirm-change').click()`, after the button became visible/enabled/stable
+  and Playwright logged `performing click action`. Its nominal 30 s timeout took 11.3 min wall time,
+  indicating a browser/test execution stall. No repeated suite runs or speculative fixes were attempted,
+  per the owner's instruction to stop on unrelated intermittent timeouts.
+  Final verification result: Playwright 34 passed / 1 timeout (14.0 min); the originally reported U9 test
+  passed in 7.5 s and the Step 3.7 platform acceptance test passed in 6.6 s. `./scripts/test.sh` exited 1
+  solely for the department timeout above; the earlier green Step 3.7 run remains historical, not this run's result.
 - Step 3.7: Operations, Policies and Audit are disabled shell tabs reserved for Steps 3.8–3.9; their contents were not started.
   Steps 3.3–3.6 remain on the parallel main track; no production or service-key work was added. No SPEC/PLAN differences for this step.
   `scopePath` already sends platform scopes to `/platform`, and the existing Vite regex already proxies `departments` and `role-bindings`; neither needed changes.
