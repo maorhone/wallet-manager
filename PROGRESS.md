@@ -200,6 +200,17 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 3.4 failure triage (2026-10-21): `frontend/e2e/member-actions.spec.ts:29`,
+  `U9 head kicks and restores a member`, exceeded 30 s while setting up Playwright's built-in
+  `context` fixture (browser context creation, before the test body). The saved
+  `frontend/test-results/member-actions-U9-head-kicks-and-restores-a-member-chromium/error-context.md`
+  confirms that location. This exact U9 context-setup timeout is already recorded below under
+  Step 2.9 stop-hook reruns, predating Step 3.4; Step 3.4 changed no browser fixtures/configuration.
+  Classified as the pre-existing intermittent browser-setup timeout, unrelated to service keys;
+  sandbox contention is suspected, not proven by this report. The supplied run passed pytest
+  (540 passed, 6 skipped), Vitest (43 passed), and the other 33 Playwright tests. Stopped without
+  rerunning the suite per the owner's explicit timeout instruction; no application/test changes,
+  timeout increases, or test weakening. A full green run has not been established by this triage.
 - Step 3.3: migration filename is `0006` (PLAN says `0005`, written before Step 3.2 took that number for the
   platform-creation-uniqueness migration); content matches PLAN's "Migration 0005 (it also covers Step 3.4)" bullet
   verbatim, just renumbered. The migration also adds the Step 3.4 `service_key` columns/checks now (schema only; no
