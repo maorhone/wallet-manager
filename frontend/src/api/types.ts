@@ -416,3 +416,33 @@ export interface UsageReport {
   cap: number;
   taken_at: string | null;
 }
+
+export interface GrantTotals {
+  departments: number;
+  groups: number;
+  grants: number;
+  amount: number;
+  shared: number;
+  unshared: number;
+  used: number;
+  returned: number;
+}
+
+export interface GrantsReport {
+  rows: (GrantTotals & { project_ref: string | null })[];
+  totals: GrantTotals;
+}
+
+export interface BlockedReport {
+  rows: {
+    day: string;
+    upn: string;
+    display_name: string | null;
+    group_id: number;
+    kind: 'base' | 'model';
+    model: string | null;
+    cap: number;
+    period_spend_to_date: number;
+    day_spend: number;
+  }[];
+}

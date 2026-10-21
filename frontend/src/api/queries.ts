@@ -8,6 +8,8 @@ import {
 import { apiFetch, apiPatch, apiPost, apiPut } from './client';
 import type {
   AllocationLevel,
+  GrantsReport,
+  BlockedReport,
   AllocationReport,
   AuditEntry,
   DepartmentSummary,
@@ -459,5 +461,34 @@ export const useUsageReport = (
       );
     },
     enabled: enabled && period !== '' && id !== '',
+    refetchInterval: 15000,
+  });
+
+export const useGrantsReport = (department?: string) =>
+  useQuery({
+    queryKey: ['reports', 'grants', department],
+    queryFn: () =>
+      apiFetch<GrantsReport>(
+        `/reports/grants${department ? `?${new URLSearchParams({ department })}` : ''}`,
+      ),
+    refetchInterval: 15000,
+  });
+
+export const useBlockedReport = (scope: UsageScope, id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'blocked', scope, id, period],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<BlockedReport>(
+        `/reports/blocked?${new URLSearchParams({
+          scope,
+          ...(scope === 'global' ? {} : { id }),
+          from: `${period}-01`,
+          to,
+        })}`,
+      );
+    },
+    enabled: period !== '' && id !== '',
     refetchInterval: 15000,
   });

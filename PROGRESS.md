@@ -1,11 +1,11 @@
 # Progress — Wallet Manager
 
 ## Status
-Step 4.5 done: UI usage charts at every level.
-Next = Step 4.6 (not started).
-Latest `./scripts/test.sh` (Step 4.5): green; pytest 518 passed / 5 existing skips (196.59 s),
-vitest 46 passed, Playwright 36 passed (2.2 min); ruff, formatting, frontend lint/typecheck pass.
-Required Vitest and Playwright tests were written first and observed failing before implementation.
+Step 4.6 done: UI Grants-by-project and Blocked tabs.
+Next = Step 4.7 (not started).
+Latest `./scripts/test.sh` (Step 4.6): green; pytest 518 passed / 5 existing skips (207.66 s),
+vitest 46 passed, Playwright 37 passed (2.5 min); ruff, formatting, frontend lint/typecheck pass.
+Required Playwright test was written first and observed failing on the missing PMO Reports link.
 No blockers or new owner questions; no commit/push. E2E scripts/default ports/env handling unchanged.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
@@ -13,6 +13,14 @@ Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped r
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.6: Grants-by-project report with project rows and aggregate counts/money totals; PMO's
+  Reports link opens its department grants with the PMO scope retained and only the Grants tab.
+  Blocked report shows daily base/model exhaustion, current cap, month-to-date/day spend for the
+  selected period, gated by member visibility. Shared loading/error/retry/empty and credits formatting.
+  Required single Playwright case written first, observed failing and then passing; scope regression updated.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 46 passed,
+  Playwright 37 passed; ruff/format/frontend lint/typecheck pass. No intermittent timeout warnings.
+  PRD updated. Step 4.7 untouched; no commit/push.
 - Step 4.5: generic shared UsageChart accepts bucket/key/spend series, stacks keys safely (including UPNs
   with dots), fills missing key values with zero and retains cumulative spend/cap line and chart states.
   My Wallet adapts its existing daily points. Added Usage reports for employee/group/department/global,
@@ -214,12 +222,18 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 4.6: UI: Grants-by-project and Blocked tabs (not started).
+- Step 4.7: UI: Concurrency peaks tab; Phase 4 wrap-up (not started).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 4.6: no SPEC/PLAN conflicts. Reused `/reports/grants` and `/reports/blocked`; no new
+  API prefix, backend, scheduler or test-script changes. Grants API is current-only, explicitly labeled
+  independent of selected period; blocked caps are also labeled current. PMO gets a distinct
+  `/report/pmo/:id/grants` route so its scope remains distinct from a representative of the same department.
+  Grants tabs are department/global; Blocked tabs follow member visibility (own, head, rep, admin).
+  Focused/full E2E uses env overrides 4130–4132; default ports/env handling unchanged.
 - Step 4.5: no SPEC/PLAN conflicts. Reused Step 4.2 `/reports/usage` and existing offline Recharts.
   The report API returns the current cap, including for a historical range; the UI explicitly labels it.
   Member toggles use scoped roles and the group summary's existing server permission; APIs enforce scope.

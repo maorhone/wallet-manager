@@ -21,9 +21,10 @@ export const scopePath = (s: Scope): string => {
   }
 };
 
-/** Reports available in this step; PMO grants are added with the Grants report tab. */
+/** Reports for the selected scope; PMO has department grants only. */
 export function reportPath(s: Scope): string | null {
-  if (s.role === 'pmo' || (s.kind === 'group' && s.role === 'viewer')) return null;
+  if (s.role === 'pmo') return `/report/pmo/${s.id}/grants`;
+  if (s.kind === 'group' && s.role === 'viewer') return null;
   const kind = s.kind === 'self' ? 'me' : s.kind === 'platform' ? 'global' : s.kind;
   const id = s.kind === 'self' ? 'me' : s.kind === 'platform' ? 'all' : s.id;
   return `/report/${kind}/${id}/allocation`;
@@ -48,7 +49,7 @@ export function scopeFromPath(pathname: string, scopes: Scope[]): Scope | undefi
   if (pathname.startsWith('/report/')) {
     const [, , kind, id] = pathname.split('/');
     const key = kind === 'me' ? 'self' : kind === 'global' ? 'platform' : `${kind}:${id}`;
-    return scopes.find((s) => scopeKey(s) === key && s.role !== 'pmo');
+    return scopes.find((s) => scopeKey(s) === key && (kind === 'pmo' || s.role !== 'pmo'));
   }
   const [, first, id] = pathname.split('/');
   const key = first === 'wallet' ? 'self' : first === 'platform' ? 'platform' : `${first}:${id}`;

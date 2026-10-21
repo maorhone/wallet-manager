@@ -28,7 +28,8 @@ describe('scopes', () => {
   });
 
   it('does not offer member reports to viewers or allocation reports to PMO', () => {
-    expect(reportPath(pmo)).toBeNull();
+    expect(reportPath(pmo)).toBe('/report/pmo/5/grants');
+    expect(scopeFromPath('/report/pmo/5/grants', [rep, pmo])).toBe(pmo);
     expect(reportPath({ kind: 'group', id: 3, role: 'viewer' })).toBeNull();
     expect(scopeFromPath('/report/department/5/allocation', [pmo])).toBeUndefined();
   });

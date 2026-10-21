@@ -1,36 +1,57 @@
-import { Stack, Tabs, Title } from '@mantine/core';
+import { Loader, Stack, Tabs, Title } from '@mantine/core';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../api/client';
-import { useMe } from '../../api/queries';
+import { useGroupSummary, useMe } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
 import Allocation, { GlobalAllocation } from './Allocation';
 import Overallocation from './Overallocation';
 import Usage from './Usage';
+import Grants from './Grants';
+import Blocked from './Blocked';
 
-/** Phase 4 report shell. Allocation, Usage and Over-allocation. */
+/** Scoped report tabs; PMO reports contain department grants only. */
 export default function ReportsPage() {
   const { kind = '', id = '', tab = 'allocation' } = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const { data: me } = useMe();
   const { period } = usePeriod();
+  const group = useGroupSummary(id, kind === 'group' ? period : '');
   if (!me) return null;
   if (
-    !['me', 'group', 'department', 'global'].includes(kind) ||
+    !['me', 'group', 'department', 'global', 'pmo'].includes(kind) ||
     (kind === 'global' && !me.scopes.some((s) => s.kind === 'platform'))
   ) {
     return <ErrorState error={new ApiError(403, { code: 'FORBIDDEN' })} />;
   }
-  const tabs =
-    kind === 'department' || kind === 'global'
-      ? (['allocation', 'usage', 'overallocation'] as const)
-      : (['allocation', 'usage'] as const);
+  if (kind === 'group' && group.isPending) return <Loader aria-label={he.loading} />;
+  const isAdmin = me.roles.some((r) => r.role === 'platform_admin');
+  const canViewMembers =
+    kind === 'me' ||
+    isAdmin ||
+    (kind === 'group' && group.data?.actions.edit_members) ||
+    (kind === 'department' &&
+      me.roles.some(
+        (r) =>
+          r.role === 'department_rep' && r.scope_kind === 'department' && String(r.scope_id) === id,
+      ));
+  const tabs: (keyof typeof he.reports.tabs)[] =
+    kind === 'pmo'
+      ? ['grants']
+      : [
+          'allocation',
+          'usage',
+          ...(kind === 'department' || kind === 'global'
+            ? (['grants', 'overallocation'] as const)
+            : []),
+          ...(canViewMembers ? (['blocked'] as const) : []),
+        ];
   if (!tabs.some((t) => t === tab)) {
     return (
       <Navigate
-        to={{ pathname: `/report/${kind}/${id}/allocation`, search: search.toString() }}
+        to={{ pathname: `/report/${kind}/${id}/${tabs[0]}`, search: search.toString() }}
         replace
       />
     );
@@ -66,6 +87,14 @@ export default function ReportsPage() {
       {tab === 'usage' && (
         <Usage
           key={`${kind}:${id}`}
+          scope={kind === 'me' ? 'employee' : (kind as 'group' | 'department' | 'global')}
+          id={kind === 'me' ? me.upn : id}
+          period={period}
+        />
+      )}
+      {tab === 'grants' && <Grants department={kind === 'global' ? undefined : id} />}
+      {tab === 'blocked' && (
+        <Blocked
           scope={kind === 'me' ? 'employee' : (kind as 'group' | 'department' | 'global')}
           id={kind === 'me' ? me.upn : id}
           period={period}

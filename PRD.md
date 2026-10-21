@@ -59,7 +59,7 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   each employee can read their own report. PMO report access is limited to grants.
   `GET /reports/grants?department=&project_ref=` groups visible grants by project with distinct department/group counts,
   grant count, amount, shared, unshared, attributed used and returned, plus totals across visible grants. Visibility matches
-  the grant list, including heads' own groups and PMO's own department. Grants report UI remains planned.
+  the grant list, including heads' own groups and PMO's own department. Grants report UI is available (Step 4.6).
 - Usage, concurrency peaks and blocked spend backend - Done (Step 4.2).
   `GET /reports/usage?scope=employee|group|department|global&id=&from=&to=&granularity=day|week|month&by=model|member`
   returns snapshot series, the current cap and snapshot time for up to 400 inclusive local dates. Day snapshots now follow
@@ -88,7 +88,15 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   and past periods remain read-only. Department and global scopes also have an Over-allocation tab showing source,
   level, entity/model, allocated amount, ceiling and a warning badge. These findings are explicitly current-only,
   independent of the selected period. Existing server permissions apply: member reports require member visibility,
-  scoped viewers get department aggregates, and PMO's grants report link awaits the Grants tab (Step 4.6).
+  scoped viewers get department aggregates, and PMO has a department grants report link.
+- Grants-by-project and Blocked tabs - Done (Step 4.6).
+  Department/global Grants tabs show project rows and totals for distinct departments/groups, grant count,
+  amount, shared, unshared, used and returned credits. PMO's Reports link opens only its department grants
+  at `/report/pmo/:id/grants`, retaining the PMO scope. Grants are labeled current and independent of the selected period.
+  The Blocked tab shows own/group/department/global daily base/model exhaustion where member visibility permits;
+  viewers and PMO do not receive member tabs. Rows show date, employee, cap kind/model, current cap,
+  month-to-date spend and daily spend, using the selected month's snapshot range. Caps are labeled current.
+  Loading, retry/error and empty states reuse shared components. Concurrency UI remains Step 4.7.
 - Usage charts at every level - Done (Step 4.5).
   The Usage report tab shows snapshot spend stacked by model for own-wallet, group, department and global scopes,
   with day/week/month buckets, cumulative spend and a cap line. Heads, representatives and admins can switch
