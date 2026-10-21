@@ -1,11 +1,18 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Next = Step 3.2.
-Latest `./scripts/test.sh` (Step 3.1): green; pytest 477 passed (6 skipped real-target cases), vitest 43, Playwright 34; ruff, frontend lint/typecheck and formatting pass. Pytest ~2m56s, Playwright ~2.3 min, full run ~3 minutes. No scripts, E2E ports or env handling changed.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Step 3.7 (Platform shell and Departments UI) done on phase-3b. Next = Step 3.8.
+Latest `./scripts/test.sh` (Step 3.7): green; pytest 527 passed / 6 skipped, Vitest 43 passed, Playwright 35 passed; ruff, frontend lint/typecheck and formatting pass. Pytest 200.70 s, Playwright 2.1 min (new acceptance test 6.6 s). Run used the supplied E2E ports 4150–4152; no scripts, default ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.7: Platform shell at `/platform/:tab`, `/platform` redirects to Pending; the existing pending-placement UI and tests stay intact.
+  Departments lists current budgets and periods, supports department and regular/staff-group creation, and edits budgets/periods through the existing API.
+  `RoleBindingsEditor` edits AD group DNs per role and displays resolved names; all changes use `ChangeSummaryDialog` with a required reason and Idempotency-Key.
+  New groups start at zero with pending/applied sync badges; each staff group links to Members for representatives' personal values (DR9).
+  Past-period selection disables changes; only platform admins can open the screen. One new Playwright acceptance test (written and observed failing first)
+  covers creation, budget/period edits, binding resolution, write headers, sync, staff navigation and access restrictions.
+  Final `./scripts/test.sh`: green, pytest 527 passed / 6 skipped, Vitest 43, Playwright 35. No blockers or new owner questions.
 - Step 3.2 review fixes (Codex fallback): fixed policy shape/type validation, NULL-safe global binding deletion, and serialized creation with DB DN/staff uniqueness; all three findings confirmed; regressions reproduced before fixes; pytest 527 passed/6 skipped, vitest 43 and Playwright 34 passed, lint/format/typecheck green (full script stopped at read-only browser cache; installer passed separately with writable temp cache); next: Step 3.3; blockers: none.
 - Step 2.10: UI `NotificationsBell` (header; unread count, drawer, mark read, scope link) and `NotificationPrefs` (on My wallet;
   critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
@@ -177,12 +184,16 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.2: Platform backend (`PUT /policies`, Redis status, department and group creation, role bindings).
+- Step 3.8: Platform Operations tab (status with Redis, outbox, drift log).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 3.7: Operations, Policies and Audit are disabled shell tabs reserved for Steps 3.8–3.9; their contents were not started.
+  Steps 3.3–3.6 remain on the parallel main track; no production or service-key work was added. No SPEC/PLAN differences for this step.
+  `scopePath` already sends platform scopes to `/platform`, and the existing Vite regex already proxies `departments` and `role-bindings`; neither needed changes.
+  Departments shows current configuration explicitly (the list API has no historical period); mutations are disabled when a past period is selected.
 - Step 3.1: PLAN says only `owners.holders` catches `DirectoryUnavailable`; `owner_of`'s earlier `target_tier` call is left
   to raise. This is deliberate: `target_tier` decides whose values are being shown (member vs. group head vs. rep), and a
   write path needs that to fail closed (503) rather than guess, so a group head's action is never silently authorized

@@ -351,3 +351,39 @@ export interface NotificationsList {
 }
 
 export type Policies = Record<string, { min?: number; default?: number; max?: number }>;
+
+export interface DepartmentRecord {
+  id: number;
+  name: string;
+  budget: number;
+  budget_period: string;
+}
+
+export interface DepartmentIn {
+  name: string;
+  litellm_org_id: string;
+  ad_group_dn: string | null;
+  budget: number;
+  budget_period: string;
+}
+
+export interface GroupIn {
+  name: string;
+  litellm_team_id: string;
+  ad_group_dn: string | null;
+  kind: 'regular' | 'department_staff';
+}
+
+export interface RoleBindingScope {
+  scope_kind: 'global' | 'department' | 'group';
+  scope_id?: number;
+}
+
+export interface RoleBindingIn extends RoleBindingScope {
+  role: string;
+  ad_group_dns: string[];
+}
+
+export interface RoleBinding extends RoleBindingIn {
+  members: Person[];
+}

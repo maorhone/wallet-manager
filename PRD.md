@@ -149,6 +149,15 @@ scope switcher, change-summary dialog, PMO page (pool and grants with the create
 `/pmo/<dept>/pool`; grant actions and Projects tab Done in Step 2.7). Group Grants tab with share dialogs Done in Step 2.8.
 Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10.
 
+### 4.8.1 Platform shell and Departments tab - Step 3.7: Done
+
+Platform admins enter `/platform`, which redirects to the existing Pending placement tab. The Departments tab
+lists current budgets and LiteLLM budget periods; admins can create departments, edit their budget and period,
+and create regular or department staff groups with a zero base budget and a sync badge. Each department links
+to its staff group's Members screen for representatives' personal values (DR9). A role editor assigns AD group
+DNs per department role and shows resolved member names; changes require a reason in the shared change summary.
+Past-period selection disables changes. Operations, Policies and Audit tabs are reserved for subsequent steps.
+
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned
 
 Production organizations, service keys, rotate/revoke.
