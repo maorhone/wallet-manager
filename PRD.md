@@ -96,9 +96,9 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   (default and maximum: the grant's expiry), the unshared remainder updates live and blocks above the grant; the actor's own
   row is disabled and names the owner role (DR9; the API still returns `SELF_ALLOCATION_FORBIDDEN`). Each grant opens its
   shares (amount, used, returned, expiry) with change and close (reason required). Employees see shares with days left in My wallet.
-- Department Group heads tab - Done (Step 2.9): `/department/<id>/group-heads` (shown to a rep or admin when a row is editable) lists each
+- Department Group heads tab - Done (Step 2.9): `/department/<id>/group-heads` (shown to a rep or admin, also for past periods, read-only) lists each
   group head with group, base cap, shares, model caps, limits and sync badge. The side panel edits the base cap, model caps and limits;
-  "שיתוף מענק" offers only the head's group's active grants. A rep's own row (when also a head) and viewers' rows are read-only (DR9).
+  "שיתוף מענק" offers only the head's group's active grants. A rep's own row (when also a head) is read-only (DR9). Viewers and PMO get `group_heads: []` (aggregates only). Heads are matched department-wide, so a moved head stays listed under their current group; shares sum all active grants.
   `GET /departments/{id}/summary` gains `group_heads`.
 
 ### 4.5 Scheduler - Phase 2: In progress (grants job Done in Step 2.3)

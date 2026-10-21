@@ -156,7 +156,9 @@ class _Group:
         values = await values_as_of(db, "employee", live, at)
         base_live = {str(group.id): {"base_budget": group.base_budget}}
         base = (await values_as_of(db, "group", base_live, at))[str(group.id)]["base_budget"]
-        shares = {upn: amount for _, upn, amount in await _shares(db, [group.id])}
+        shares: dict[str, Decimal] = defaultdict(lambda: ZERO)
+        for _, upn, amount in await _shares(db, [group.id]):
+            shares[upn] += amount
         grants = (await _grants_by_group(db, [group.id], timezone, spend.period)).get(
             group.id, ZERO
         )
@@ -434,8 +436,14 @@ async def _group_heads(
         )
     )
     out = []
+    if not principal.department_roles(groups[0].department_id) & {ADMIN, REP} if groups else True:
+        return out  # viewers and PMO see aggregates only (decision 7)
+    # Heads keep their AD role when moved, so match them across the whole department.
+    heads = set()
     for group in groups:
-        upns = {p["upn"] for p in await holders(db, directory, HEAD, "group", group.id)}
+        heads |= {p["upn"] for p in await holders(db, directory, HEAD, "group", group.id)}
+    for group in groups:
+        upns = heads
         if not upns:
             continue
         g = await _Group.load(db, group, spend, pc["at"], th, settings.app_timezone)

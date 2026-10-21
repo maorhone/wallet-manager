@@ -21,7 +21,7 @@ export default function DepartmentPage() {
 
   const tabs = [
     ...TABS,
-    ...(summary.data?.group_heads.some((h) => h.actions.edit) ? ['group-heads'] : []),
+    ...(summary.data?.group_heads.length ? ['group-heads'] : []),
     ...(summary.data?.actions.place ? ['pending'] : []),
   ];
   if (summary.data && !tabs.includes(tab))

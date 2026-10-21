@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from app.models import (
     Department,
     DepartmentModelAllowance,
+    Employee,
     Grant,
+    GrantShare,
     GroupModelPot,
     RoleBinding,
 )
@@ -79,9 +81,9 @@ async def test_group_heads_rows_for_rep(login, seeded, tmp_path):
     assert heads["noa@corp.example"]["actions"] == {"edit": True, "share": True}
     for key in ("group_id", "shares", "model_caps", "max_parallel", "rpm_limit", "sync_status"):
         assert key in dana
-    # A department viewer sees no editable rows (D11 aggregates only).
+    # Viewers and PMO see aggregates only: no personal rows at all (decision 7).
     viewer = (await (await login("viewer")).get("/departments/1/summary")).json()
-    assert all(h["actions"] == {"edit": False, "share": False} for h in viewer["group_heads"])
+    assert viewer["group_heads"] == []
     # A representative who is also a group head cannot edit their own row (DR9).
     staff_dn = "CN=grp-d1-staff,OU=Groups,DC=corp,DC=example"  # the rep's own group (id 4)
     async with seeded() as s:
@@ -92,6 +94,26 @@ async def test_group_heads_rows_for_rep(login, seeded, tmp_path):
     assert own["actions"] == {"edit": False, "share": False}
     other = next(h for h in both["group_heads"] if h["upn"] == "dana@corp.example")
     assert other["actions"]["edit"] is True
+
+
+async def test_group_heads_shares_sum_and_moved_head(login, seeded):
+    async with seeded() as s:
+        for _ in range(2):
+            g = Grant(**{**GRANT, "group_id": 1})
+            s.add(g)
+            await s.flush()
+            s.add(GrantShare(grant_id=g.id, upn="noa@corp.example", amount=100))
+        (await s.get(Employee, "noa@corp.example")).group_id = 1  # moved; AD role is kept
+        await s.commit()
+    body = (await (await login("rep")).get("/departments/1/summary")).json()
+    noa = next(h for h in body["group_heads"] if h["upn"] == "noa@corp.example")
+    assert noa["group_id"] == 1 and noa["shares"] == 200
+
+
+async def test_group_heads_past_period_listed_read_only(login, seeded):
+    body = (await (await login("rep")).get("/departments/1/summary?period=2020-01")).json()
+    assert body["read_only"] is True and body["group_heads"]
+    assert all(h["actions"]["edit"] is False for h in body["group_heads"])
 
 
 async def test_summary_scope(login):
