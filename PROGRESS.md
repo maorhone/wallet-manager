@@ -190,6 +190,18 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 3.7 backend-timeout investigation (2026-10-22): the reported `./scripts/test.sh` run
+  stopped at `tests/api/test_status_outbox.py::test_retry_failed_row` during async fixture setup,
+  before the test body, with `pytest-timeout` (>60 s; 262 passed, 1 setup error in 766.14 s).
+  The supplied stack ends in `pytest_asyncio`'s fixture runner → asyncio event loop →
+  `EpollSelector.poll`; it does not identify the suspended fixture or database operation.
+  Step 3.7 changed no backend code, pytest fixtures or timeout settings. A single focused run,
+  `uv run pytest -q -x tests/api/test_status_outbox.py --durations=10`, passed all 8 tests in
+  5.79 s; the reported test took 0.48 s setup, 0.24 s call and 0.13 s teardown.
+  Evidence points to an unrelated intermittent fixture timeout; the underlying stalled operation
+  cannot be determined from the supplied tail. No application code, tests or timeouts changed.
+  Stopped after that focused check per the owner's instruction; the full script was not rerun
+  and is not claimed green for this investigation. Next remains Step 3.8; no Step 3.3–3.6 work.
 - Step 3.7 failure investigation: `e2e/member-actions.spec.ts:29`, `U9 head kicks and restores a member`,
   hit Playwright's 30 s timeout while setting up the browser `context` (reported duration 2.8 min).
   The saved `error-context.md` contains only that fixture-setup error, before login, navigation or member actions;
