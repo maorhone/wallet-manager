@@ -65,6 +65,37 @@ async def test_system_team_in_production_org_not_department_org_dr4(
     assert team.organization_id != "D1"
 
 
+async def test_department_cannot_reuse_an_existing_production_org_id(login_wm, provisioned, put):
+    """DR4: a production org id must never collide with a real department's own org (reviewer
+    finding: the generated "{litellm_org_id}-prod" id must stay out of departments' reach even
+    when the production org was created first)."""
+    admin = await login_wm("admin")
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 100000})
+    assert r.status_code == 200, r.text
+
+    body = {"name": "Shadow", "litellm_org_id": "D1-prod", "budget": 0}
+    r = await post(admin, "/departments", body)
+    assert r.status_code == 422, r.text
+    assert r.json()["details"]["field"] == "litellm_org_id"
+
+
+async def test_group_cannot_reuse_an_existing_production_system_team_id(login_wm, provisioned, put):
+    """DR4: a production system's generated "sys-{id}" team id must never collide with a real
+    employee team, even when the production system was created first (reviewer finding)."""
+    admin = await login_wm("admin")
+    await put(admin, f"/production/departments/{D1}", {"budget": 100000})
+    r = await post(
+        admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 1000}
+    )
+    assert r.status_code == 200, r.text
+    sys_id = int(r.json()["entities"][0]["id"])
+
+    body = {"name": "Shadow", "litellm_team_id": f"sys-{sys_id}"}
+    r = await post(admin, f"/departments/{D1}/groups", body)
+    assert r.status_code == 422, r.text
+    assert r.json()["details"]["field"] == "litellm_team_id"
+
+
 async def test_systems_over_production_budget_422_with_numbers(login_wm, provisioned, put):
     admin = await login_wm("admin")
     await put(admin, f"/production/departments/{D1}", {"budget": 50000})

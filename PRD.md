@@ -158,8 +158,11 @@ when its budget would push the department's systems past the production budget; 
 production budget below the systems' total is accepted and shown as over-allocated. The department's
 representative and the admin can read the production organization, its systems, their spend and
 sync status (admin only edits); other roles have no access. Production is not reconciled (FR-RC
-only re-derives the §8.1 fields). Service keys (create with a one-time secret, rotate, revoke) are
-Planned for Step 3.4.
+only re-derives the §8.1 fields). Production org/system LiteLLM ids are generated (`{org}-prod`,
+`sys-{id}`); DR4 reserves these patterns, so platform department/group creation rejects an id ending
+in `-prod` or starting with `sys-`, which would otherwise let a department's own org or an employee
+team collide with a production object. Service keys (create with a one-time secret, rotate, revoke)
+are Planned for Step 3.4.
 
 ### 4.10 Directory (section 5.1, 9.1) - Phase 3: In progress (Step 3.1)
 

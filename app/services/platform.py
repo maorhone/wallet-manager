@@ -142,6 +142,12 @@ async def create_department(
 ) -> list[dict]:
     role = can_manage_platform(principal)
     await ctx.lock(LockKind.PLATFORM, 0)
+    if body.litellm_org_id.endswith("-prod"):
+        # DR4: the "-prod" suffix is reserved for generated production org ids (FR-K1),
+        # so a department can never be created with an id a future production org will claim.
+        raise invalid_request(
+            "litellm_org_id cannot use the reserved '-prod' suffix", {"field": "litellm_org_id"}
+        )
     if await ctx.db.scalar(
         select(Department.id).where(Department.litellm_org_id == body.litellm_org_id)
     ):
@@ -177,6 +183,12 @@ async def create_group(
     await ctx.lock(LockKind.DEPARTMENT, department_id)
     if await ctx.db.get(Department, department_id) is None:
         raise ApiError(404, "NOT_FOUND", "Department not found")
+    if body.litellm_team_id.startswith("sys-"):
+        # DR4: the "sys-" prefix is reserved for generated production system ids (FR-K2),
+        # so a group can never be created with an id a future production system will claim.
+        raise invalid_request(
+            "litellm_team_id cannot use the reserved 'sys-' prefix", {"field": "litellm_team_id"}
+        )
     if await ctx.db.scalar(select(Grp.id).where(Grp.litellm_team_id == body.litellm_team_id)):
         raise invalid_request("litellm_team_id already exists", {"field": "litellm_team_id"})
     if body.ad_group_dn and await ctx.db.scalar(

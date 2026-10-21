@@ -96,6 +96,26 @@ async def test_duplicate_team_id_invalid(login_wm, provisioned):
     assert body["details"]["field"] == "litellm_team_id"
 
 
+async def test_department_org_id_reserved_prod_suffix_invalid(login_wm, provisioned):
+    admin = await login_wm("admin")
+    body = {"name": "Shadow", "litellm_org_id": "D1-prod", "budget": 0}
+    r = await post(admin, "/departments", body)
+    assert r.status_code == 422, r.text
+    body = r.json()
+    assert body["code"] == "INVALID_REQUEST"
+    assert body["details"]["field"] == "litellm_org_id"
+
+
+async def test_group_team_id_reserved_sys_prefix_invalid(login_wm, provisioned):
+    admin = await login_wm("admin")
+    body = {"name": "Shadow", "litellm_team_id": "sys-1"}
+    r = await post(admin, f"/departments/{D1}/groups", body)
+    assert r.status_code == 422, r.text
+    body = r.json()
+    assert body["code"] == "INVALID_REQUEST"
+    assert body["details"]["field"] == "litellm_team_id"
+
+
 async def test_non_admin_403(login_wm, provisioned):
     rep = await login_wm("rep")
     dept_body = {"name": "X", "litellm_org_id": "org-x", "budget": 1000}
