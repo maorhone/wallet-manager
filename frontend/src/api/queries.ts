@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 import { apiFetch, apiPatch, apiPost, apiPut } from './client';
 import type {
+  ConcurrencyPeaks,
   AllocationLevel,
   GrantsReport,
   BlockedReport,
@@ -471,6 +472,26 @@ export const useGrantsReport = (department?: string) =>
       apiFetch<GrantsReport>(
         `/reports/grants${department ? `?${new URLSearchParams({ department })}` : ''}`,
       ),
+    refetchInterval: 15000,
+  });
+
+/** A calendar month stays within the live report's 31-local-date limit. */
+export const useConcurrencyPeaks = (scope: UsageScope, id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'concurrency-peaks', scope, id, period],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<ConcurrencyPeaks>(
+        `/reports/concurrency-peaks?${new URLSearchParams({
+          scope,
+          ...(scope === 'global' ? {} : { id }),
+          from: `${period}-01`,
+          to,
+        })}`,
+      );
+    },
+    enabled: period !== '' && id !== '',
     refetchInterval: 15000,
   });
 

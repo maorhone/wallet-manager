@@ -1,11 +1,11 @@
 # Progress — Wallet Manager
 
 ## Status
-Step 4.6 done: UI Grants-by-project and Blocked tabs.
-Next = Step 4.7 (not started).
-Latest `./scripts/test.sh` (Step 4.4 review fixes): green; pytest 518 passed / 5 existing skips (190.90 s),
-vitest 48 passed, Playwright 37 passed (2.6 min); ruff, formatting, frontend lint/typecheck pass.
-Required Playwright test was written first and observed failing on the missing PMO Reports link.
+Step 4.7 done: UI Concurrency peaks tab; Phase 4 complete.
+Next = Step (none; Phase 4 ends with this step; merge into main follows).
+Latest `./scripts/test.sh` (Step 4.7): green; pytest 518 passed / 5 existing skips (197.54 s),
+vitest 48 passed, Playwright 38 passed (2.6 min); ruff, formatting, frontend lint/typecheck pass.
+Full run: 6m11.318s. Required Playwright test was written first and observed failing on the missing Concurrency tab.
 No blockers or new owner questions; no commit/push. E2E scripts/default ports/env handling unchanged.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
@@ -13,6 +13,16 @@ Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped r
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.7: Concurrency peaks tab with a daily scoped/global peak line and top-100 employee
+  table showing overlap peak, current personal `max_parallel` and UTC peak timestamp.
+  Reuses the live peaks API, selected period and report scopes; viewers see aggregates only,
+  PMO remains grants-only, employees see their own data. Shared loading/error/retry/empty states.
+  Required single Playwright test written first, observed failing, then passing; verifies overlapping
+  versus consecutive requests, ranked employee peaks/limits, period changes and viewer/PMO visibility.
+  All Phase 4 acceptance-mapping tests exist and pass, including repository hygiene.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, Vitest 48 passed,
+  Playwright 38 passed; ruff lint/format and frontend lint/typecheck pass. No intermittent timeouts.
+  PRD updated. Phase 4 complete; no further step started, no commit/push, no new blockers/questions.
 - Step 4.4 review fixes: confirmed the major per-model remaining clamp finding and removed it from
   the shared Allocation adapter, so report and child model tables show negative balances for overspent caps.
   Added two rendering regressions covering overspent, exact, under, zero and uncapped models;
@@ -229,12 +239,29 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 4.7: UI: Concurrency peaks tab; Phase 4 wrap-up (not started).
+- Step (none; Phase 4 ends with this step; merge into main follows).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 4.7: no SPEC/PLAN behavior conflicts. Reused Step 4.2's live, scoped
+  `/reports/concurrency-peaks`, existing Recharts and shared report states. The selected calendar
+  month stays within the API's 31-local-date limit; member rows show the API's current personal
+  `max_parallel` (dash when unset), not an inferred policy limit. Viewers get aggregates only;
+  PMO stays grants-only. D6 pilot policy values are unchanged.
+  Per the owner's explicit run instruction, Next is Step (none; Phase 4 ends with this step;
+  merge into main follows), overriding PLAN 4.7's "Next = Phase 0 (real environment)" wording.
+  No new API prefix, backend/scheduler work or changes to test scripts/default ports/env handling.
+  Focused/full E2E uses env overrides 4130–4132. Required Playwright test failed on the missing
+  tab before implementation and passed afterward (2.5 s test; 9.5 s focused run).
+  All named Phase 4 acceptance-mapping tests exist; the new test is the fourth reports browser
+  case, within Phase 4's four-test allowance and the combined ten-test allowance.
+  Runtime budget: full script 371.318 s; pytest 197.54 s (+6.64 s versus the preceding 190.90 s run),
+  Vitest 4.94 s, Playwright 2.6 min. Step 4.7 adds no pytest work and one 2.2 s browser case.
+  Against the available historical pre-reports baseline (Step 2.5: about 155 s), pytest growth is
+  about 42.54 s, below the combined Phase 3/4 allowance of about 90 s. A separate Phase 3 timing
+  baseline is not recorded in this checkout; the comparison uses the available earlier baseline.
 - Step 4.6: no SPEC/PLAN conflicts. Reused `/reports/grants` and `/reports/blocked`; no new
   API prefix, backend, scheduler or test-script changes. Grants API is current-only, explicitly labeled
   independent of selected period; blocked caps are also labeled current. PMO gets a distinct

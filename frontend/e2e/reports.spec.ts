@@ -2,6 +2,75 @@ import { apiAs, expect, fakeSpend, loginAs, resetData, test } from './fixtures';
 
 test.beforeEach(() => resetData());
 
+test('Admin sees global and per-employee concurrency peaks from SpendLogs overlaps', async ({
+  page,
+}) => {
+  await loginAs(page, 'admin@corp.example');
+  const me = await (await page.request.get('/me')).json();
+  const period = me.current_period as string;
+  const admin = await apiAs('admin@corp.example');
+  const summary = await (await admin.get(`/departments/${me.department.id}/summary`)).json();
+  const group = summary.groups.find((g: { name: string }) => g.name === 'Group A1').id;
+  for (const [upn, max_parallel] of [
+    ['dani@corp.example', 3],
+    ['dana@corp.example', 4],
+  ] as const) {
+    expect(
+      (await admin.put(`/groups/${group}/members/${upn}/limits`, { max_parallel })).ok(),
+    ).toBeTruthy();
+  }
+  await admin.dispose();
+  await fakeSpend(
+    [
+      ['dani', '01T10:00:00', '01T11:00:00'],
+      ['dani', '01T10:15:00', '01T10:45:00'],
+      ['dana', '01T10:30:00', '01T11:00:00'],
+      // More requests do not raise the overlap peak: these run consecutively.
+      ['dani', '02T10:00:00', '02T10:30:00'],
+      ['dani', '02T10:30:00', '02T11:00:00'],
+    ].map(([user, start, end]) => ({
+      team_id: 'A1',
+      user_id: `${user}@corp.example`,
+      model: 'peaks-model',
+      amount: 0,
+      start: `${period}-${start}Z`,
+      end: `${period}-${end}Z`,
+    })),
+  );
+  await page.goto('/platform');
+  await page.getByRole('link', { name: 'דוחות', exact: true }).click();
+  await page.getByRole('tab', { name: 'שיאי מקביליות', exact: true }).click();
+  await expect(page).toHaveURL(/\/report\/global\/all\/concurrency$/);
+  const chart = page.getByTestId('concurrency-chart');
+  await expect(chart.locator('.recharts-line-curve')).toHaveCount(1);
+  await expect(chart.locator('.recharts-label-list').getByText('3', { exact: true })).toBeVisible();
+  await expect(chart.locator('.recharts-label-list').getByText('1', { exact: true })).toBeVisible();
+  const members = page.getByTestId('concurrency-members');
+  await expect(members.locator('tbody tr')).toHaveCount(2);
+  const dani = members.locator('tbody tr').nth(0);
+  await expect(dani).toContainText('dani@corp.example');
+  await expect(dani.locator('td').nth(1)).toHaveText('2');
+  await expect(dani.locator('td').nth(2)).toHaveText('3');
+  await expect(dani.locator('td').nth(3)).toHaveText(`${period}-01T10:15:00Z`);
+  const dana = members.locator('tbody tr').nth(1);
+  await expect(dana).toContainText('dana@corp.example');
+  await expect(dana.locator('td').nth(1)).toHaveText('1');
+  await expect(dana.locator('td').nth(2)).toHaveText('4');
+  const [year, month] = period.split('-').map(Number);
+  const previous = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
+  await page.getByTestId('period-selector').selectOption(previous);
+  await expect(chart.getByTestId('empty-state')).toBeVisible();
+  await expect(members.getByTestId('empty-state')).toBeVisible();
+  await loginAs(page, 'viewer@corp.example');
+  await page.goto(`/report/department/${me.department.id}/concurrency`);
+  await expect(chart.locator('.recharts-line-curve')).toHaveCount(1);
+  await expect(chart.locator('.recharts-label-list').getByText('3', { exact: true })).toBeVisible();
+  await expect(members).toHaveCount(0);
+  await loginAs(page, 'pmo@corp.example');
+  await page.goto(`/report/pmo/${me.department.id}/grants`);
+  await expect(page.getByRole('tab', { name: 'שיאי מקביליות', exact: true })).toHaveCount(0);
+});
+
 test("Rep opens the department allocation report with group and model rows, and a past period shows that period's values", async ({
   page,
 }) => {

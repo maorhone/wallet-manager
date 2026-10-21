@@ -97,7 +97,14 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   The Blocked tab shows own/group/department/global daily base/model exhaustion where member visibility permits;
   viewers and PMO do not receive member tabs. Rows show date, employee, cap kind/model, current cap,
   month-to-date spend and daily spend, using the selected month's snapshot range. Caps are labeled current.
-  Loading, retry/error and empty states reuse shared components. Concurrency UI remains Step 4.7.
+  Loading, retry/error and empty states reuse shared components.
+- Concurrency peaks UI - Done (Step 4.7); Phase 4 reports and alerts complete.
+  The Concurrency peaks tab plots daily peaks for the selected own/group/department/global scope and calendar month,
+  using live SpendLogs overlaps rather than request counts or summed employee peaks.
+  Authorized member scopes show the top 100 employees with observed peak, current personal `max_parallel`
+  (a dash when unset) and peak timestamp in UTC. Viewers see aggregate peaks only; PMO remains grants-only.
+  The period selector reloads the live report for that month (at most 31 local dates); shared loading,
+  error/retry and empty states apply. These measurements support D6 pilot decisions without changing policy.
 - Usage charts at every level - Done (Step 4.5).
   The Usage report tab shows snapshot spend stacked by model for own-wallet, group, department and global scopes,
   with day/week/month buckets, cumulative spend and a cap line. Heads, representatives and admins can switch
@@ -105,7 +112,7 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   Group and department overviews include daily model charts; My Wallet keeps its daily chart.
   The selected period controls the date range; the report labels the API's cap as current and shows snapshot freshness.
   Loading, empty, error and retry states reuse the shared chart. PMO remains limited to grants.
-  Grants/blocked tabs and concurrency peaks UI remain planned (Steps 4.6–4.7).
+  All Phase 4 report tabs are available (Steps 4.4–4.7).
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 

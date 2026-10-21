@@ -10,6 +10,7 @@ import Overallocation from './Overallocation';
 import Usage from './Usage';
 import Grants from './Grants';
 import Blocked from './Blocked';
+import Concurrency from './Concurrency';
 
 /** Scoped report tabs; PMO reports contain department grants only. */
 export default function ReportsPage() {
@@ -43,6 +44,7 @@ export default function ReportsPage() {
       : [
           'allocation',
           'usage',
+          'concurrency',
           ...(kind === 'department' || kind === 'global'
             ? (['grants', 'overallocation'] as const)
             : []),
@@ -93,6 +95,14 @@ export default function ReportsPage() {
         />
       )}
       {tab === 'grants' && <Grants department={kind === 'global' ? undefined : id} />}
+      {tab === 'concurrency' && (
+        <Concurrency
+          scope={kind === 'me' ? 'employee' : (kind as 'group' | 'department' | 'global')}
+          id={kind === 'me' ? me.upn : id}
+          period={period}
+          canViewMembers={Boolean(canViewMembers)}
+        />
+      )}
       {tab === 'blocked' && (
         <Blocked
           scope={kind === 'me' ? 'employee' : (kind as 'group' | 'department' | 'global')}

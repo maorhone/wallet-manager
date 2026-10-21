@@ -417,6 +417,17 @@ export interface UsageReport {
   taken_at: string | null;
 }
 
+export interface ConcurrencyPeaks {
+  daily: { day: string; peak: number; at: string }[];
+  members: {
+    upn: string;
+    display_name: string | null;
+    peak: number;
+    at: string;
+    max_parallel: number | null;
+  }[];
+}
+
 export interface GrantTotals {
   departments: number;
   groups: number;
