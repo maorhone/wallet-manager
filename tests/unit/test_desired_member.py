@@ -29,14 +29,14 @@ async def test_temp_increase_sum_and_earliest_expiry(seeded, settings):
         g1, g2, g3 = await _grant(s), await _grant(s), await _grant(s)
         s.add_all([_share(g1, 100, 20), _share(g2, 50, 5), _share(g3, 70, 1, "closed")])
         await s.commit()
-        req = await build(s, settings, "/team/member_update", DANI)
+        req = await build(s, settings, "employee", "/team/member_update", DANI)
     assert req.temp_budget_increase == 150
     assert req.temp_budget_expiry == NOW + timedelta(days=5)
 
 
 async def test_no_shares_sends_zero_and_null_together(seeded, settings):
     async with seeded() as s:
-        req = await build(s, settings, "/team/member_update", DANI)
+        req = await build(s, settings, "employee", "/team/member_update", DANI)
     payload = req.payload()
     assert payload["temp_budget_increase"] == 0 and payload["temp_budget_expiry"] is None
 
@@ -47,6 +47,6 @@ async def test_model_share_raises_member_model_cap(seeded, settings):
         plain = await _grant(s)
         s.add_all([_share(g, 100, 20), _share(plain, 30, 20)])
         await s.commit()
-        req = await build(s, settings, "/team/member_update", DANI)
+        req = await build(s, settings, "employee", "/team/member_update", DANI)
     assert req.model_max_budget["gpt-4o"].budget_limit == float(Decimal(100))
     assert req.temp_budget_increase == 130

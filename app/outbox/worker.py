@@ -126,7 +126,7 @@ async def drain(
                         raise DesiredUnavailable(f"{row.endpoint} has no stored payload")
                     body = _FROZEN[row.endpoint](**row.payload)
                 else:
-                    body = await build(s, settings, row.endpoint, row.entity_id)
+                    body = await build(s, settings, row.entity, row.endpoint, row.entity_id)
                     row.payload = body.payload()
                 await _apply(client, s, row, body)
                 row.status, row.last_error = "applied", None

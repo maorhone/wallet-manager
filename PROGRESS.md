@@ -1,11 +1,27 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Next = Step 3.2.
-Latest `./scripts/test.sh` (Step 3.1): green; pytest 477 passed (6 skipped real-target cases), vitest 43, Playwright 34; ruff, frontend lint/typecheck and formatting pass. Pytest ~2m56s, Playwright ~2.3 min, full run ~3 minutes. No scripts, E2E ports or env handling changed.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Next = Step 3.4.
+Latest `./scripts/test.sh` (Step 3.3): green; pytest 536 passed (6 skipped real-target cases), vitest 43, Playwright 34; ruff, frontend lint/typecheck and formatting pass. Pytest ~3m18s, full run ~3.3 minutes. No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.3: migration `0006_production_service_keys` (`department.prod_litellm_org_id|prod_budget|prod_budget_period`,
+  table `production_system`, and the Step 3.4 `service_key` columns/checks PLAN bundles into the same migration),
+  `LockKind.PRODUCTION`, `app/services/production.py` (`set_production_org`, `create_production_system`, `get_production`),
+  `app/schemas/production.py`, `app/routers/production.py` (`PUT /production/departments/{id}`,
+  `POST .../systems`, `GET /production/departments/{id}`; registered in `app/main.py`), `can_view_production`
+  (admin or the department's rep; others 403). `app/outbox/desired.py: build()` now takes the outbox row's `entity`
+  (not just its endpoint) so `/organization/new|update` and `/team/new` can tell a department/group from a
+  production org/system apart, since both share the same entity_id namespace and LiteLLM endpoints (`desired_fields`,
+  `enqueue`, `worker.drain` updated to pass it through; production is never reconciled, so `desired_fields` always
+  resolves the department/group builder). `app/services/spend.py: take_snapshot` adds `scope_kind="system"` rows from
+  production teams' spend. `app/services/views.py: department_summary` gained `actions.view_production|edit_production`.
+  No frontend changes (`production`/`service-keys` were already in the vite proxy regex from Step 10; the UI tab is
+  Step 3.6). Tests: `tests/api/test_production.py` (7), `tests/api/test_production_concurrency.py` (1),
+  `tests/test_spend_snapshot.py::test_system_spend_snapshotted` (+1), `tests/test_schema.py` (updated for the new
+  table/columns). `./scripts/test.sh`: pytest 536 passed, 6 skipped; vitest 43; Playwright 34. See Notes for the
+  SPEC §8.2 gap (owner question 28) and the `build()` signature change.
 - Step 3.2 review fixes (Codex fallback): fixed policy shape/type validation, NULL-safe global binding deletion, and serialized creation with DB DN/staff uniqueness; all three findings confirmed; regressions reproduced before fixes; pytest 527 passed/6 skipped, vitest 43 and Playwright 34 passed, lint/format/typecheck green (full script stopped at read-only browser cache; installer passed separately with writable temp cache); next: Step 3.3; blockers: none.
 - Step 2.10: UI `NotificationsBell` (header; unread count, drawer, mark read, scope link) and `NotificationPrefs` (on My wallet;
   critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
@@ -177,12 +193,35 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.2: Platform backend (`PUT /policies`, Redis status, department and group creation, role bindings).
+- Step 3.4: Service keys: create (secret shown once), rotate, revoke, list.
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 3.3: migration filename is `0006` (PLAN says `0005`, written before Step 3.2 took that number for the
+  platform-creation-uniqueness migration); content matches PLAN's "Migration 0005 (it also covers Step 3.4)" bullet
+  verbatim, just renumbered. The migration also adds the Step 3.4 `service_key` columns/checks now (schema only; no
+  create/rotate/revoke code yet), as PLAN's Step 3.3 text bundles them into one migration.
+- Step 3.3: SPEC §8.2 lists no `production_system` table or `department.prod_*` columns (FR-K1/K2 need somewhere to
+  persist them; the spec is silent, not in conflict with PLAN). Added as owner question 28; `tests/test_schema.py`'s
+  SPEC fidelity dict now includes them with a comment pointing at that question, and the table count assertion is 17.
+- Step 3.3: `app/outbox/desired.py: build()` grew an `entity` parameter before `endpoint`. Department org/group-team
+  writes and production org/system writes share the literal LiteLLM endpoints (`/organization/new|update`,
+  `/team/new`) and, since `production_org`'s entity_id is the department id and `production_system`'s own id can
+  collide numerically with an unrelated `Grp` id, the old endpoint-only dispatch could build the wrong object (or
+  fail with `DesiredUnavailable` from the wrong table). `enqueue()` and `worker.drain()` now pass the outbox row's
+  own `entity` column through; `desired_fields()` (reconciliation) passes a fixed `"department"`/`"group"`, since
+  production is never reconciled. Updated the two existing tests (`test_desired_member.py`, `test_reconcile_job.py`)
+  that called `build()` directly.
+- Step 3.3: PLAN's Files list has `GET /production/departments/{id}` and `PUT /production/departments/{id}`, but
+  SPEC §11.1's endpoint block literally lists only `POST /production/departments/{id}/systems`; §12.5.4 tab 6 and
+  §12.5.5 both need a way to set and read the production budget, so SPEC is silent rather than conflicting. Built
+  both as PLAN describes. `GET` takes no `period` (neither PLAN nor SPEC mention one for it); it always reads the
+  current period from `app.state.clock`.
+- Step 3.3: `can_view_production` returns 404 for an unknown department (via the shared `_dept_roles` helper) and 403
+  for every role except admin and the department's rep, including a department viewer/PMO who can see the
+  department's other screens -- the §12.2 ייצור row is blank for them, unlike other department screens.
 - Step 3.1: PLAN says only `owners.holders` catches `DirectoryUnavailable`; `owner_of`'s earlier `target_tier` call is left
   to raise. This is deliberate: `target_tier` decides whose values are being shown (member vs. group head vs. rep), and a
   write path needs that to fail closed (503) rather than guess, so a group head's action is never silently authorized
@@ -396,6 +435,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 20. **Public repository (D25, NFR10).** Placeholders only; hygiene test scans tracked files. Before publishing, scan the full git history and provide internal names via a gitignored `.public-denylist`.
 21. **F5/F6 wording.** F6 (a manager's own cap, DR9) is unrelated to sync and is kept; F5 and F7 are replaced, F8–F10 added.
 22–27. **Phase 2 questions (PLAN.md §5):** the owner (Maor) approved the default answers on 20/10/2026.
+28. **Production schema not in SPEC §8.2 (Step 3.3).** SPEC.md's data model section lists no `production_system` table or `department.prod_*` columns, though FR-K1/FR-K2 need somewhere to persist them; it is silent rather than conflicting with PLAN's Step 3.3 schema. Picked the safest option: followed PLAN's migration verbatim (one department column set, a new `production_system` table, and the `service_key` columns/checks PLAN bundles into the same migration for Step 3.4) and extended `tests/test_schema.py`'s SPEC fidelity check to note the gap.
 
 - Step 1b.1: SPEC §8.2 v0.3 has 16 tables (PLAN counts differently); followed the spec. A 404 on `/jwt/key/mapping/update` or `/delete` in the fake means no such mapping.
   `/_test/fail` keys on the request path and is cleared by `/_test/reset`. The fake's `LiteLLM_JWTKeyMapping.is_active` column is added by `create_all` only on a fresh fake

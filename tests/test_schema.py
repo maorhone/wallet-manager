@@ -1,9 +1,11 @@
 from sqlalchemy import text
 
-# Literal transcription of SPEC.md §8.2 v0.3 (table -> column set).
+# Literal transcription of SPEC.md §8.2 v0.3 (table -> column set), plus the Step 3.3/3.4
+# production and service-key schema that §8.2 never lists (FR-K1/K2 need it; see PROGRESS.md
+# "Questions for owner" #28 -- the spec is silent here, not in conflict with PLAN's schema).
 SPEC_8_2 = {
     "department": "id litellm_org_id name ad_group_dn budget budget_period pmo_pool reserve "
-    "created_at updated_at",
+    "created_at updated_at prod_litellm_org_id prod_budget prod_budget_period",
     "department_model_allowance": "department_id model amount",
     "grp": "id litellm_team_id department_id name ad_group_dn kind base_budget "
     "default_member_cap overalloc_factor tpm_limit model_tpm_limits status",
@@ -15,8 +17,9 @@ SPEC_8_2 = {
     "grant": "id department_id group_id amount model project_ref purpose starts_at expires_at "
     "status created_by closed_at used returned",
     "grant_share": "id grant_id upn amount expires_at status used returned closed_reason",
+    "production_system": "id department_id litellm_team_id name budget status created_at",
     "service_key": "id owner_kind owner_id litellm_token_hash alias max_budget max_parallel "
-    "rpm_limit models status",
+    "rpm_limit models status created_at created_by",
     "policy": "key value",
     "role_binding": "ad_group_dn role scope_kind scope_id",
     "litellm_write": "id entity entity_id endpoint payload status attempts last_error "
@@ -42,4 +45,4 @@ async def test_tables_match_spec_8_2(engine):
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
     assert actual == {t: set(c.split()) for t, c in SPEC_8_2.items()}
-    assert len(SPEC_8_2) == 16  # SPEC §8.2 v0.3: sync_run and sync_action are gone
+    assert len(SPEC_8_2) == 17  # SPEC §8.2 v0.3's 16, plus production_system (see note above)

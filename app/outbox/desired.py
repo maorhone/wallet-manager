@@ -1,7 +1,8 @@
 """Desired-state builders (SPEC §8.1), evaluated at apply time so retries send the latest values.
 
-``build(session, settings, endpoint, entity_id)`` returns the typed LiteLLM request for the
-outbox row's endpoint. ``DesiredUnavailable`` means the state it needs does not exist (yet).
+``build(session, settings, entity, endpoint, entity_id)`` returns the typed LiteLLM request for
+the outbox row's entity and endpoint. ``DesiredUnavailable`` means the state it needs does not
+exist (yet).
 """
 
 from decimal import Decimal
@@ -36,6 +37,7 @@ from app.models import (
     GroupModelPot,
     Grp,
     Policy,
+    ProductionSystem,
 )
 from app.services.spend import month_bounds
 
@@ -52,7 +54,10 @@ async def desired_fields(session, settings, object: str, id: str) -> dict:
         "key": "/key/update",
         "jwt_mapping": "/jwt/key/mapping/update",
     }[object]
-    fields = (await build(session, settings, endpoint, id)).model_dump(mode="json")
+    # production is not reconciled (FR-RC covers only §8.1), so "department"/"group" always
+    # resolve the ambiguous organization/team builders here
+    entity = {"organization": "department", "team": "group"}.get(object, "employee")
+    fields = (await build(session, settings, entity, endpoint, id)).model_dump(mode="json")
     excluded = (
         {"organization_id", "organization_alias"}
         if object == "organization"
@@ -112,6 +117,27 @@ async def _org_fields(session: AsyncSession, entity_id: str) -> dict:
     return {
         "organization_id": d.litellm_org_id, "organization_alias": d.name,
         "max_budget": float(d.budget), "budget_duration": d.budget_period,
+    }  # fmt: skip
+
+
+async def _prod_org_fields(session: AsyncSession, entity_id: str) -> dict:
+    """FR-K1, DR4: a separate Organization per department (entity_id = department id)."""
+    d = await _get(session, Department, entity_id)
+    if d.prod_litellm_org_id is None:
+        raise DesiredUnavailable(f"Department {entity_id} has no production organization")
+    return {
+        "organization_id": d.prod_litellm_org_id, "organization_alias": f"{d.name} production",
+        "max_budget": float(d.prod_budget or 0), "budget_duration": d.prod_budget_period,
+    }  # fmt: skip
+
+
+async def _prod_system_fields(session: AsyncSession, entity_id: str) -> dict:
+    """FR-K2: a Team under the production org, never the department's own org."""
+    sys = await _get(session, ProductionSystem, entity_id)
+    d = await session.get(Department, sys.department_id)
+    return {
+        "team_id": sys.litellm_team_id, "organization_id": d.prod_litellm_org_id,
+        "max_budget": float(sys.budget), "budget_duration": d.prod_budget_period,
     }  # fmt: skip
 
 
@@ -176,14 +202,34 @@ async def _key_limits(session: AsyncSession, e: Employee) -> dict:
     }
 
 
-async def build(session: AsyncSession, settings: Settings, endpoint: str, entity_id: str):
+async def build(
+    session: AsyncSession, settings: Settings, entity: str, endpoint: str, entity_id: str
+):
+    # "department" and "production_org" share /organization/*; "group" and "production_system"
+    # share /team/new; both pairs reuse the same entity_id namespace (department/system id), so
+    # the entity tells them apart (production is never reconciled, FR-RC covers §8.1 only).
     match endpoint:
         case "/organization/new":
-            return OrganizationNew(**await _org_fields(session, entity_id))
+            fields = await (
+                _prod_org_fields(session, entity_id)
+                if entity == "production_org"
+                else _org_fields(session, entity_id)
+            )
+            return OrganizationNew(**fields)
         case "/organization/update":
-            return OrganizationUpdate(**await _org_fields(session, entity_id))
+            fields = await (
+                _prod_org_fields(session, entity_id)
+                if entity == "production_org"
+                else _org_fields(session, entity_id)
+            )
+            return OrganizationUpdate(**fields)
         case "/team/new":
-            return TeamNew(**await _team_fields(session, entity_id, settings.app_timezone))
+            fields = await (
+                _prod_system_fields(session, entity_id)
+                if entity == "production_system"
+                else _team_fields(session, entity_id, settings.app_timezone)
+            )
+            return TeamNew(**fields)
         case "/team/update":
             return TeamUpdate(**await _team_fields(session, entity_id, settings.app_timezone))
         case "/user/new":

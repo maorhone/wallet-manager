@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Employee, Grp, SpendSnapshot
+from app.models import Employee, Grp, ProductionSystem, SpendSnapshot
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
     current = now.strftime("%Y-%m")
     async with sf() as db:
         groups = {g.litellm_team_id: g for g in await db.scalars(select(Grp))}
+        systems = {s.litellm_team_id: s for s in await db.scalars(select(ProductionSystem))}
         member_group = dict((await db.execute(select(Employee.upn, Employee.group_id))).all())
         have_previous = await db.scalar(
             select(SpendSnapshot.period).where(SpendSnapshot.period == previous_period(current))
@@ -49,11 +50,13 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
         totals: dict[tuple, Decimal] = defaultdict(Decimal)
         for r in rows:
             group = groups.get(r.team_id)
-            if group is None:
-                continue
-            scopes = [("group", str(group.id)), ("department", str(group.department_id))]
-            if r.user and member_group.get(r.user) == group.id:  # membership spend only
-                scopes.append(("employee", r.user))
+            if group is not None:
+                scopes = [("group", str(group.id)), ("department", str(group.department_id))]
+                if r.user and member_group.get(r.user) == group.id:  # membership spend only
+                    scopes.append(("employee", r.user))
+            else:
+                system = systems.get(r.team_id)
+                scopes = [("system", str(system.id))] if system is not None else []
             for kind, scope_id in scopes:
                 day = r.day.isoformat()
                 # day rows stay inside the calendar month so periods never share a key

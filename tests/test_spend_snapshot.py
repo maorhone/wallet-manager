@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.litellm_client import LiteLLMReader
-from app.models import SpendSnapshot
+from app.models import ProductionSystem, SpendSnapshot
 from app.services.spend import take_snapshot
 
 NOW = datetime(2026, 6, 15, 12, tzinfo=ZoneInfo("Asia/Jerusalem"))
@@ -84,3 +84,17 @@ async def test_ro_db_down_keeps_last_snapshot(spend, ro_engine):
 
     await take_snapshot(spend, Down(), NOW)
     assert await _snap(spend) == before
+
+
+async def test_system_spend_snapshotted(seeded, fake_app, fake_engine, ro_engine):
+    async with seeded() as s:
+        s.add(
+            ProductionSystem(department_id=1, name="Sys A", litellm_team_id="sys-1", budget=10000)
+        )
+        await s.commit()
+    await _log(fake_engine, 20, "sys-1", None, "gpt-4", 12, datetime(2026, 6, 3, 9, tzinfo=UTC))
+    await take_snapshot(seeded, LiteLLMReader(ro_engine), NOW)
+    snap = await _snap(seeded)
+    assert snap[("system", "1", "2026-06", None)] == 12
+    assert snap[("system", "1", "2026-06", "gpt-4")] == 12
+    assert ("group", "1", "2026-06", None) not in snap  # a system is not a department group

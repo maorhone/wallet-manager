@@ -52,6 +52,10 @@ class Department(Base):
     reserve: Mapped[Decimal] = mapped_column(ALLOC, server_default="0")
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _created()
+    # §4, DR4, FR-K1: the production org is separate from the department's own org
+    prod_litellm_org_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    prod_budget: Mapped[Decimal | None] = mapped_column(ALLOC)
+    prod_budget_period: Mapped[str] = mapped_column(Text, server_default="1mo")
 
 
 class DepartmentModelAllowance(Base):
@@ -176,8 +180,36 @@ class GrantShare(Base):
     closed_reason: Mapped[str | None] = mapped_column(Text)
 
 
+class ProductionSystem(Base):
+    __tablename__ = "production_system"
+    __table_args__ = (
+        CheckConstraint(_in("status", "active", "archived"), name="ck_production_system_status"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, **ID)
+    department_id: Mapped[int] = mapped_column(ForeignKey("department.id"))
+    # set right after insert, once the row's own id is known (f"sys-{id}")
+    litellm_team_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    name: Mapped[str] = mapped_column(Text)
+    budget: Mapped[Decimal] = mapped_column(ALLOC, server_default="0")
+    status: Mapped[str] = mapped_column(Text, server_default="active")
+    created_at: Mapped[datetime] = _created()
+
+
 class ServiceKey(Base):
     __tablename__ = "service_key"
+    __table_args__ = (
+        CheckConstraint(_in("owner_kind", "group", "system"), name="ck_service_key_owner_kind"),
+        CheckConstraint(
+            _in("status", "pending", "active", "failed", "revoked"), name="ck_service_key_status"
+        ),
+        Index(
+            "uq_service_key_token_hash",
+            "litellm_token_hash",
+            unique=True,
+            postgresql_where=text("litellm_token_hash IS NOT NULL"),
+        ),
+        Index("ix_service_key_owner", "owner_kind", "owner_id"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, **ID)
     owner_kind: Mapped[str] = mapped_column(Text)
     owner_id: Mapped[int] = mapped_column(BigInteger)
@@ -188,6 +220,8 @@ class ServiceKey(Base):
     rpm_limit: Mapped[int | None] = mapped_column(Integer)
     models: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     status: Mapped[str] = mapped_column(Text, server_default="active")
+    created_at: Mapped[datetime] = _created()
+    created_by: Mapped[str | None] = mapped_column(Text)
 
 
 class Policy(Base):

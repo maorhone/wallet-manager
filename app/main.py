@@ -27,6 +27,7 @@ from app.routers import (
     placements,
     platform,
     policies,
+    production,
     reports,
     role_bindings,
 )
@@ -114,6 +115,7 @@ def create_app(
     app.include_router(policies.router)
     app.include_router(reports.router)
     app.include_router(platform.router)
+    app.include_router(production.router)
     app.include_router(role_bindings.router)
     app.include_router(audit.router)
 

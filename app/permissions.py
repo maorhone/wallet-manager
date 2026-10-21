@@ -188,6 +188,15 @@ async def can_view_pending(session, p: Principal, department_id: int | None) -> 
     return await can_place(session, p, department_id)
 
 
+async def can_view_production(session, p: Principal, department_id: int) -> str:
+    """§12.2 ייצור row: admin edits, the department's rep views; everyone else is forbidden."""
+    roles = await _dept_roles(session, p, department_id)
+    for role in (ADMIN, REP):
+        if role in roles:
+            return role
+    raise _forbidden()
+
+
 def can_manage_platform(p: Principal) -> str:
     """§12.5.5: policies, department/group creation and role bindings are admin only."""
     if not p.is_admin:

@@ -42,6 +42,7 @@ class LockKind(enum.IntEnum):
     JOB = 5  # scheduler job locks (session-level, one replica per job)
     REQUEST = 6  # serialize replay lookup and the entire request transaction
     PLATFORM = 7  # creation registries: 0 = departments, 1 = groups
+    PRODUCTION = 8  # production org budget and its systems (id = department_id)
 
 
 def employee_lock_id(upn: str) -> int:

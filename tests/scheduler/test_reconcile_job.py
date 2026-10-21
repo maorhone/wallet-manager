@@ -18,7 +18,7 @@ async def run(provisioned, litellm, fake_clock, prov_settings):
         ):
             if e.group_id:
                 await litellm.team_member_update(
-                    await build(db, prov_settings, "/team/member_update", e.upn)
+                    await build(db, prov_settings, "employee", "/team/member_update", e.upn)
                 )
 
     async def call():

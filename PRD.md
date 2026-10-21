@@ -149,9 +149,17 @@ scope switcher, change-summary dialog, PMO page (pool and grants with the create
 `/pmo/<dept>/pool`; grant actions and Projects tab Done in Step 2.7). Group Grants tab with share dialogs Done in Step 2.8.
 Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10.
 
-### 4.9 Production and service keys (FR-K) - Later phase: Planned
+### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.3)
 
-Production organizations, service keys, rotate/revoke.
+A platform admin sets a department's production budget (DR4: a separate LiteLLM Organization from
+the department's own, so employee spending can never block production) and creates systems (Teams)
+under it with their own budget. Creating a system is rejected with the usual over-allocation error
+when its budget would push the department's systems past the production budget; lowering the
+production budget below the systems' total is accepted and shown as over-allocated. The department's
+representative and the admin can read the production organization, its systems, their spend and
+sync status (admin only edits); other roles have no access. Production is not reconciled (FR-RC
+only re-derives the §8.1 fields). Service keys (create with a one-time secret, rotate, revoke) are
+Planned for Step 3.4.
 
 ### 4.10 Directory (section 5.1, 9.1) - Phase 3: In progress (Step 3.1)
 

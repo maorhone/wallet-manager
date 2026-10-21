@@ -49,6 +49,8 @@ async def test_split_and_unallocated(login, seeded, snapshot):
         "edit_budget": False,
         "edit_allowances": False,
         "place": True,
+        "view_production": True,
+        "edit_production": False,
     }
     assert body["period"] and body["reset_date"] and body["read_only"] is False
 
@@ -64,6 +66,8 @@ async def test_over_allocated_state_and_admin_actions(login, seeded):
         "edit_budget": True,
         "edit_allowances": True,
         "place": True,
+        "view_production": True,
+        "edit_production": True,
     }
 
 

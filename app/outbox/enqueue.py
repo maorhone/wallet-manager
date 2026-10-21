@@ -18,7 +18,7 @@ async def enqueue(
     await session.flush()  # builders read the domain rows written earlier in this transaction
     if payload is None:
         try:
-            payload = (await build(session, settings, endpoint, entity_id)).payload()
+            payload = (await build(session, settings, entity, endpoint, entity_id)).payload()
         except DesiredUnavailable:
             payload = None  # e.g. the JWT mapping needs the key hash, which exists only after apply
     row = LitellmWrite(
