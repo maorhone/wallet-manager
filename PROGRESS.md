@@ -222,6 +222,21 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - Step 3.3: `can_view_production` returns 404 for an unknown department (via the shared `_dept_roles` helper) and 403
   for every role except admin and the department's rep, including a department viewer/PMO who can see the
   department's other screens -- the §12.2 ייצור row is blank for them, unlike other department screens.
+- Flaky (unrelated to Step 3.3): a `./scripts/test.sh` run hit the 60s pytest-timeout in fixture setup on
+  `tests/api/test_lifecycle_permissions.py::test_matrix[head_own_group-kick]` (45 passed, 1 error; full run 781s).
+  The file touches nothing changed by Step 3.3 (`app/services/lifecycle.py`, `tests/api/lifecycle.py` are untracked
+  in this commit's diff) and neither the test alone (51 passed, 2.4s) nor the exact file prefix that ran before it
+  in collection order (`test_audit`, `test_concurrency_locks`, `test_department_budget`, `test_department_summary`,
+  `test_grants`, `test_grants_concurrency`, `test_grants_read`, `test_group_limits`, `test_group_summary`, then
+  `test_lifecycle_permissions` itself, 88 passed, 46.85s) reproduce it. Same symptom already seen twice before
+  (`test_matrix[rep-delete]` once while FastAPI built a route; and the general "random test during fixture setup"
+  note above) on an unrelated step, so this looks like sandbox load rather than a Step 3.3 regression. Reran the
+  full `pytest -q -x` in the background during this session: it failed again, 175s in, but on a different and
+  unrelated test (`tests/api/test_grants_concurrency.py::test_a11_concurrent_grants_one_pool_insufficient`, the
+  same test PROGRESS already recorded hitting this exact flake once in Step 2.8), this time with the 60s timeout
+  firing inside plain synchronous `yaml.safe_load` of the seed file in `app/directory.py`'s `FixtureDirectory.__init__`
+  (pure CPU, no I/O or lock to deadlock on). Two different unrelated tests timing out in CPU-bound, non-async code
+  on two consecutive runs confirms this is sandbox CPU contention, not a Step 3.3 regression; did not chase further.
 - Step 3.1: PLAN says only `owners.holders` catches `DirectoryUnavailable`; `owner_of`'s earlier `target_tier` call is left
   to raise. This is deliberate: `target_tier` decides whose values are being shown (member vs. group head vs. rep), and a
   write path needs that to fail closed (503) rather than guess, so a group head's action is never silently authorized
