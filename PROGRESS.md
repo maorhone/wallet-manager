@@ -1,17 +1,29 @@
 # Progress — Wallet Manager
 
 ## Status
-Step 4.2 done: usage series, concurrency peaks and blocked spend backend. Next = Step 4.3 (not started).
-Latest `./scripts/test.sh` (Step 4.2 timeout investigation): green; pytest 502 passed / 5 skipped (190.46 s),
-vitest 43 passed, Playwright 34 passed (2.2 min); ruff, formatting, frontend lint/typecheck pass.
-25 new Step 4.2 tests. Original Step 4.2 E2E used overrides 4140–4142; timeout verification used default ports 4120–4122.
-E2E env handling and test scripts are unchanged. No new blockers or owner questions; no commit/push.
+Step 4.3 done: critical over-allocation alerts, daily concurrency-at-limit summary and report gauges.
+Next = Step 4.4 (not started).
+Latest `./scripts/test.sh` (Step 4.3): green; pytest 512 passed / 5 skipped (380.55 s),
+vitest 43 passed, Playwright 34 passed (2.4 min); ruff, formatting, frontend lint/typecheck pass.
+10 new Step 4.3 tests; required tests observed failing before implementation. No blockers; no commit/push.
+E2E env handling, default ports and test scripts are unchanged; this run uses overrides 4140–4142.
+One unrelated pytest timeout warning was recorded under Notes; the full script exited 0.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
 Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.3: `scheduled_check` sends critical `overallocation` notifications to admins and department representatives,
+  deduplicated by level/entity/model/local day, including live LiteLLM breaches and WM checks. Unknown scopes notify admins only.
+  Daily `run_report_alerts` uses yesterday's local-day overlaps through the existing reader, counts all members reaching
+  their configured key limit, and sends admins one non-critical `concurrency_at_limit` summary with the top 100.
+  Both report gauges update in the job; blocked employees are distinct across exhausted base/model caps using FR-R5 snapshots.
+  Startup/daily scheduling uses the injected clock and a separate job advisory lock; worker checks share breach dedupe keys.
+  Existing notification UI gains Hebrew labels and preferences; critical mute returns 422. No migration or new API prefix.
+  Tests cover the required four cases plus timezone/midnight clipping, worker/scheduler dedupe, next day, muted/below-limit,
+  empty-day gauge reset, separate model keys, unknown scope, full count before top-100 truncation and left/unknown exclusion.
+  PRD updated; Step 4.4 untouched.
 - Step 4.2: `GET /reports/usage` (snapshot day/week/month series by model/member, current cap, snapshot time),
   `/reports/concurrency-peaks` (live half-open interval overlaps, daily totals and top 100 visible employees),
   `/reports/blocked` (daily base/model exhaustion, current cap and month-to-date/day spend).
@@ -184,6 +196,15 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 4.3: no SPEC/PLAN conflicts. Breach dedupe dates and yesterday's alert window use APP_TIMEZONE;
+  peak timestamps stay UTC. Concurrency limits use the configured employee key limit, as in Step 4.2 reports.
+  `wm_blocked_employees` defaults to yesterday's distinct FR-R5 employees (see owner question); zero-activity runs reset gauges.
+  Gauges remain process-local, matching existing scheduler/worker metrics; no new metrics server or persistence added.
+  Notification inserts reuse the existing transaction/dedupe/mute conventions; there are no allocation/outbox writes.
+- Step 4.3 verification: pytest completed with 512 passed / 5 skipped, but emitted an intermittent
+  `PytestUnraisableExceptionWarning` for `tests/api/test_reports_allocation.py::test_viewer_group_level_403_department_ok`:
+  the 60 s pytest-timeout signal arrived inside Python's `weakref.WeakKeyDictionary.remove` callback and was ignored there.
+  The test passed; no assertions, timeout settings or existing test behavior changed. Recorded and continued as requested.
 - Step 4.2 failure investigation: `e2e/pending.spec.ts:38`, "U12 rep places a pending user of the department",
   timed out after 30 s while setting up Playwright's `context` fixture, before page setup or application actions.
   The saved error context contains only that fixture timeout. Step 4.2 leaves browser context setup unchanged;
@@ -391,6 +412,9 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   department pending list (no role on the department), so the tab is absent.
 
 ## Questions for owner
+- Step 4.3 metric window (non-blocking): PLAN names `wm_blocked_employees` without a time window.
+  Defaulted to yesterday's distinct employees at a base/model cap, matching the concurrency gauge's day and reusing FR-R5.
+  Confirm if a current-day/current-month snapshot count is preferred. Implementation continues with this safe default.
 **Owner approved all 21 defaults below on 20/10/2026, including 10 (keep placeholder concurrency/rpm until pilot), 11 (client id claim order appid, client_id, azp) and 12 (no static key, ADFS JWT mapped by upn).**
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).
 2. **Default model caps for new members (FR-G2).** §8.2 has no column, so they are stored in `policy` key `member_defaults.group.<id>`.

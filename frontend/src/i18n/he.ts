@@ -45,6 +45,8 @@ export const he = {
       grant_received: 'התקבל מענק',
       drift_repeated: 'סטייה חוזרת מ-LiteLLM',
       reconcile_missing: 'אובייקט חסר ב-LiteLLM',
+      overallocation: 'חריגה מהקצאת התקציב',
+      concurrency_at_limit: 'מקביליות הגיעה למגבלת המפתח',
     } as Record<string, string>,
   },
   wallet: {

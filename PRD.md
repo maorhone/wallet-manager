@@ -73,6 +73,13 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   calendar-month spend and that day's spend, including zero-spend days after exhaustion. Per FR-R5, base exhaustion uses
   the base cap even when a share increases the wallet total. Member visibility applies; PMO is limited to grant reports.
   The fake supports explicit request intervals and key hashes in `/_test/spend` and atomic `/_test/spend/bulk` setup.
+- Report alerts - Done (Step 4.3). Every over-allocation finding sends a critical notification to platform admins
+  and the affected department's representatives, once per finding/model/local day, including live LiteLLM breaches.
+  Unknown departments notify admins only. The daily scheduler examines yesterday's SpendLogs overlaps in APP_TIMEZONE;
+  when employees reach their configured key concurrency limit, admins receive one summary with the full count and
+  the top 100 affected members (peak, UTC timestamp, limit). This pilot input for D6 can be muted.
+  The same job updates `wm_concurrency_peak{scope="global"}` and `wm_blocked_employees` for yesterday; the latter counts
+  distinct employees at a base or model cap using snapshots and FR-R5. Report UI remains planned (Step 4.4 onward).
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 
@@ -133,6 +140,8 @@ Separate process (`python -m app.scheduler`) with an injectable clock; one repli
 restart catches up on everything overdue. Grants job (every 60 s): activation, share and grant expiry, then one recompute of the
 member's temporary budget (earliest remaining expiry) per affected person. Metrics: `wm_scheduler_job_runs_total`,
 `wm_scheduler_job_last_success_timestamp`. Notifications and reconciliation jobs run alongside grants.
+The report-alert job runs at startup and every 86400 seconds (configurable with `SCHEDULER_REPORT_ALERTS_INTERVAL_S`),
+under its own advisory lock; reruns share the notification dedupe keys with the worker's over-allocation checks.
 
 ### 4.6 Reconciliation (FR-RC) - Phase 2: Done (Step 2.5)
 
@@ -160,6 +169,8 @@ Optional email copy (`NOTIFY_EMAIL_ENABLED`, off by default, needs an internal r
 header shows the unread count and opens a drawer with the list (mark read, link to the scope: a grant opens the group's Grants
 tab; employee 80%/100% alerts open My wallet; a pending placement opens the department's Pending tab, or the Platform page when the department is unknown; unread alerts older than the newest 100 stay reachable); "My wallet" has a preferences card with a checkbox per kind, critical kinds shown checked and disabled.
 The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
+Step 4.3 adds Hebrew labels and preferences for critical `overallocation` (cannot mute, 422) and non-critical
+`concurrency_at_limit` notifications, reusing the bell and preference controls.
 
 ### 4.8 UI screens - Phase 1/1b: Done; Phase 2: Planned
 

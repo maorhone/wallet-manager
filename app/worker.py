@@ -55,7 +55,7 @@ async def overallocation_loop(settings: Settings) -> None:
     reader = LiteLLMReader(ro_engine)
     try:
         while True:
-            await scheduled_check(sf, reader)
+            await scheduled_check(sf, reader, settings=settings)
             await asyncio.sleep(settings.overalloc_interval_s)
     finally:
         await ro_engine.dispose()
