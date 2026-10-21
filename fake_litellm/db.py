@@ -99,6 +99,7 @@ token = Table(
     Column("model_max_budget", JSONB),
     Column("blocked", Boolean, default=False),
     Column("organization_id", Text),
+    Column("models", ARRAY(Text)),  # service-account keys only (FR-K2/K3); null for personal keys
 )
 jwt_mapping = Table(
     "LiteLLM_JWTKeyMapping",

@@ -154,6 +154,16 @@ class KeyUpdate(_Req):
         return body
 
 
+class ServiceAccountKeyGenerate(_Req):
+    # user_id is omitted: service keys have no user (FR-K2/K3); no model_max_budget (R6, as above).
+    team_id: str
+    key_alias: str | None = None
+    max_budget: float | None = None
+    max_parallel_requests: int | None = None
+    rpm_limit: int | None = None
+    models: list[str] | None = None
+
+
 class KeyBlock(_Req):
     key: str
 

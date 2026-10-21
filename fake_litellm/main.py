@@ -399,6 +399,18 @@ def _key_router() -> APIRouter:
             )
         return m.KeyGenerateResponse(key=key, token=_hash(key))
 
+    @r.post("/key/service-account/generate")
+    async def key_service_account_generate(body: m.ServiceAccountKeyGenerate, request: Request):
+        key = "sk-" + secrets.token_urlsafe(24)
+        data = body.payload()
+        async with request.app.state.fake.engine.begin() as conn:
+            await conn.execute(
+                insert(token).values(
+                    token=_hash(key), user_id=None, spend=0, blocked=False, metadata={}, **data
+                )
+            )
+        return m.KeyGenerateResponse(key=key, token=_hash(key))
+
     @r.post("/key/update")
     async def key_update(body: m.KeyUpdate, request: Request):
         data = body.payload()

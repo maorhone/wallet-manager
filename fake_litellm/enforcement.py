@@ -105,6 +105,10 @@ def _cap(models: dict | None, model: str) -> float | None:
 
 async def _check_budgets(conn: AsyncConnection, key: dict, model: str, now: datetime) -> None:
     """Order: key, team member, team, organization, then model budgets (R1, R5, R6)."""
+    if key["models"] and model not in key["models"]:  # FR-K2/K3: the key's allowed-models list
+        raise _Reject(
+            _error(400, "model_not_allowed", f"Model {model} is not allowed for this key")
+        )
     if key["max_budget"] is not None and key["spend"] >= key["max_budget"]:
         raise _blocked("key", "key")
     team_id, user_id = key["team_id"], key["user_id"]

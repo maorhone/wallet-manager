@@ -42,11 +42,11 @@ ORDER BY t.team_id
 """
 
 _SPEND_ROWS = """
-SELECT team_id, "user", model_group,
+SELECT team_id, "user", api_key, model_group,
        ("startTime" AT TIME ZONE 'UTC')::date AS day, SUM(spend) AS spend
 FROM "LiteLLM_SpendLogs"
 WHERE "startTime" >= :start AND "startTime" < :end
-GROUP BY team_id, "user", model_group, day
+GROUP BY team_id, "user", api_key, model_group, day
 ORDER BY day, team_id, "user", model_group
 """
 
@@ -70,6 +70,7 @@ class OverallocatedTeam:
 class SpendRow(NamedTuple):
     team_id: str | None
     user: str | None
+    api_key: str | None
     model_group: str | None
     day: date
     spend: Decimal
@@ -96,9 +97,9 @@ class LiteLLMReader:
         ]
 
     async def spend_rows(self, start: datetime, end: datetime) -> list[SpendRow]:
-        """Daily spend per (team, user, model group) for ``start <= startTime < end``."""
+        """Daily spend per (team, user, key, model group) for ``start <= startTime < end``."""
         return [
-            SpendRow(r[0], r[1], r[2], r[3], _dec(r[4]))
+            SpendRow(r[0], r[1], r[2], r[3], r[4], _dec(r[5]))
             for r in await self._rows(_SPEND_ROWS, start=start, end=end)
         ]
 

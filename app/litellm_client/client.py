@@ -26,6 +26,7 @@ from .models import (
     OrganizationMemberAdd,
     OrganizationNew,
     OrganizationUpdate,
+    ServiceAccountKeyGenerate,
     TeamInfo,
     TeamMemberAdd,
     TeamMemberDelete,
@@ -143,6 +144,11 @@ class LiteLLMClient:
 
     async def key_generate(self, body: KeyGenerate) -> KeyGenerateResponse:
         return await self._call("POST", "/key/generate", KeyGenerateResponse, body)
+
+    async def key_service_account_generate(
+        self, body: ServiceAccountKeyGenerate
+    ) -> KeyGenerateResponse:
+        return await self._call("POST", "/key/service-account/generate", KeyGenerateResponse, body)
 
     async def key_update(self, body: KeyUpdate) -> None:
         await self._call("POST", "/key/update", None, body)
