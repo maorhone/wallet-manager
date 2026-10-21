@@ -12,7 +12,7 @@ from app.auth.session import SESSION_MAX_AGE
 from app.clock import Clock, SystemClock
 from app.config import Settings
 from app.db import make_engine, make_session_factory
-from app.directory import FixtureDirectory
+from app.directory import Directory, make_directory
 from app.errors import ApiError, install_error_handlers
 from app.litellm_client import LiteLLMClient, LiteLLMReader
 from app.routers import (
@@ -57,8 +57,10 @@ def create_app(
     litellm: LiteLLMClient | None = None,
     reader: LiteLLMReader | None = None,
     clock: Clock | None = None,
+    directory: Directory | None = None,
 ) -> FastAPI:
-    """``litellm``, ``reader`` and ``clock`` are injected by tests; the defaults are real."""
+    """``litellm``, ``reader``, ``clock`` and ``directory`` are injected by tests; the defaults
+    are real."""
     settings = settings or Settings()
     if settings.dev_jwt_secret and not settings.dev_auth:
         raise RuntimeError("DEV_JWT_SECRET is set but DEV_AUTH is off; refusing to start")
@@ -78,7 +80,7 @@ def create_app(
     app.state.litellm_reader = reader
     app.state.engine = make_engine(settings.database_url)
     app.state.session_factory = make_session_factory(app.state.engine)
-    app.state.directory = FixtureDirectory(settings.seed_file)
+    app.state.directory = directory or make_directory(settings)
     app.state.oauth = build_oauth(settings)
     install_error_handlers(app)
     install_replay_handler(app)

@@ -1,3 +1,5 @@
+import logging
+
 from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Request
@@ -6,7 +8,10 @@ from starlette.responses import RedirectResponse, Response
 
 from app.auth.session import start_session
 from app.config import Settings
+from app.directory import DirectoryUnavailable
 from app.errors import ApiError
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth")
 
@@ -50,6 +55,13 @@ async def callback(request: Request):
     groups = claims.get(settings.oidc_groups_claim) or []
     if isinstance(groups, str):
         groups = [groups]
+    if not groups:
+        # No groups claim from ADFS: fall back to the directory (§6 roles at login).
+        try:
+            groups = request.app.state.directory.groups_of(upn)
+        except DirectoryUnavailable:
+            log.warning("directory unavailable at login; creating an employee-only session")
+            groups = []
     response = RedirectResponse("/", status_code=303)
     await start_session(
         request, response, upn, claims.get(settings.oidc_name_claim) or upn, list(groups)

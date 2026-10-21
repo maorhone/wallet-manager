@@ -1,8 +1,25 @@
 from periods import CURRENT
 
+from app.directory import DirectoryUnavailable
 from app.models import Employee, EmployeeModelCap
 
 DANI, DANA = "dani@corp.example", "dana@corp.example"
+
+
+class _MembersDown:
+    """``members_of`` is unreachable; ``groups_of``/``display_name`` still work."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def groups_of(self, upn: str) -> list[str]:
+        return self._inner.groups_of(upn)
+
+    def members_of(self, dn: str) -> list[str]:
+        raise DirectoryUnavailable("ldap down")
+
+    def display_name(self, upn: str) -> str | None:
+        return self._inner.display_name(upn)
 
 
 async def test_fields_fr_e1(login, seeded, snapshot):
@@ -60,6 +77,15 @@ async def test_owner_names_from_directory(login):
     head = (await (await login("dana")).get("/me/wallet")).json()["owners"]
     assert head["base_cap"]["role"] == "department_rep"
     assert head["base_cap"]["people"] == [{"upn": "rep@corp.example", "display_name": "Rina Rep"}]
+
+
+async def test_owner_names_degrade_when_directory_down(login):
+    """§5.4: a directory outage degrades the wallet's owner names, not the role or the request."""
+    client = await login("dani")
+    client._transport.app.state.directory = _MembersDown(client._transport.app.state.directory)
+    owners = (await client.get("/me/wallet")).json()["owners"]
+    assert owners["base_cap"] == {"role": "group_head", "people": []}
+    assert owners["limits"] == owners["model_caps"] == owners["base_cap"]
 
 
 async def test_future_period_is_422(login):

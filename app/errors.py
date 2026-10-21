@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.directory import DirectoryUnavailable
 from app.metrics import VALIDATION_REJECTIONS
 
 
@@ -157,6 +158,12 @@ def install_error_handlers(app: FastAPI) -> None:
         errors = [{"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
         return _envelope(
             request, 422, "INVALID_REQUEST", "Request validation failed", details={"errors": errors}
+        )
+
+    @app.exception_handler(DirectoryUnavailable)
+    async def _directory_unavailable(request: Request, exc: DirectoryUnavailable):
+        return _envelope(
+            request, 503, "DIRECTORY_UNAVAILABLE", "The directory could not be read; retry later"
         )
 
     @app.exception_handler(StarletteHTTPException)

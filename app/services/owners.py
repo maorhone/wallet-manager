@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.directory import Directory
+from app.directory import Directory, DirectoryUnavailable
 from app.models import Grp, RoleBinding
 from app.permissions import target_tier
 from app.services.personal_values import OWNER_ROLE
@@ -12,7 +12,11 @@ from app.services.personal_values import OWNER_ROLE
 async def holders(
     db: AsyncSession, directory: Directory, role: str, scope_kind: str, scope_id: int | None
 ) -> list[dict]:
-    """People holding ``role`` on a scope: the directory members of the bound AD groups."""
+    """People holding ``role`` on a scope: the directory members of the bound AD groups.
+
+    Degrades to ``[]`` when the directory is unreachable (§5.4), so a wallet with a known
+    owner role still renders without names.
+    """
     dns = await db.scalars(
         select(RoleBinding.ad_group_dn).where(
             RoleBinding.role == role,
@@ -22,8 +26,11 @@ async def holders(
             else RoleBinding.scope_id == scope_id,
         )
     )
-    upns = sorted({u for dn in dns for u in directory.members_of(dn)})
-    return [{"upn": u, "display_name": directory.display_name(u) or u} for u in upns]
+    try:
+        upns = sorted({u for dn in dns for u in directory.members_of(dn)})
+        return [{"upn": u, "display_name": directory.display_name(u) or u} for u in upns]
+    except DirectoryUnavailable:
+        return []
 
 
 async def owner_of(

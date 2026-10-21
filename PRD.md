@@ -150,6 +150,15 @@ Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Ste
 
 Production organizations, service keys, rotate/revoke.
 
+### 4.10 Directory (section 5.1, 9.1) - Phase 3: In progress (Step 3.1)
+
+A new `DIRECTORY_BACKEND` setting switches the one place Wallet Manager reads AD: `fixture` (dev/test,
+unchanged) or `ldap` (LDAPS, read-only). The directory backs three things, still with no periodic sync:
+the one-time onboarding lookup, owners' names shown on wallets, and ADFS login roles when the token carries
+no groups claim. If the directory cannot be reached, onboarding and member-target writes answer 503
+`DIRECTORY_UNAVAILABLE` and change nothing; a wallet still shows the correct owner role with empty names;
+and a login with no groups claim falls back to an employee-only session instead of failing.
+
 ## 5. Non-functional
 
 Explicit LiteLLM client boundary (NFR3), outbox with idempotent retries, audit of every change, CSRF + CSP,

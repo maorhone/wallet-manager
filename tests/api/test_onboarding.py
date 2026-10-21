@@ -6,10 +6,20 @@ import logging
 from lifecycle import DANI, employee, outbox, set_status
 from sqlalchemy import func, select, text
 
-from app.directory import DirectoryUnavailable
+from app.config import Settings
+from app.directory import DirectoryUnavailable, LdapDirectory
 from app.models import AuditLog, Employee, LitellmWrite
 from app.outbox.worker import drain
 from app.services.lifecycle import JOINER
+
+
+def _bad_ldap_directory() -> LdapDirectory:
+    def connect():
+        raise OSError("connection refused")
+
+    settings = Settings(_env_file=None, ldap_user_base="OU=Users,DC=corp,DC=example")
+    return LdapDirectory(settings, connect=connect)
+
 
 NEWBIE, DRIFTER, TWIN = (f"{u}@corp.example" for u in ("newbie", "drifter", "twin"))
 GHOST = "ghost@corp.example"
@@ -197,6 +207,16 @@ async def test_directory_unavailable_503_writes_nothing(portal, provisioned):
             return fail
 
     portal.app.state.directory = Down()
+    before = await counts(provisioned)
+    r = await portal.post(NEWBIE)
+    assert r.status_code == 503 and r.json()["code"] == "DIRECTORY_UNAVAILABLE"
+    assert await counts(provisioned) == before
+    assert (await portal.post(DANI)).status_code == 200  # existing employees are unaffected
+
+
+async def test_ldap_directory_down_503_nothing_written(portal, provisioned):
+    """Step 3.1: a real ``LdapDirectory`` whose connection fails degrades the same way (§5.4)."""
+    portal.app.state.directory = _bad_ldap_directory()
     before = await counts(provisioned)
     r = await portal.post(NEWBIE)
     assert r.status_code == 503 and r.json()["code"] == "DIRECTORY_UNAVAILABLE"

@@ -1,8 +1,8 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Next = Phase 3.
-Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Next = Step 3.2.
+Latest `./scripts/test.sh` (Step 3.1): green; pytest 477 passed (6 skipped real-target cases), vitest 43, Playwright 34; ruff, frontend lint/typecheck and formatting pass. Pytest ~2m56s, Playwright ~2.3 min, full run ~3 minutes. No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -155,14 +155,38 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   seed `grants:` (PRJ-ATLAS, A2, 30,000, 60 d, share 5,000 to avi) applied only with `SEED_GRANTS=1`; `e2e_stack.py` sets it only when the API port is the default 4111.
   Tests: `tests/api/test_notifications.py` (5), `test_notification_events.py` (3), `tests/scheduler/test_notifications_job.py` (6), `tests/unit/test_notify_email.py` (2), `tests/test_seed_grants.py` (1).
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
+- Step 3.1: `ldap3` dependency (`uv add ldap3`, reachable); `app/directory.py` gained `LdapDirectory` (one bind + search per
+  lookup via an injectable `connect()`, `members_of` cached for `LDAP_CACHE_TTL_S`, `groups_of` uncached, only a found
+  `display_name` cached) and `make_directory(settings)` (`DIRECTORY_BACKEND` `fixture`|`ldap`; `ldap` without `LDAP_URL`/
+  `LDAP_USER_BASE` raises `RuntimeError` at startup). `app/config.py`/`.env.example` gained the `LDAP_*` settings.
+  `app/main.py: create_app(..., directory=)` now builds the directory via `make_directory` (injectable, like `litellm`/
+  `reader`/`clock`). `app/errors.py` maps `DirectoryUnavailable` to 503 `DIRECTORY_UNAVAILABLE` globally, so writes that
+  call `target_tier` now fail closed without each call site catching it. `app/auth/oidc.py`'s callback falls back to
+  `directory.groups_of(upn)` when the ADFS token's groups claim is empty; a directory outage there logs a warning and
+  creates an employee-only session (least privilege) instead of failing login. `app/services/owners.py: holders` now
+  catches `DirectoryUnavailable` from `members_of`/`display_name` and returns `[]`, so a wallet still shows the correct
+  owner role with empty names when the directory is down (the role comes from `target_tier`, computed separately and
+  earlier, so it is unaffected by a `members_of`-only outage). `tests/directory/ldap_mock.py: mock_connect(yaml_path)`
+  builds one ldap3 `MOCK_SYNC` server from `seed/dev.yaml` with no real LDAP server. Tests: `tests/directory/test_ldap_directory.py`
+  (8, incl. `test_real_ldap[real]` skipped without `LDAP_TEST_URL`), `tests/directory/test_directory_contract.py` (3,
+  parametrized fixture/ldap, dani/lost/ghost upns), `tests/auth/test_oidc.py` (+2: groups-claim fallback, directory-down
+  employee-only session), `tests/api/test_onboarding.py::test_ldap_directory_down_503_nothing_written` (+1, a real
+  `LdapDirectory` whose `connect` raises `OSError`), `tests/api/test_me_wallet.py::test_owner_names_degrade_when_directory_down`
+  (+1). No new API path prefix (directory is internal), so `frontend/vite.config.ts` is unchanged. `./scripts/test.sh`:
+  pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step (none; Phase 2 ends with Step 2.10). Next = Phase 3.
+- Step 3.2: Platform backend (`PUT /policies`, Redis status, department and group creation, role bindings).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 3.1: PLAN says only `owners.holders` catches `DirectoryUnavailable`; `owner_of`'s earlier `target_tier` call is left
+  to raise. This is deliberate: `target_tier` decides whose values are being shown (member vs. group head vs. rep), and a
+  write path needs that to fail closed (503) rather than guess, so a group head's action is never silently authorized
+  against an admin wrongly treated as a plain member during an outage. The read path (`/me/wallet`'s owner names) only
+  degrades the `holders()` name lookup; the role itself is still correct because `target_tier` ran first.
 - Review 2.8: all 12 findings fixed (see commit "Step 2.8: review fixes"); Review 2.8 open: none.
 - Flaky (unrelated, backend): full ./scripts/test.sh intermittently hits the 60s pytest-timeout on an asyncpg call (test_rs256_via_jwks, test_restart_catches_up_on_overdue); both pass alone. Vitest also times out at 5s on cold first renders when the machine is loaded.
 - Step 2.9: `MemberSidePanel` gained `withBaseCap` (one-row `PUT /groups/{gid}/members/caps`); `ShareDialog` members type loosened.

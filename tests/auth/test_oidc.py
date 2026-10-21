@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -7,6 +8,8 @@ import jwt
 import pytest
 import respx
 from cryptography.hazmat.primitives.asymmetric import rsa
+
+from app.directory import DirectoryUnavailable
 
 ISSUER = "https://adfs.test/adfs"
 CLIENT_ID = "wm-client"
@@ -32,7 +35,8 @@ async def oidc(make_client):
     return client
 
 
-def _mock_adfs(router: respx.MockRouter, key, nonce_for) -> None:
+def _mock_adfs(router: respx.MockRouter, key, nonce_for, groups=GROUPS) -> None:
+    """``groups=None`` omits the groups claim, so the callback falls back to the directory."""
     router.get(f"{ISSUER}/.well-known/openid-configuration").respond(
         json={
             "issuer": ISSUER,
@@ -46,15 +50,14 @@ def _mock_adfs(router: respx.MockRouter, key, nonce_for) -> None:
 
     def token(request: httpx.Request) -> httpx.Response:
         now = int(time.time())
-        id_token = jwt.encode(
-            {
-                "iss": ISSUER, "aud": CLIENT_ID, "iat": now, "exp": now + 300,
-                "nonce": nonce_for(), "sub": "adfs-sub-1",
-                "upn": "dana@corp.example", "name": "Dana Levi",
-                "groups": GROUPS,
-            },
-            key, algorithm="RS256", headers={"kid": "k1"},
-        )  # fmt: skip
+        claims = {
+            "iss": ISSUER, "aud": CLIENT_ID, "iat": now, "exp": now + 300,
+            "nonce": nonce_for(), "sub": "adfs-sub-1",
+            "upn": "dana@corp.example", "name": "Dana Levi",
+        }  # fmt: skip
+        if groups is not None:
+            claims["groups"] = groups
+        id_token = jwt.encode(claims, key, algorithm="RS256", headers={"kid": "k1"})
         return httpx.Response(
             200, json={"access_token": "adfs-at", "token_type": "Bearer", "id_token": id_token}
         )
@@ -102,3 +105,41 @@ async def test_callback_rejects_bad_nonce(oidc, key):
         r = await oidc.get("/auth/callback", params={"code": "abc", "state": state})
     assert r.status_code == 401 and r.json()["code"] == "UNAUTHENTICATED"
     assert (await oidc.get("/me")).status_code == 401
+
+
+async def test_login_without_groups_claim_uses_directory(oidc, key):
+    """§6: an ADFS token with no groups claim falls back to the directory's ``groups_of``."""
+    with respx.mock(assert_all_called=False) as router:
+        nonce_box = []
+        _mock_adfs(router, key, lambda: nonce_box[0], groups=None)
+        state, nonce, _ = await _start(oidc)
+        nonce_box.append(nonce)
+        r = await oidc.get("/auth/callback", params={"code": "abc", "state": state})
+    assert r.status_code == 303 and r.headers["location"] == "/"
+
+    me = (await oidc.get("/me")).json()
+    assert me["upn"] == "dana@corp.example"
+    assert [r["role"] for r in me["roles"]] == ["employee", "group_head"]
+
+
+async def test_login_directory_down_employee_only(oidc, key, caplog):
+    """§5.4/§6: a directory outage at login degrades to the least-privilege employee role."""
+
+    class Down:
+        def groups_of(self, upn: str) -> list[str]:
+            raise DirectoryUnavailable("ldap down")
+
+    oidc._transport.app.state.directory = Down()
+    with respx.mock(assert_all_called=False) as router:
+        nonce_box = []
+        _mock_adfs(router, key, lambda: nonce_box[0], groups=None)
+        state, nonce, _ = await _start(oidc)
+        nonce_box.append(nonce)
+        caplog.set_level(logging.WARNING)
+        r = await oidc.get("/auth/callback", params={"code": "abc", "state": state})
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert "directory unavailable" in caplog.text.lower()
+
+    me = (await oidc.get("/me")).json()
+    assert me["upn"] == "dana@corp.example"
+    assert [r["role"] for r in me["roles"]] == ["employee"]

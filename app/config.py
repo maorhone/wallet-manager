@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,3 +46,11 @@ class Settings(BaseSettings):
     reconcile_drift_alert_count: int = 3
     reconcile_drift_window_h: float = 24
     scheduler_lock_timeout_s: float = 300
+    # Directory (Step 3.1): "fixture" stays the dev/test default; "ldap" is the production backend.
+    directory_backend: Literal["fixture", "ldap"] = "fixture"
+    ldap_url: str = ""
+    ldap_bind_dn: str = ""
+    ldap_bind_password: str = ""
+    ldap_user_base: str = ""
+    ldap_timeout_s: float = 5
+    ldap_cache_ttl_s: float = 300
