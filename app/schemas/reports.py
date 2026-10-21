@@ -1,6 +1,6 @@
 """Report responses: Decimal internally, JSON numbers at the API boundary."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, PlainSerializer
 
 ReportNumber = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
 AllocationLevel = Literal["department", "group", "employee"]
+ReportScopeKind = Literal["global", "department", "group", "employee"]
 
 
 class ModelAllocation(BaseModel):
@@ -66,3 +67,50 @@ class ProjectGrants(GrantTotals):
 class GrantsReport(BaseModel):
     rows: list[ProjectGrants]
     totals: GrantTotals
+
+
+class UsagePoint(BaseModel):
+    bucket: date
+    key: str
+    spend: ReportNumber
+
+
+class UsageReport(BaseModel):
+    series: list[UsagePoint]
+    cap: ReportNumber
+    taken_at: datetime | None
+
+
+class DailyPeak(BaseModel):
+    day: date
+    peak: int
+    at: datetime
+
+
+class MemberPeak(BaseModel):
+    upn: str
+    display_name: str | None
+    peak: int
+    at: datetime
+    max_parallel: int | None
+
+
+class PeaksReport(BaseModel):
+    daily: list[DailyPeak]
+    members: list[MemberPeak]
+
+
+class BlockedRow(BaseModel):
+    day: date
+    upn: str
+    display_name: str | None
+    group_id: int
+    kind: Literal["base", "model"]
+    model: str | None
+    cap: ReportNumber
+    period_spend_to_date: ReportNumber
+    day_spend: ReportNumber
+
+
+class BlockedReport(BaseModel):
+    rows: list[BlockedRow]

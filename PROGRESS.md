@@ -1,17 +1,26 @@
 # Progress — Wallet Manager
 
 ## Status
-Step 4.1 done: allocation-versus-spend and grants reports backend. Next = Step 4.2 (not started).
-Latest `./scripts/test.sh` (Step 4.1): green; pytest 477 passed / 5 skipped (191.20 s),
-vitest 43 passed, Playwright 34 passed (2.4 min); ruff, formatting, frontend lint/typecheck pass.
-The 16 new report cases pass (6.00 s focused). E2E used env overrides 4140–4142; default ports
-4120–4122, E2E env handling and test scripts are unchanged. No new blockers or owner questions; no commit/push.
+Step 4.2 done: usage series, concurrency peaks and blocked spend backend. Next = Step 4.3 (not started).
+Latest `./scripts/test.sh` (Step 4.2): green; pytest 502 passed / 5 skipped (187.44 s),
+vitest 43 passed, Playwright 34 passed (2.1 min); ruff, formatting, frontend lint/typecheck pass.
+25 new Step 4.2 tests. E2E used env overrides 4140–4142; default ports 4120–4122,
+E2E env handling and test scripts are unchanged. No new blockers or owner questions; no commit/push.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
 Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.2: `GET /reports/usage` (snapshot day/week/month series by model/member, current cap, snapshot time),
+  `/reports/concurrency-peaks` (live half-open interval overlaps, daily totals and top 100 visible employees),
+  `/reports/blocked` (daily base/model exhaustion, current cap and month-to-date/day spend).
+  Shared scope authorization enforces member visibility, employee self access, global admin/viewer access and PMO grants-only.
+  Snapshots now bucket in APP_TIMEZONE; UTC timestamps use the supplied snapshot clock. Existing group/department day rows reused.
+  Read-only peaks use one SQL statement with scoped team/user filters, midnight/window clipping and deterministic earliest ties.
+  Fake single/bulk spend setup supports start/end and key hashes; bulk rows/counters commit atomically. E2E fakeSpend helper added.
+  Required PLAN tests written first and observed failing before implementation; additional boundary/DST, rollback, visibility,
+  top-100, monthly reset, fractional spend and no-future-projection coverage added. PRD updated. Step 4.3 untouched.
 - Step 4.1: `GET /reports/allocation` (department/group/employee, period, snapshot spend and per-model rows)
   and `GET /reports/grants` (visible grants by project, distinct department/group counts, grant count and money totals).
   Reuses wallet/summary builders, period snapshots, audit history, effective model pots and the scoped grant list.
@@ -169,12 +178,19 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 4.2: Usage series, concurrency peaks, blocked spend (not started).
+- Step 4.3: Alerts: over-allocation breach and concurrency at the key limit (not started).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 4.2 SPEC/PLAN difference: FR-R5 explicitly names base-cap or model-cap exhaustion; PLAN says base cap plus active
+  shares for the base row. Followed FR-R5: blocked-report base rows compare against current base_cap, even with active shares.
+  Wallet/usage-chart totals still include active shares. `/reports/blocked` is PLAN's endpoint for FR-R5 (not listed in §11.1).
+  Date ranges are inclusive, weeks start Monday, sparse usage/peaks omit missing days; blocked rows include zero-spend days
+  after exhaustion, reset at each local month, and stop at the injected clock's local today. Caps are current values.
+  Old already-frozen historical day snapshots retain the earlier UTC-day limitation; newly refreshed periods use local dates.
+  No new prefix (reports already proxied), scheduler job, alerts, UI, test-script or E2E port/env changes.
 - Step 4.1: no new SPEC/PLAN conflicts. The existing department-summary permission helper permits PMO;
   reports apply the narrower §12.2 reports permission (PMO grants only) without changing summary access.
   `departments` and `groups` in project report rows/totals are distinct counts; `grants` is a count.

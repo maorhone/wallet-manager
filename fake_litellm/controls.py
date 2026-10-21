@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import exists, insert, select
 
 from .db import reset_db, spend_logs, team, team_member, token
@@ -34,7 +34,10 @@ class Spend(BaseModel):
     user_id: str | None = None
     model: str
     amount: float
-    at: datetime | None = None
+    at: AwareDatetime | None = None
+    start: AwareDatetime | None = None
+    end: AwareDatetime | None = None
+    api_key: str | None = None
 
 
 @router.post("/reset")
@@ -102,24 +105,42 @@ async def invariants(request: Request):
 @router.post("/spend")
 async def add_spend(body: Spend, request: Request):
     """Insert a SpendLogs row and bump team / membership / organization spend consistently."""
-    at = body.at or request.app.state.fake.now()
     async with request.app.state.fake.engine.begin() as conn:
-        row = (
-            await conn.execute(select(team.c.organization_id).where(team.c.team_id == body.team_id))
-        ).first()
-        if row is None:
-            raise HTTPException(404, detail={"error": f"team {body.team_id} not found"})
-        await conn.execute(
-            insert(spend_logs).values(
-                request_id=uuid4().hex,
-                user=body.user_id,
-                team_id=body.team_id,
-                organization_id=row[0],
-                model_group=body.model,
-                startTime=at,
-                endTime=at,
-                spend=body.amount,
-            )
-        )
-        await bump_spend(conn, None, body.team_id, body.user_id, row[0], body.amount)
+        await _add_spend(conn, body, request.app.state.fake.now())
     return {"ok": True}
+
+
+@router.post("/spend/bulk")
+async def add_spend_bulk(body: list[Spend], request: Request):
+    """All rows and spend counters commit together, including failures halfway through."""
+    now = request.app.state.fake.now()
+    async with request.app.state.fake.engine.begin() as conn:
+        for item in body:
+            await _add_spend(conn, item, now)
+    return {"ok": True}
+
+
+async def _add_spend(conn, body: Spend, now: datetime):
+    at = body.at or now
+    start, end = body.start or at, body.end or at
+    if end < start:
+        raise HTTPException(422, detail={"error": "end precedes start"})
+    row = (
+        await conn.execute(select(team.c.organization_id).where(team.c.team_id == body.team_id))
+    ).first()
+    if row is None:
+        raise HTTPException(404, detail={"error": f"team {body.team_id} not found"})
+    await conn.execute(
+        insert(spend_logs).values(
+            request_id=uuid4().hex,
+            api_key=body.api_key,
+            user=body.user_id,
+            team_id=body.team_id,
+            organization_id=row[0],
+            model_group=body.model,
+            startTime=start,
+            endTime=end,
+            spend=body.amount,
+        )
+    )
+    await bump_spend(conn, body.api_key, body.team_id, body.user_id, row[0], body.amount)

@@ -42,7 +42,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
     for period in periods:
         start, end = month_bounds(period, now.tzinfo)
         try:
-            rows = await reader.spend_rows(start, end)
+            rows = await reader.spend_rows(start, end, timezone=str(now.tzinfo))
         except Exception:
             log.warning("spend snapshot: LiteLLM database unreachable; keeping old rows")
             return
@@ -56,7 +56,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
                 scopes.append(("employee", r.user))
             for kind, scope_id in scopes:
                 day = r.day.isoformat()
-                # day rows stay inside the calendar month so periods never share a key
+                # Reader buckets in APP_TIMEZONE, including the local month boundary.
                 for p in (period, day) if day.startswith(period) else (period,):
                     totals[(kind, scope_id, p, None)] += r.spend
                     totals[(kind, scope_id, p, r.model_group)] += r.spend
@@ -66,7 +66,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
                     (SpendSnapshot.period == period) | SpendSnapshot.period.like(f"{period}-%")
                 )
             )
-            taken = datetime.now(UTC)
+            taken = now.astimezone(UTC)
             db.add_all(
                 SpendSnapshot(scope_kind=k, scope_id=i, period=p, model=m, spend=s, taken_at=taken)
                 for (k, i, p, m), s in totals.items()

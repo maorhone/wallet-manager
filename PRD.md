@@ -59,7 +59,20 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   each employee can read their own report. PMO report access is limited to grants.
   `GET /reports/grants?department=&project_ref=` groups visible grants by project with distinct department/group counts,
   grant count, amount, shared, unshared, attributed used and returned, plus totals across visible grants. Visibility matches
-  the grant list, including heads' own groups and PMO's own department. Report UI and usage/peaks endpoints remain planned.
+  the grant list, including heads' own groups and PMO's own department. Report UI remains planned.
+- Usage, concurrency peaks and blocked spend backend - Done (Step 4.2).
+  `GET /reports/usage?scope=employee|group|department|global&id=&from=&to=&granularity=day|week|month&by=model|member`
+  returns snapshot series, the current cap and snapshot time for up to 400 inclusive local dates. Day snapshots now follow
+  `APP_TIMEZONE`, including month boundaries; weeks start Monday and month buckets start on the first day. Member series
+  require member visibility; employees can read their own series. Global aggregates require admin or a global viewer.
+  `GET /reports/concurrency-peaks` accepts the same scopes and up to 31 local dates. Its live read counts overlapping
+  SpendLogs intervals, with end events before starts at the same instant, carrying running requests across midnight and
+  clipping to the selected range. It returns daily aggregate peaks with UTC timestamps and the top 100 visible members
+  (peak, timestamp, configured concurrency limit); viewers receive daily aggregates only.
+  `GET /reports/blocked` returns a row per exhausted employee/base or model cap per day, with current cap, cumulative
+  calendar-month spend and that day's spend, including zero-spend days after exhaustion. Per FR-R5, base exhaustion uses
+  the base cap even when a share increases the wallet total. Member visibility applies; PMO is limited to grant reports.
+  The fake supports explicit request intervals and key hashes in `/_test/spend` and atomic `/_test/spend/bulk` setup.
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 
