@@ -14,7 +14,7 @@ class DevLogin(BaseModel):
 
 @router.get("/users")
 async def dev_users(request: Request):
-    directory = request.app.state.directory
+    directory = request.app.state.dev_directory
     out = []
     async with request.app.state.session_factory() as db:
         for upn in directory.users:
@@ -31,7 +31,7 @@ async def dev_users(request: Request):
 
 @router.post("/login")
 async def dev_login(body: DevLogin, request: Request, response: Response):
-    directory = request.app.state.directory
+    directory = request.app.state.dev_directory
     if body.upn not in directory.users:
         raise ApiError(404, "NOT_FOUND", "Unknown dev user")
     await start_session(

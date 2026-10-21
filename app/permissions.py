@@ -188,10 +188,15 @@ async def can_view_pending(session, p: Principal, department_id: int | None) -> 
     return await can_place(session, p, department_id)
 
 
-async def target_tier(session: AsyncSession, directory: Directory, upn: str) -> str:
-    """Highest role the target holds, from directory groups ∩ role_binding (DR9)."""
-    roles = {b.role for b in await load_bindings(session, directory.groups_of(upn))}
+def tier_from_bindings(bindings: list[Binding]) -> str:
+    """Highest role among ``bindings`` (DR9)."""
+    roles = {b.role for b in bindings}
     for role, tier in ((ADMIN, "platform_admin"), (REP, "department_rep"), (HEAD, "group_head")):
         if role in roles:
             return tier
     return "member"
+
+
+async def target_tier(session: AsyncSession, directory: Directory, upn: str) -> str:
+    """Highest role the target holds, from directory groups ∩ role_binding (DR9)."""
+    return tier_from_bindings(await load_bindings(session, directory.groups_of(upn)))

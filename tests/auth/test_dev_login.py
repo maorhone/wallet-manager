@@ -20,3 +20,18 @@ async def test_dev_login_sets_session(make_client):
     assert (await client.get("/me")).json()["upn"] == "dana@corp.example"
 
     assert (await client.post("/auth/dev/login", json={"upn": "x@corp.example"})).status_code == 404
+
+
+async def test_dev_login_works_when_app_directory_is_ldap(make_client):
+    """PLAN §3.1: dev auth keeps its own fixture directory even when DIRECTORY_BACKEND=ldap."""
+    client = await make_client(
+        dev_auth=True,
+        directory_backend="ldap",
+        ldap_url="ldaps://dc.corp.example",
+        ldap_user_base="OU=Users,DC=corp,DC=example",
+    )
+    users = (await client.get("/auth/dev/users")).json()
+    assert any(u["upn"] == "dana@corp.example" for u in users)
+
+    r = await client.post("/auth/dev/login", json={"upn": "dana@corp.example"})
+    assert r.status_code == 200, r.text

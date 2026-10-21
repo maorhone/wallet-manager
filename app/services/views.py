@@ -249,7 +249,7 @@ async def me_wallet(
     ]
     remaining = row["total"] - row["used"]
     g_rem, d_rem = g.card["remaining"], g.dept_card["remaining"]
-    owner = await owner_of(db, directory, emp.upn, group)
+    owner = await owner_of(db, directory, emp.upn, group, principal=principal)
     return {
         **_envelope(pc, spend),
         "sync_status": (await sync_status(db, "employee", [emp.upn]))[emp.upn],

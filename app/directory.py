@@ -1,14 +1,24 @@
+import ssl
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
 import yaml
-from ldap3 import ALL, Connection, Server
+from ldap3 import ALL, Connection, Server, Tls
 from ldap3.core.exceptions import LDAPException
+from ldap3.core.results import RESULT_SUCCESS
 from ldap3.utils.conv import escape_filter_chars
 
 from app.config import Settings
+
+
+def _is_successful(conn: Connection) -> bool:
+    """``Connection.search`` returns ``False`` both on a zero-match search and on a server
+    error (ldap3's boolean conflates "no entries" with "failed"); the LDAP result code is the
+    only reliable signal, so a search error cannot be read back as an authoritative empty
+    result and misclassify a privileged target as an ordinary member (DR9)."""
+    return conn.result.get("result") == RESULT_SUCCESS
 
 
 class DirectoryUnavailable(Exception):
@@ -61,8 +71,13 @@ class LdapDirectory:
         self._name_cache: dict[str, str] = {}
 
     def _default_connect(self) -> Connection:
+        # LDAPS only (enforced in make_directory); CERT_REQUIRED stops an impersonated server
+        # from capturing the bind password or supplying forged, privileged role memberships.
         server = Server(
-            self._settings.ldap_url, get_info=ALL, connect_timeout=self._settings.ldap_timeout_s
+            self._settings.ldap_url,
+            get_info=ALL,
+            connect_timeout=self._settings.ldap_timeout_s,
+            tls=Tls(validate=ssl.CERT_REQUIRED),
         )
         return Connection(
             server,
@@ -80,6 +95,8 @@ class LdapDirectory:
             if not conn.bind():
                 raise DirectoryUnavailable("directory bind failed")
             conn.search(self._settings.ldap_user_base, filter_, attributes=attributes)
+            if not _is_successful(conn):
+                raise DirectoryUnavailable("directory search failed")
             return list(conn.entries)
         except (LDAPException, OSError) as exc:
             raise DirectoryUnavailable("directory search failed") from exc
@@ -122,5 +139,7 @@ def make_directory(settings: Settings) -> Directory:
             raise RuntimeError(
                 "ldap_url and ldap_user_base are required for directory_backend=ldap"
             )
+        if not settings.ldap_url.lower().startswith("ldaps://"):
+            raise RuntimeError("ldap_url must use ldaps:// so bind credentials stay encrypted")
         return LdapDirectory(settings)
     return FixtureDirectory(settings.seed_file)

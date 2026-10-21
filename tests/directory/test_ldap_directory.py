@@ -24,10 +24,14 @@ def _entry(**attrs) -> dict:
 
 
 class FakeConnection:
-    def __init__(self, bind_ok=True, entries=None, search_raises=None):
+    def __init__(self, bind_ok=True, entries=None, search_raises=None, result_code=0):
         self.bind_ok = bind_ok
         self.entries = entries or []
         self.search_raises = search_raises
+        self.result = {
+            "result": result_code,
+            "description": "success" if not result_code else "error",
+        }
         self.unbound = False
         self.last_filter = None
 
@@ -38,7 +42,8 @@ class FakeConnection:
         self.last_filter = filter_
         if self.search_raises is not None:
             raise self.search_raises
-        return True
+        # mirrors ldap3's real quirk: False both for zero matches and for a server error
+        return self.result["result"] == 0 and bool(self.entries)
 
     def unbind(self) -> bool:
         self.unbound = True
@@ -76,6 +81,53 @@ def test_socket_error_raises_directory_unavailable():
     ld = LdapDirectory(SETTINGS, connect=bad_connect)
     with pytest.raises(DirectoryUnavailable):
         ld.groups_of("dana@corp.example")
+
+
+def test_unsuccessful_search_without_exception_raises_directory_unavailable():
+    """A server error (e.g. insufficientAccessRights, code 50) makes ldap3's ``search`` return
+    ``False`` without raising, the same as a legitimate zero-match search; reading that as an
+    empty result would misclassify a privileged target (here, an admin) as an ordinary member
+    and let a group head authorize a write against them (DR9)."""
+    conn = FakeConnection(
+        result_code=50, entries=[_entry(memberOf=["CN=admins,DC=corp,DC=example"])]
+    )
+    ld = LdapDirectory(SETTINGS, connect=lambda: conn)
+    with pytest.raises(DirectoryUnavailable):
+        ld.groups_of("dana@corp.example")
+    assert conn.unbound  # cleaned up even on failure
+
+
+def test_successful_zero_match_search_is_not_treated_as_an_error():
+    """A real zero-match search also returns ``False`` from ``search`` (ldap3's quirk); the
+    result code, not the boolean, must decide, or every unknown/no-groups lookup would 503."""
+    conn = FakeConnection(result_code=0, entries=[])
+    ld = LdapDirectory(SETTINGS, connect=lambda: conn)
+    assert ld.groups_of("ghost@corp.example") == []
+
+
+def test_make_directory_refuses_plain_ldap_url():
+    with pytest.raises(RuntimeError):
+        make_directory(
+            Settings(
+                _env_file=None,
+                directory_backend="ldap",
+                ldap_url="ldap://dc.corp.example",
+                ldap_user_base="OU=Users,DC=corp,DC=example",
+            )
+        )
+
+
+def test_default_connect_requires_certificate_validation():
+    import ssl
+
+    settings = Settings(
+        _env_file=None,
+        ldap_url="ldaps://dc.corp.example",
+        ldap_user_base="OU=Users,DC=corp,DC=example",
+    )
+    ld = LdapDirectory(settings)
+    conn = ld._default_connect()
+    assert conn.server.tls.validate == ssl.CERT_REQUIRED
 
 
 def test_members_of_cached_until_ttl():

@@ -12,7 +12,7 @@ from app.auth.session import SESSION_MAX_AGE
 from app.clock import Clock, SystemClock
 from app.config import Settings
 from app.db import make_engine, make_session_factory
-from app.directory import Directory, make_directory
+from app.directory import Directory, FixtureDirectory, make_directory
 from app.errors import ApiError, install_error_handlers
 from app.litellm_client import LiteLLMClient, LiteLLMReader
 from app.routers import (
@@ -98,6 +98,9 @@ def create_app(
     )
     app.include_router(oidc.router)
     if settings.dev_auth:
+        # Dev login always lists/authenticates against the fixture dataset (PLAN §3.1), even
+        # when the app's own directory_backend is "ldap", so dev auth never depends on LDAP.
+        app.state.dev_directory = FixtureDirectory(settings.seed_file)
         app.include_router(dev.router)
     app.include_router(me.router)
     app.include_router(departments.router)

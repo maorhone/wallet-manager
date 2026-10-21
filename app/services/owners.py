@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.directory import Directory, DirectoryUnavailable
 from app.models import Grp, RoleBinding
-from app.permissions import target_tier
+from app.permissions import Principal, target_tier, tier_from_bindings
 from app.services.personal_values import OWNER_ROLE
 
 
@@ -34,10 +34,26 @@ async def holders(
 
 
 async def owner_of(
-    db: AsyncSession, directory: Directory, upn: str, group: Grp, cache: dict | None = None
+    db: AsyncSession,
+    directory: Directory,
+    upn: str,
+    group: Grp,
+    cache: dict | None = None,
+    principal: Principal | None = None,
 ) -> dict:
-    """``{role, people}`` for the person who sets ``upn``'s values (empty people if unknown)."""
-    role = OWNER_ROLE[await target_tier(db, directory, upn)]
+    """``{role, people}`` for the person who sets ``upn``'s values (empty people if unknown).
+
+    When ``upn`` is ``principal``'s own (the wallet read path), the tier comes from the
+    session's already-loaded bindings instead of a fresh directory call, so a full directory
+    outage degrades to empty ``people`` instead of a 503 (§5.4). Any other ``upn`` still needs
+    a live ``target_tier`` lookup.
+    """
+    tier = (
+        tier_from_bindings(principal.bindings)
+        if principal is not None and principal.upn == upn
+        else await target_tier(db, directory, upn)
+    )
+    role = OWNER_ROLE[tier]
     scope = {
         "group_head": ("group", group.id),
         "department_rep": ("department", group.department_id),

@@ -22,6 +22,19 @@ class _MembersDown:
         return self._inner.display_name(upn)
 
 
+class _AllDown:
+    """A complete directory outage: every lookup, including ``groups_of``, is unreachable."""
+
+    def groups_of(self, upn: str) -> list[str]:
+        raise DirectoryUnavailable("ldap down")
+
+    def members_of(self, dn: str) -> list[str]:
+        raise DirectoryUnavailable("ldap down")
+
+    def display_name(self, upn: str) -> str | None:
+        raise DirectoryUnavailable("ldap down")
+
+
 async def test_fields_fr_e1(login, seeded, snapshot):
     async with seeded() as s:
         s.add(EmployeeModelCap(upn=DANI, model="gpt-4", amount=5000))
@@ -84,6 +97,18 @@ async def test_owner_names_degrade_when_directory_down(login):
     client = await login("dani")
     client._transport.app.state.directory = _MembersDown(client._transport.app.state.directory)
     owners = (await client.get("/me/wallet")).json()["owners"]
+    assert owners["base_cap"] == {"role": "group_head", "people": []}
+    assert owners["limits"] == owners["model_caps"] == owners["base_cap"]
+
+
+async def test_wallet_read_survives_a_complete_directory_outage(login):
+    """§5.4: even a full outage (``groups_of`` down too) must not 503 a wallet read; the
+    viewer's own role comes from the session's bindings, not a fresh directory call."""
+    client = await login("dani")
+    client._transport.app.state.directory = _AllDown()
+    r = await client.get("/me/wallet")
+    assert r.status_code == 200, r.text
+    owners = r.json()["owners"]
     assert owners["base_cap"] == {"role": "group_head", "people": []}
     assert owners["limits"] == owners["model_caps"] == owners["base_cap"]
 
