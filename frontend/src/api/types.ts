@@ -104,6 +104,7 @@ export interface MyWallet {
   shares: {
     id: number;
     grant_id: number;
+    project_ref: string;
     amount: number;
     used?: number;
     expires_at: string | null;
@@ -322,6 +323,8 @@ export interface GrantShare {
   used: number;
   returned: number;
   closed_reason: string | null;
+  sync_status: SyncStatus;
+  actions: { edit: boolean; close: boolean };
 }
 
 export interface AppNotification {

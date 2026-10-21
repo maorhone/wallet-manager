@@ -3,7 +3,7 @@ import { MantineProvider } from '@mantine/core';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Grant, Member } from '../api/types';
+import type { Grant, GrantShare, Member } from '../api/types';
 import { ShareDialog } from './ShareDialog';
 
 window.matchMedia ??= ((q: string) => ({
@@ -32,9 +32,16 @@ const member = (upn: string, role = 'נציג המחלקה') =>
     display_name: upn,
     owner: { role, people: [] },
   }) as unknown as Member;
-const members = [member('dana@x.example', 'נציג המחלקה'), member('avi@x.example')];
+const members = [
+  member('dana@x.example', 'נציג המחלקה'),
+  member('avi@x.example'),
+  member('bob@x.example'),
+];
 
-function open(onConfirm = vi.fn().mockResolvedValue(undefined)) {
+function open(
+  onConfirm = vi.fn().mockResolvedValue(undefined),
+  extra: Record<string, unknown> = {},
+) {
   render(
     createElement(
       MantineProvider,
@@ -47,6 +54,7 @@ function open(onConfirm = vi.fn().mockResolvedValue(undefined)) {
         timezone: 'Asia/Jerusalem',
         onClose: () => {},
         onConfirm,
+        ...extra,
       }),
     ),
   );
@@ -99,5 +107,33 @@ describe('ShareDialog', () => {
       true,
     );
     expect(screen.getByTestId('share-row-dana@x.example').textContent).toContain('נציג המחלקה');
+  });
+
+  it('sums fractional amounts exactly', () => {
+    open(undefined, { grant: { ...grant, unshared: 0.3 } });
+    pick('avi@x.example');
+    pick('bob@x.example');
+    change('share-amount-avi@x.example', '0.1');
+    change('share-amount-bob@x.example', '0.2');
+    change('share-reason', 'why');
+    expect(screen.queryByTestId('share-over')).toBeNull();
+    expect((screen.getByTestId('share-confirm') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('amount-only edit keeps the share expiry instant', async () => {
+    const share = {
+      id: 9,
+      upn: 'avi@x.example',
+      display_name: 'avi',
+      amount: 100,
+      expires_at: '2026-11-15T10:00:00Z', // same day as the grant's expiry
+    } as unknown as GrantShare;
+    const onConfirm = open(undefined, { share, members: [] });
+    change('share-amount-avi@x.example', '150');
+    change('share-reason', 'why');
+    expect(screen.getByTestId('share-summary').textContent).toContain('150');
+    fireEvent.click(screen.getByTestId('share-confirm'));
+    await waitFor(() => expect(onConfirm).toHaveBeenCalled());
+    expect(onConfirm.mock.calls[0][0][0].expires_at).toBe('2026-11-15T10:00:00.000Z');
   });
 });

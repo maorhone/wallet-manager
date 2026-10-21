@@ -206,7 +206,13 @@ export const he = {
     manage: 'חלוקות',
     unshared: 'לא חולק',
     returned: 'הוחזר',
-    closeWarning: 'הסכום שלא נוצל יחזור למענק',
+    closeWarning:
+      'הסכום שלא נוצל יוחזר לקופה של הפרויקטים ויקטין את התקציב של הקבוצה. אי אפשר לחלק אותו מחדש מהמענק. לשינוי גודל חלוקה יש לשנות את הסכום שלה',
+    summary: 'סיכום השינוי',
+    before: 'לפני',
+    after: 'אחרי',
+    unusedReturn: 'יוחזר לקופה',
+    grantEffect: 'נותר לחלוקה במענק אחרי השינוי',
   },
   pmo: {
     tabs: { pool: 'קופה', grants: 'מענקים', projects: 'פרויקטים' } as Record<string, string>,

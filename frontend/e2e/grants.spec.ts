@@ -56,6 +56,7 @@ test('U5 PMO grant then group head share; employee sees the share with expiry; P
   await loginAs(page, DANI);
   await page.goto('/wallet');
   await expect(page.getByTestId('shares-table')).toContainText('400');
+  await expect(page.getByTestId('shares-table')).toContainText('PRJ-U5');
   await expect(page.getByTestId('shares-table')).toContainText('ימים');
 
   // The PMO sees shared and unshared.

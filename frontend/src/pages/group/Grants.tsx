@@ -7,10 +7,11 @@ import {
   Modal,
   Stack,
   Table,
+  Text,
   Textarea,
   Title,
 } from '@mantine/core';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useGrantShares,
   useGrants,
@@ -20,6 +21,7 @@ import {
 } from '../../api/queries';
 import type { Grant, GrantShare, GroupSummary } from '../../api/types';
 import { Credits } from '../../components/Credits';
+import { SyncBadge } from '../../components/SyncBadge';
 import { DateText } from '../../components/DateText';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
@@ -46,6 +48,14 @@ function CloseShare({
   return (
     <Modal opened onClose={onClose} title={`${t.close}: ${share.display_name}`}>
       <Stack data-testid="share-close">
+        <Stack gap={2} data-testid="share-close-summary">
+          <Text size="sm">
+            {t.close}: {share.display_name} · <Credits value={share.amount} />
+          </Text>
+          <Text size="sm">
+            {t.unusedReturn}: <Credits value={Math.max(0, share.amount - share.used)} />
+          </Text>
+        </Stack>
         <Alert variant="light">{t.closeWarning}</Alert>
         <Textarea
           label={he.summary.reason}
@@ -97,20 +107,31 @@ export default function Grants({
   const [edit, setEdit] = useState<GrantShare | null>(null);
   const [closing, setClosing] = useState<GrantShare | null>(null);
   const shares = useGrantShares(open?.id ?? 0, !!open);
+  // The create dialog's taken list comes from the grant being shared, not the open panel.
+  const sharingShares = useGrantShares(sharing?.id ?? 0, !!sharing);
   const members = useGroupMembers(groupId, period, !!sharing);
   const ro = summary.read_only;
+
+  // Open dialogs never survive a period or group change (§12.1).
+  useEffect(() => {
+    setOpen(null);
+    setSharing(null);
+    setEdit(null);
+    setClosing(null);
+  }, [groupId, period]);
   const grant = open && grants.data?.find((g) => g.id === open.id);
 
   if (grants.isPending) return <Loader aria-label={he.loading} />;
   if (grants.error || !grants.data)
     return <ErrorState error={grants.error} onRetry={grants.refetch} />;
   const tz = me?.timezone ?? 'Asia/Jerusalem';
-  const can = !!grant?.actions.share && !ro;
-  const active = (shares.data ?? []).filter((s) => s.status === 'active');
+  const can = !ro;
+  const taken = (sharingShares.data ?? []).filter((s) => s.status === 'active').map((s) => s.upn);
   return (
     <Stack>
       <GrantList
         grants={grants.data}
+        showUnshared
         actions={(g) => (
           <Group gap={4} wrap="nowrap">
             <Button
@@ -136,6 +157,8 @@ export default function Grants({
           </Title>
           {shares.isPending ? (
             <Loader aria-label={he.loading} />
+          ) : shares.error ? (
+            <ErrorState error={shares.error} onRetry={shares.refetch} />
           ) : shares.data && shares.data.length > 0 ? (
             <Table>
               <Table.Thead>
@@ -165,26 +188,35 @@ export default function Grants({
                     <Table.Td>
                       <DateText value={s.expires_at} />
                     </Table.Td>
-                    <Table.Td>{he.pmo.statuses[s.status] ?? s.status}</Table.Td>
+                    <Table.Td>
+                      <Group gap={4} wrap="nowrap">
+                        {he.pmo.statuses[s.status] ?? s.status}
+                        <SyncBadge status={s.sync_status} />
+                      </Group>
+                    </Table.Td>
                     {can && (
                       <Table.Td>
                         {s.status === 'active' && (
                           <Group gap={4} wrap="nowrap">
-                            <Button
-                              size="compact-xs"
-                              data-testid={`share-edit-${s.upn}`}
-                              onClick={() => setEdit(s)}
-                            >
-                              {t.change}
-                            </Button>
-                            <Button
-                              size="compact-xs"
-                              color="red"
-                              data-testid={`share-close-${s.upn}`}
-                              onClick={() => setClosing(s)}
-                            >
-                              {t.close}
-                            </Button>
+                            {s.actions.edit && (
+                              <Button
+                                size="compact-xs"
+                                data-testid={`share-edit-${s.upn}`}
+                                onClick={() => setEdit(s)}
+                              >
+                                {t.change}
+                              </Button>
+                            )}
+                            {s.actions.close && (
+                              <Button
+                                size="compact-xs"
+                                color="red"
+                                data-testid={`share-close-${s.upn}`}
+                                onClick={() => setClosing(s)}
+                              >
+                                {t.close}
+                              </Button>
+                            )}
                           </Group>
                         )}
                       </Table.Td>
@@ -198,13 +230,24 @@ export default function Grants({
           )}
         </Card>
       )}
-      {sharing && members.isPending && <Loader aria-label={he.loading} />}
-      {sharing && members.data && (
+      {sharing && !ro && (members.isPending || sharingShares.isPending) && (
+        <Loader aria-label={he.loading} />
+      )}
+      {sharing && !ro && (members.error || sharingShares.error) && (
+        <ErrorState
+          error={members.error ?? sharingShares.error}
+          onRetry={() => {
+            void members.refetch();
+            void sharingShares.refetch();
+          }}
+        />
+      )}
+      {sharing && !ro && members.data && sharingShares.data && (
         <ShareDialog
-          grant={sharing}
-          members={members.data.members.filter((m) => m.status !== 'kicked')}
+          grant={grants.data.find((g) => g.id === sharing.id) ?? sharing}
+          members={members.data.members.filter((m) => m.status === 'active')}
           selfUpn={me?.upn ?? ''}
-          taken={active.map((s) => s.upn)}
+          taken={taken}
           timezone={tz}
           onClose={() => setSharing(null)}
           onConfirm={(create, reason, key) =>
@@ -212,7 +255,7 @@ export default function Grants({
           }
         />
       )}
-      {edit && grant && (
+      {edit && grant && !ro && (
         <ShareDialog
           grant={grant}
           members={[]}
@@ -232,7 +275,7 @@ export default function Grants({
           }
         />
       )}
-      {closing && grant && (
+      {closing && grant && !ro && (
         <CloseShare
           share={closing}
           onClose={() => setClosing(null)}

@@ -20,6 +20,8 @@ import { Credits } from './Credits';
 
 const t = he.shares;
 const dayOf = (iso: string, tz: string) => todayIn(tz, new Date(iso));
+/** Money is summed as integer micro-units so 0.10 + 0.20 is exactly 0.30. */
+const units = (n: number) => Math.round(n * 1e6);
 
 export interface ShareRowIn {
   upn: string;
@@ -85,18 +87,20 @@ export function ShareDialog({
   const patch = (upn: string, p: Partial<Row>) =>
     setRows({ ...rows, [upn]: { ...row(upn), ...p } });
   const chosen = people.filter((p) => row(p.upn).on);
-  const budget = share ? grant.unshared + share.amount : grant.unshared;
-  const remainder = budget - chosen.reduce((s, p) => s + row(p.upn).amount, 0);
+  const budget = units(grant.unshared) + (share ? units(share.amount) : 0);
+  const remainderU = budget - chosen.reduce((s, p) => s + units(row(p.upn).amount), 0);
+  const remainder = remainderU / 1e6;
   const late = (r: Row) => r.day === '' || r.day > grantDay;
   const bad = chosen.some((p) => row(p.upn).amount <= 0 || late(row(p.upn)));
-  const valid = chosen.length > 0 && remainder >= 0 && !bad && reason.trim() !== '';
+  const valid = chosen.length > 0 && remainderU >= 0 && !bad && reason.trim() !== '';
 
   // The grant's own expiry instant is the cap, so the grant's day maps to it exactly.
+  // An unchanged share expiry keeps its original instant.
   const instant = (r: Row) =>
-    r.day === grantDay
-      ? grant.expires_at
-      : share && r.day === dayOf(share.expires_at, timezone)
-        ? share.expires_at
+    share && r.day === dayOf(share.expires_at, timezone)
+      ? share.expires_at
+      : r.day === grantDay
+        ? grant.expires_at
         : zonedInstant(r.day, '23:59:59', timezone);
 
   const confirm = async () => {
@@ -191,14 +195,38 @@ export function ShareDialog({
         </Table>
         <Group>
           <Text>{t.remainder}:</Text>
-          <Text fw={700} c={remainder < 0 ? 'red' : undefined} data-testid="share-remainder">
+          <Text fw={700} c={remainderU < 0 ? 'red' : undefined} data-testid="share-remainder">
             <Credits value={remainder} />
           </Text>
         </Group>
-        {remainder < 0 && (
+        {remainderU < 0 && (
           <Alert color="red" variant="light" data-testid="share-over">
             {t.over}
           </Alert>
+        )}
+        {chosen.length > 0 && (
+          <Stack gap={2} data-testid="share-summary">
+            <Text fw={600}>{t.summary}</Text>
+            {chosen.map((p) => {
+              const r = row(p.upn);
+              return (
+                <Text size="sm" key={p.upn} data-testid={`share-summary-${p.upn}`}>
+                  {p.display_name}
+                  {share && (
+                    <>
+                      {' '}
+                      {t.before}: <Credits value={share.amount} /> ·{' '}
+                      {dayOf(share.expires_at, timezone)}
+                    </>
+                  )}{' '}
+                  {t.after}: <Credits value={r.amount} /> · {r.day}
+                </Text>
+              );
+            })}
+            <Text size="sm">
+              {t.grantEffect}: <Credits value={remainder} />
+            </Text>
+          </Stack>
         )}
         <Textarea
           label={he.summary.reason}

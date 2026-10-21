@@ -67,6 +67,10 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   ceiling and model pot for the closing month. Returns preserve four decimal places, conserving
   fractional spend. Expiry and member recomputation commit together; concurrent retries do not
   create duplicate future grants. Removing the last model pot clears it in LiteLLM.
+- Review fixes (2.8): share dialogs sum money exactly, keep an unchanged share expiry, show a before/after summary, and
+  offer only active employees; the close warning states that unused money returns to the PMO pool and lowers the group's
+  budget. Edit/close buttons follow each share's server `actions`; share rows show sync status; dialogs close on period
+  change and are hidden for past periods; the group Grants tab shows the unshared remainder; the wallet shows project refs.
 - PMO pool, create/change/close grants, project summary - Done (Step 2.1).
 - Shares (Step 2.2, Done, backend): head, representative or admin shares part of an active grant with an employee
   (`POST /grants/{id}/shares`, bulk and all-or-nothing). Rejections: sum above grant (`SHARE_EXCEEDS_GRANT`), expiry after

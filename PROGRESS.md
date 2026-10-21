@@ -163,6 +163,8 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Review 2.8: all 12 findings fixed (see commit "Step 2.8: review fixes"); Review 2.8 open: none.
+- Flaky (unrelated, backend): full ./scripts/test.sh intermittently hits the 60s pytest-timeout on an asyncpg call (test_rs256_via_jwks, test_restart_catches_up_on_overdue); both pass alone. Vitest also times out at 5s on cold first renders when the machine is loaded.
 - Step 2.9: `MemberSidePanel` gained `withBaseCap` (one-row `PUT /groups/{gid}/members/caps`); `ShareDialog` members type loosened.
   The summary's head rows include `model_tpm_limits` (not in PLAN) so the panel's limits write does not clear them. Tab is shown when any
   row has `actions.edit` (a viewer/PMO never sees it). "Own row read-only" is covered by the API test (a rep who is also a group head);

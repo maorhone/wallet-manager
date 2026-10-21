@@ -15,9 +15,12 @@ const SOON_DAYS = 7;
 export function GrantList({
   grants,
   actions,
+  showUnshared = false,
 }: {
   grants: Grant[];
   actions?: (g: Grant) => ReactNode;
+  /** §12.5.2: the group view also shows the grant remainder. */
+  showUnshared?: boolean;
 }) {
   const [project, setProject] = useState('');
   const [group, setGroup] = useState('');
@@ -81,6 +84,7 @@ export function GrantList({
               <Table.Th>{t.start}</Table.Th>
               <Table.Th>{t.expiry}</Table.Th>
               <Table.Th>{t.shared}</Table.Th>
+              {showUnshared && <Table.Th>{he.shares.unshared}</Table.Th>}
               <Table.Th>{t.used}</Table.Th>
               <Table.Th>{t.returned}</Table.Th>
               <Table.Th>{t.status}</Table.Th>
@@ -113,6 +117,11 @@ export function GrantList({
                 <Table.Td>
                   <Credits value={g.shared} />
                 </Table.Td>
+                {showUnshared && (
+                  <Table.Td data-testid={`grant-unshared-${g.id}`}>
+                    <Credits value={g.unshared} />
+                  </Table.Td>
+                )}
                 <Table.Td>
                   <Credits value={g.used} />
                 </Table.Td>

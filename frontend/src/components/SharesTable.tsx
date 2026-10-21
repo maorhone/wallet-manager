@@ -29,7 +29,7 @@ export function SharesTable({ shares }: { shares: MyWallet['shares'] }) {
             {shares.map((s) => (
               <Table.Tr key={s.id}>
                 <Table.Td>
-                  <Num>#{s.grant_id}</Num>
+                  <Num>{s.project_ref}</Num>
                 </Table.Td>
                 <Table.Td>
                   <Credits value={s.amount} />
