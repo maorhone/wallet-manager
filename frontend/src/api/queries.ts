@@ -101,7 +101,8 @@ export const useGroupSummary = (id: string, period: string) =>
 
 const hasPendingDepartment = (d: DepartmentSummary) =>
   d.split.pmo_reserve_sync_status === 'pending' ||
-  d.groups.some((g) => g.sync_status === 'pending');
+  d.groups.some((g) => g.sync_status === 'pending') ||
+  d.group_heads.some((h) => h.sync_status === 'pending');
 
 export const useDepartmentSummary = (id: string, period: string) =>
   useQuery({

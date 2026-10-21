@@ -163,6 +163,10 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   the Playwright test cannot log in as such a user because the dev seed has no head with department access. Two no-op Bash slips
   (an empty `cat >>` heredoc and a `sed` on /dev/null) changed nothing. One full run hit the 60s pytest-timeout in
   `test_lifecycle_permissions.py::test_matrix[rep_on_self-delete]` (fixture CPU starvation); it passed alone and in the next full run.
+- Step 2.9 stop-hook reruns: `hasPendingDepartment` now includes `group_heads` (the new Playwright test needed the 1 s poll). Other full runs
+  failed on a different unrelated test each time while the sandbox was slow: pytest 60 s fixture timeouts (`test_grants.py::test_head_viewer_employee_403`,
+  `test_review_grants.py::test_review_close_target_authorization[...]`; both pass alone), Playwright `group.spec.ts` U3 (outage banner within 20 s:
+  `/status` cache 10 s + 5 s poll leaves little margin) and `member-actions.spec.ts` U9 ("timeout while setting up context", browser start).
 - Flaky, unrelated to 2.8 (frontend only): `tests/api/test_grants_concurrency.py::test_a11_concurrent_grants_one_pool_insufficient`
   hit the 60s pytest-timeout in fixture setup (`fake_litellm/main.py` `key_generate`, inside SQLAlchemy cache-key generation, pure CPU)
   while the sandbox was starved; it passes alone in 2s and in the earlier full green run (458 passed).

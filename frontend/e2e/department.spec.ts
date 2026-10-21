@@ -80,7 +80,7 @@ test("Rep edits a group head base cap from the Group heads tab; the head's own r
   const row = page.getByTestId('head-row-dana@corp.example');
   await expect(row).toContainText('7,777', { timeout: 15_000 });
   await expect(row.getByTestId('sync-badge')).toHaveAttribute('data-status', 'applied', {
-    timeout: 60_000,
+    timeout: 20_000,
   });
   // A head cannot open the department screens, so the only own-row case is a rep who is also a head
   // (covered by the API test); the other head's row keeps its own controls.
