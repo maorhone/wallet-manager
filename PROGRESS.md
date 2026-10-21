@@ -1,19 +1,27 @@
 # Progress — Wallet Manager
 
 ## Status
-Step 4.4 done: Reports shell, Allocation and Over-allocation tabs.
-Next = Step 4.5 (not started).
-Latest `./scripts/test.sh` (Step 4.4): green; pytest 518 passed / 5 existing skips (190.11 s),
-vitest 45 passed, Playwright 35 passed (2.3 min); ruff, formatting, frontend lint/typecheck pass.
-The required Playwright test and two new scope tests were observed failing before implementation.
-No blockers; no commit/push. No new owner questions or unrelated timeout warnings in this run.
-E2E env handling, default ports and test scripts are unchanged.
+Step 4.5 done: UI usage charts at every level.
+Next = Step 4.6 (not started).
+Latest `./scripts/test.sh` (Step 4.5): green; pytest 518 passed / 5 existing skips (196.59 s),
+vitest 46 passed, Playwright 36 passed (2.2 min); ruff, formatting, frontend lint/typecheck pass.
+Required Vitest and Playwright tests were written first and observed failing before implementation.
+No blockers or new owner questions; no commit/push. E2E scripts/default ports/env handling unchanged.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
 Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.5: generic shared UsageChart accepts bucket/key/spend series, stacks keys safely (including UPNs
+  with dots), fills missing key values with zero and retains cumulative spend/cap line and chart states.
+  My Wallet adapts its existing daily points. Added Usage reports for employee/group/department/global,
+  by-model or authorized by-member stacks, day/week/month buckets, selected-period range, current-cap label
+  and snapshot freshness. Added daily model charts to group/department overviews; PMO remains grants-only.
+  Required one Vitest and one Playwright case written first and observed failing, then passing.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 46 passed,
+  Playwright 36 passed; ruff/format/frontend lint/typecheck pass. No unrelated timeout warnings.
+  PRD updated; Step 4.6 untouched; no commit/push.
 - Step 4.4: `/report/:kind/:id/:tab` shell and selected-scope “דוחות” link; Allocation at own-wallet,
   group, department and global levels, with shared WalletCard, ModelTable, StateBadge and PeriodSelector.
   Child rows show allocation/spend/remaining/percent/state; group member rows include model caps/spend.
@@ -206,12 +214,18 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 4.5: UI: usage charts at every level (not started).
+- Step 4.6: UI: Grants-by-project and Blocked tabs (not started).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 4.5: no SPEC/PLAN conflicts. Reused Step 4.2 `/reports/usage` and existing offline Recharts.
+  The report API returns the current cap, including for a historical range; the UI explicitly labels it.
+  Member toggles use scoped roles and the group summary's existing server permission; APIs enforce scope.
+  PMO-only overviews omit charts because the report API limits PMO to grants. No new API prefix,
+  backend/scheduler changes or test script changes. Focused/full E2E uses env overrides 4130–4132.
+  The new browser test polls the snapshot API before mounting the chart, matching the existing report test.
 - Step 4.4: no SPEC/PLAN conflicts. Reused existing APIs only: global Allocation renders visible department
   reports because `/reports/allocation` supports department/group/employee levels. Findings are current-only
   because the existing `/reports/overallocation` has no period parameter. The UI labels this explicitly.

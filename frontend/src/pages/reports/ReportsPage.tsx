@@ -7,8 +7,9 @@ import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
 import Allocation, { GlobalAllocation } from './Allocation';
 import Overallocation from './Overallocation';
+import Usage from './Usage';
 
-/** Phase 4 report shell. Only Allocation and Over-allocation are available in Step 4.4. */
+/** Phase 4 report shell. Allocation, Usage and Over-allocation. */
 export default function ReportsPage() {
   const { kind = '', id = '', tab = 'allocation' } = useParams();
   const [search] = useSearchParams();
@@ -24,8 +25,8 @@ export default function ReportsPage() {
   }
   const tabs =
     kind === 'department' || kind === 'global'
-      ? (['allocation', 'overallocation'] as const)
-      : (['allocation'] as const);
+      ? (['allocation', 'usage', 'overallocation'] as const)
+      : (['allocation', 'usage'] as const);
   if (!tabs.some((t) => t === tab)) {
     return (
       <Navigate
@@ -62,6 +63,14 @@ export default function ReportsPage() {
             period={period}
           />
         ))}
+      {tab === 'usage' && (
+        <Usage
+          key={`${kind}:${id}`}
+          scope={kind === 'me' ? 'employee' : (kind as 'group' | 'department' | 'global')}
+          id={kind === 'me' ? me.upn : id}
+          period={period}
+        />
+      )}
       {tab === 'overallocation' && (
         <Overallocation department={kind === 'department' ? id : undefined} />
       )}

@@ -87,7 +87,7 @@ export default function MyWallet() {
         )}
       </Card>
       <UsageChart
-        points={usage.data}
+        series={usage.data?.map((p) => ({ bucket: p.day, key: p.model, spend: p.spend }))}
         loading={usage.isPending}
         error={usage.error}
         onRetry={usage.refetch}

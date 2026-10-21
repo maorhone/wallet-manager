@@ -1,10 +1,13 @@
 import { Card, List, Stack, Table, Text, Title } from '@mantine/core';
+import { useMe } from '../../api/queries';
 import type { GroupSummary, MemberSlim } from '../../api/types';
 import { Credits } from '../../components/Credits';
 import { EmptyState } from '../../components/EmptyState';
 import { Num } from '../../components/Num';
 import { Pct } from '../../components/Pct';
 import { WalletCard } from '../../components/WalletCard';
+import Usage from '../reports/Usage';
+import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
 
 const t = he.groupPage;
@@ -38,7 +41,9 @@ function MemberList({
 }
 
 export default function Overview({ summary: s }: { summary: GroupSummary }) {
+  const { data: me } = useMe();
   const w = s.wallet;
+  const { period } = usePeriod();
   return (
     <Stack>
       <WalletCard
@@ -53,6 +58,9 @@ export default function Overview({ summary: s }: { summary: GroupSummary }) {
         allocated={w.allocated}
         unallocated={w.unallocated}
       />
+      {(s.actions.edit_members || me?.roles.some((r) => r.role === 'viewer')) && (
+        <Usage scope="group" id={String(s.group.id)} period={period} controls={false} />
+      )}
       <Card withBorder data-testid="pots">
         <Title order={5}>{t.pots}</Title>
         {s.pots.length === 0 ? (

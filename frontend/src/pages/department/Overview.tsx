@@ -1,17 +1,22 @@
 import { Anchor, Card, Stack, Table, Title } from '@mantine/core';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useMe } from '../../api/queries';
 import type { DepartmentSummary } from '../../api/types';
 import { Credits } from '../../components/Credits';
 import { Pct } from '../../components/Pct';
 import { SplitChart } from '../../components/SplitChart';
 import { API_STATE, StateBadge } from '../../components/StateBadge';
 import { WalletCard } from '../../components/WalletCard';
+import Usage from '../reports/Usage';
+import { usePeriod } from '../../components/PeriodSelector';
 import { he } from '../../i18n/he';
 
 const t = he.departmentPage;
 
 export default function Overview({ summary: s }: { summary: DepartmentSummary }) {
+  const { data: me } = useMe();
   const w = s.wallet;
+  const { period } = usePeriod();
   const [search] = useSearchParams();
   return (
     <Stack>
@@ -27,6 +32,16 @@ export default function Overview({ summary: s }: { summary: DepartmentSummary })
         allocated={w.allocated}
         unallocated={w.unallocated}
       />
+      {me?.roles.some(
+        (r) =>
+          r.role === 'platform_admin' ||
+          (r.role === 'viewer' && r.scope_kind === 'global') ||
+          (['department_rep', 'viewer'].includes(r.role) &&
+            r.scope_kind === 'department' &&
+            r.scope_id === s.department.id),
+      ) && (
+        <Usage scope="department" id={String(s.department.id)} period={period} controls={false} />
+      )}
       <Card withBorder>
         <Title order={5}>{t.splitChart}</Title>
         <SplitChart

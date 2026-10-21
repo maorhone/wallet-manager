@@ -89,7 +89,14 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   level, entity/model, allocated amount, ceiling and a warning badge. These findings are explicitly current-only,
   independent of the selected period. Existing server permissions apply: member reports require member visibility,
   scoped viewers get department aggregates, and PMO's grants report link awaits the Grants tab (Step 4.6).
-  Usage charts, grants/blocked tabs and concurrency peaks UI remain planned (Steps 4.5–4.7).
+- Usage charts at every level - Done (Step 4.5).
+  The Usage report tab shows snapshot spend stacked by model for own-wallet, group, department and global scopes,
+  with day/week/month buckets, cumulative spend and a cap line. Heads, representatives and admins can switch
+  authorized group/department/global reports to member stacks; viewers see model aggregates only.
+  Group and department overviews include daily model charts; My Wallet keeps its daily chart.
+  The selected period controls the date range; the report labels the API's cap as current and shows snapshot freshness.
+  Loading, empty, error and retry states reuse the shared chart. PMO remains limited to grants.
+  Grants/blocked tabs and concurrency peaks UI remain planned (Steps 4.6–4.7).
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 

@@ -402,3 +402,17 @@ export interface OverallocationFinding {
   department_id: number | null;
   model: string | null;
 }
+
+export type UsageScope = AllocationLevel | 'global';
+export type UsageGranularity = 'day' | 'week' | 'month';
+export type UsageBy = 'model' | 'member';
+export interface UsageSeriesPoint {
+  bucket: string;
+  key: string;
+  spend: number;
+}
+export interface UsageReport {
+  series: UsageSeriesPoint[];
+  cap: number;
+  taken_at: string | null;
+}

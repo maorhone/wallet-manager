@@ -91,3 +91,61 @@ test("Rep opens the department allocation report with group and model rows, and 
   await page.getByRole('tab', { name: 'הקצאה וניצול', exact: true }).click();
   await expect(page.getByTestId('wallet-card')).toContainText('5,678');
 });
+
+test('Group head sees the group usage chart stacked by model and switches to by member; a viewer has no by-member option', async ({
+  page,
+}) => {
+  await loginAs(page, 'dana@corp.example');
+  const me = await (await page.request.get('/me')).json();
+  const group = me.group.id;
+  const period = me.current_period;
+  await fakeSpend([
+    {
+      team_id: 'A1',
+      user_id: 'dani@corp.example',
+      model: 'usage-model-a',
+      amount: 12,
+      at: `${period}-01T12:00:00Z`,
+    },
+    {
+      team_id: 'A1',
+      user_id: 'dani@corp.example',
+      model: 'usage-model-b',
+      amount: 8,
+      at: `${period}-01T12:00:00Z`,
+    },
+  ]);
+  // Wait for the snapshot worker before mounting the cached usage query.
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(
+        `/reports/usage?scope=group&id=${group}&from=${period}-01&to=${period}-01`,
+      );
+      const report = await response.json();
+      return report.series?.reduce((sum: number, p: { spend: number }) => sum + p.spend, 0);
+    })
+    .toBe(20);
+  await page.goto(`/group/${group}/overview`);
+  await expect(page.getByTestId('usage-chart')).toContainText('usage-model-a');
+  await page.getByRole('link', { name: 'דוחות', exact: true }).click();
+  await page.getByRole('tab', { name: 'שימוש', exact: true }).click();
+  const chart = page.getByTestId('usage-chart');
+  await expect(chart).toContainText('usage-model-a');
+  await expect(chart).toContainText('usage-model-b');
+  await expect(chart.locator('.recharts-reference-line')).toHaveCount(1);
+  await page.getByLabel('קיבוץ שימוש').selectOption('member');
+  await expect(chart).toContainText('dani@corp.example');
+  await expect(chart).not.toContainText('usage-model-a');
+  await page.getByLabel('רזולוציה').selectOption('week');
+  await expect(chart).toContainText('dani@corp.example');
+  await page.getByLabel('רזולוציה').selectOption('month');
+  await expect(chart).toContainText('dani@corp.example');
+  await loginAs(page, 'viewer@corp.example');
+  await page.goto(`/department/${me.department.id}/overview`);
+  await expect(page.getByTestId('usage-chart')).toContainText('usage-model-a');
+  await page.getByRole('link', { name: 'דוחות', exact: true }).click();
+  await page.getByRole('tab', { name: 'שימוש', exact: true }).click();
+  await expect(page.getByLabel('קיבוץ שימוש')).toHaveCount(0);
+  await expect(chart).toContainText('usage-model-a');
+  await expect(chart).not.toContainText('dani@corp.example');
+});

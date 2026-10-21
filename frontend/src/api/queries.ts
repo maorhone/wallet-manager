@@ -31,6 +31,10 @@ import type {
   Policies,
   Status,
   UsagePoint,
+  UsageReport,
+  UsageScope,
+  UsageGranularity,
+  UsageBy,
   WriteResponse,
 } from './types';
 
@@ -428,4 +432,32 @@ export const useMyUsage = (from: string, to: string) =>
     queryKey: keys.usage(from, to),
     queryFn: () => apiFetch<UsagePoint[]>(`/me/usage?from=${from}&to=${to}`),
     enabled: from !== '',
+  });
+
+export const useUsageReport = (
+  scope: UsageScope,
+  id: string,
+  period: string,
+  granularity: UsageGranularity = 'day',
+  by: UsageBy = 'model',
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: ['reports', 'usage', scope, id, period, granularity, by],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<UsageReport>(
+        `/reports/usage?${new URLSearchParams({
+          scope,
+          ...(scope === 'global' ? {} : { id }),
+          from: `${period}-01`,
+          to,
+          granularity,
+          by,
+        })}`,
+      );
+    },
+    enabled: enabled && period !== '' && id !== '',
+    refetchInterval: 15000,
   });
