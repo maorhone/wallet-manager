@@ -351,3 +351,54 @@ export interface NotificationsList {
 }
 
 export type Policies = Record<string, { min?: number; default?: number; max?: number }>;
+
+export type AllocationLevel = 'department' | 'group' | 'employee';
+
+export interface ModelAllocation {
+  model: string;
+  allocation: number | null;
+  spend: number;
+  pct: number | null;
+}
+
+export interface AllocationValues {
+  total: number;
+  allocated: number;
+  spend: number;
+  remaining: number;
+  pct: number;
+  state: ApiState;
+}
+
+export interface AllocationRow extends AllocationValues {
+  id: number | string;
+  name: string;
+  kind: string;
+  base: number | null;
+  grants: number | null;
+  base_cap: number | null;
+  shares_total: number | null;
+  model_caps: Record<string, number> | null;
+  models: ModelAllocation[];
+}
+
+export interface AllocationReport extends AllocationValues {
+  level: AllocationLevel;
+  id: number | string;
+  name: string;
+  period: string;
+  rows: AllocationRow[];
+  models: ModelAllocation[];
+  spend_taken_at: string | null;
+}
+
+export interface OverallocationFinding {
+  source: 'wm' | 'litellm';
+  level: 'department' | 'group' | 'group_model' | 'member_model';
+  entity_id: number | string;
+  name: string | null;
+  allocated: number;
+  total: number;
+  department_id: number | null;
+  model: string | null;
+}

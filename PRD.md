@@ -59,7 +59,7 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   each employee can read their own report. PMO report access is limited to grants.
   `GET /reports/grants?department=&project_ref=` groups visible grants by project with distinct department/group counts,
   grant count, amount, shared, unshared, attributed used and returned, plus totals across visible grants. Visibility matches
-  the grant list, including heads' own groups and PMO's own department. Report UI remains planned.
+  the grant list, including heads' own groups and PMO's own department. Grants report UI remains planned.
 - Usage, concurrency peaks and blocked spend backend - Done (Step 4.2).
   `GET /reports/usage?scope=employee|group|department|global&id=&from=&to=&granularity=day|week|month&by=model|member`
   returns snapshot series, the current cap and snapshot time for up to 400 inclusive local dates. Day snapshots now follow
@@ -80,7 +80,16 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
   one summary with the full count and the top 100 affected members (peak, UTC timestamp, effective limit).
   Members with no effective limit are excluded. This pilot input for D6 can be muted.
   The same job updates `wm_concurrency_peak{scope="global"}` and `wm_blocked_employees` for yesterday; the latter counts
-  distinct employees at a base or model cap using snapshots and FR-R5. Report UI remains planned (Step 4.4 onward).
+  distinct employees at a base or model cap using snapshots and FR-R5.
+- Reports shell, Allocation and Over-allocation UI - Done (Step 4.4).
+  The Hebrew “דוחות” link opens `/report/:kind/:id/:tab` for the selected own-wallet, group, department or global scope.
+  Allocation shows the shared wallet card with snapshot freshness, child allocation/spend/remaining/status rows and model
+  allocations/spend; global scope lists department reports. The shared period selector loads that period's values,
+  and past periods remain read-only. Department and global scopes also have an Over-allocation tab showing source,
+  level, entity/model, allocated amount, ceiling and a warning badge. These findings are explicitly current-only,
+  independent of the selected period. Existing server permissions apply: member reports require member visibility,
+  scoped viewers get department aggregates, and PMO's grants report link awaits the Grants tab (Step 4.6).
+  Usage charts, grants/blocked tabs and concurrency peaks UI remain planned (Steps 4.5–4.7).
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 

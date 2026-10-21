@@ -21,6 +21,14 @@ export const scopePath = (s: Scope): string => {
   }
 };
 
+/** Reports available in this step; PMO grants are added with the Grants report tab. */
+export function reportPath(s: Scope): string | null {
+  if (s.role === 'pmo' || (s.kind === 'group' && s.role === 'viewer')) return null;
+  const kind = s.kind === 'self' ? 'me' : s.kind === 'platform' ? 'global' : s.kind;
+  const id = s.kind === 'self' ? 'me' : s.kind === 'platform' ? 'all' : s.id;
+  return `/report/${kind}/${id}/allocation`;
+}
+
 export function scopeLabel(s: Scope): string {
   const role = s.role ? ` (${he.roles[s.role] ?? s.role})` : '';
   switch (s.kind) {
@@ -37,6 +45,11 @@ export function scopeLabel(s: Scope): string {
 
 /** Which scope the current URL belongs to (undefined on /login and unknown paths). */
 export function scopeFromPath(pathname: string, scopes: Scope[]): Scope | undefined {
+  if (pathname.startsWith('/report/')) {
+    const [, , kind, id] = pathname.split('/');
+    const key = kind === 'me' ? 'self' : kind === 'global' ? 'platform' : `${kind}:${id}`;
+    return scopes.find((s) => scopeKey(s) === key && s.role !== 'pmo');
+  }
   const [, first, id] = pathname.split('/');
   const key = first === 'wallet' ? 'self' : first === 'platform' ? 'platform' : `${first}:${id}`;
   return scopes.find((s) => scopeKey(s) === key);

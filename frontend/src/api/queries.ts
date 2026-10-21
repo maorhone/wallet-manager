@@ -7,6 +7,8 @@ import {
 } from '@tanstack/react-query';
 import { apiFetch, apiPatch, apiPost, apiPut } from './client';
 import type {
+  AllocationLevel,
+  AllocationReport,
   AuditEntry,
   DepartmentSummary,
   DevUser,
@@ -23,6 +25,7 @@ import type {
   MyWallet,
   NotificationPref,
   NotificationsList,
+  OverallocationFinding,
   PendingPlacement,
   PmoPool,
   Policies,
@@ -30,6 +33,29 @@ import type {
   UsagePoint,
   WriteResponse,
 } from './types';
+
+export const useAllocationReport = (level: AllocationLevel, id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'allocation', level, id, period],
+    queryFn: () =>
+      apiFetch<AllocationReport>(
+        `/reports/allocation?${new URLSearchParams({ level, id, period })}`,
+      ),
+    enabled: period !== '' && id !== '',
+    refetchInterval: 15000,
+  });
+
+/** The server authorizes visible departments; this filter narrows the selected department. */
+export const useOverallocationReport = (department?: string) =>
+  useQuery({
+    queryKey: ['reports', 'overallocation'],
+    queryFn: () => apiFetch<{ findings: OverallocationFinding[] }>('/reports/overallocation'),
+    select: (data) =>
+      department === undefined
+        ? data.findings
+        : data.findings.filter((f) => f.department_id === Number(department)),
+    refetchInterval: 15000,
+  });
 
 export const keys = {
   me: ['me'] as const,

@@ -1,19 +1,29 @@
 # Progress — Wallet Manager
 
 ## Status
-Step 4.3 done: critical over-allocation alerts, daily concurrency-at-limit summary and report gauges.
-Next = Step 4.4 (not started).
-Latest `./scripts/test.sh` (Step 4.3 review fixes): green; pytest 518 passed / 5 skipped (204.60 s),
-vitest 43 passed, Playwright 34 passed (2.3 min); ruff, formatting, frontend lint/typecheck pass.
-10 original Step 4.3 tests plus 6 review regression cases; failing cases observed before implementation.
-No blockers; no commit/push. E2E env handling, default ports and test scripts are unchanged.
-The prior unrelated pytest timeout investigation is recorded under Notes; this full script exited 0 without that warning.
+Step 4.4 done: Reports shell, Allocation and Over-allocation tabs.
+Next = Step 4.5 (not started).
+Latest `./scripts/test.sh` (Step 4.4): green; pytest 518 passed / 5 existing skips (190.11 s),
+vitest 45 passed, Playwright 35 passed (2.3 min); ruff, formatting, frontend lint/typecheck pass.
+The required Playwright test and two new scope tests were observed failing before implementation.
+No blockers; no commit/push. No new owner questions or unrelated timeout warnings in this run.
+E2E env handling, default ports and test scripts are unchanged.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
 Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.4: `/report/:kind/:id/:tab` shell and selected-scope “דוחות” link; Allocation at own-wallet,
+  group, department and global levels, with shared WalletCard, ModelTable, StateBadge and PeriodSelector.
+  Child rows show allocation/spend/remaining/percent/state; group member rows include model caps/spend.
+  Global allocation reuses department report cards. Past-period values and snapshot freshness are shown.
+  Department/global Over-allocation tabs show scoped current findings, source, level, model and ceilings;
+  a clear label explains that findings are current-only even when a past period is selected.
+  Added the required single Playwright test (including past values and findings), plus two scope regression tests.
+  Observed all three new cases fail before implementation. Full `./scripts/test.sh` exited 0:
+  pytest 518 passed / 5 existing skips, vitest 45 passed, Playwright 35 passed; lint/format/typecheck pass.
+  PRD updated; Step 4.5 untouched. No commit/push.
 - Step 4.3 review fixes: confirmed the major default-concurrency finding; daily alerts now compare peaks against
   the personal override or `concurrency.default`, matching key provisioning, and report that effective limit.
   Added six regression cases for default/changed default, threshold boundaries, override precedence and no limit;
@@ -196,12 +206,19 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 4.4: UI: Reports page shell, Allocation and Over-allocation tabs (not started).
+- Step 4.5: UI: usage charts at every level (not started).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 4.4: no SPEC/PLAN conflicts. Reused existing APIs only: global Allocation renders visible department
+  reports because `/reports/allocation` supports department/group/employee levels. Findings are current-only
+  because the existing `/reports/overallocation` has no period parameter. The UI labels this explicitly.
+  D11 keeps group viewers out of member reports; department/global viewers see department aggregates.
+  PMO scopes get their grant reports in Step 4.6; this step does not offer an unauthorized Allocation link.
+  No new API prefix (`reports` is already proxied), Python changes, scheduler work or test script changes.
+  Focused E2E uses env overrides 4130–4132; defaults remain unchanged. No new owner questions or blockers.
 - Step 4.3 failure investigation (2026-10-21): the reported
   `tests/api/test_lifecycle_permissions.py::test_matrix[head_on_self-move]` failure was a 60 s
   pytest-timeout during `provisioned` fixture setup, before the test body:
