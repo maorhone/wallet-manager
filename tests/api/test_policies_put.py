@@ -1,5 +1,6 @@
 """§11.1 PUT /policies, §12.5.5 Policies."""
 
+import pytest
 from sqlalchemy import select
 
 from app.models import AuditLog, Grp
@@ -92,3 +93,41 @@ async def test_overalloc_factor_per_group_then_caps_check_uses_it(login, put, pr
     out_of_range = await put(admin, "/policies", {"overalloc_factors": {str(A1): 3.0}})
     assert out_of_range.status_code == 422
     assert out_of_range.json()["code"] == "INVALID_REQUEST"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("thresholds", []),
+        ("thresholds", None),
+        ("thresholds", {"near": "0.8"}),
+        ("thresholds", {"full": True}),
+        ("concurrency", {"min": 1, "max": 8}),
+        ("concurrency", []),
+        ("concurrency", {"min": 1, "default": "4", "max": 8}),
+        ("rpm", {"min": False, "default": 120, "max": 600}),
+        ("rpm", {"min": 1, "default": 120.5, "max": 600}),
+        ("overalloc_factor_default", "1.2"),
+        ("overalloc_factor_default", True),
+        ("overalloc_factors", []),
+        ("overalloc_factors", None),
+        ("overalloc_factors", {"bad": 1.2}),
+        ("overalloc_factors", {"1.5": 1.2}),
+        ("overalloc_factors", {"9223372036854775808": 1.2}),
+        ("overalloc_factors", {"1": "1.2"}),
+        ("overalloc_factors", {"1": True}),
+    ],
+)
+async def test_malformed_policy_rejected_before_mutation(login, put, seeded, key, value):
+    admin = await login("admin")
+    before = (await admin.get("/policies")).json()
+    async with seeded() as s:
+        audits = len(list(await s.scalars(select(AuditLog))))
+    r = await put(admin, "/policies", {"overalloc_factor_default": 1.5, key: value})
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "INVALID_REQUEST"
+    assert r.json()["details"]["field"] == key
+    assert (await admin.get("/policies")).json() == before
+    async with seeded() as s:
+        assert len(list(await s.scalars(select(AuditLog)))) == audits
+        assert (await s.get(Grp, A1)).overalloc_factor == 1

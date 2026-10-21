@@ -44,6 +44,9 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 - Per-model allowances per department, pots per group, personal model caps, over-allocation factor.
 - Group and personal tpm/rpm/concurrency limits within platform policy; member defaults for new joiners.
 - Every sum is checked under a per-parent advisory lock; errors carry requested/available/parent_total.
+- Platform review fixes (Step 3.2): malformed policy values return 422 before any change; global role bindings can be
+  replaced or removed (the last admin binding remains protected). Concurrent creation rejects duplicate department/group
+  DNs and second staff groups with 422; database constraints also enforce these rules.
 
 ### 4.2 Wallets and reports (FR-E, FR-R, FR-V) - Phase 1: Done
 

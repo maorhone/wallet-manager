@@ -1,9 +1,12 @@
 """§11.1 Platform: policies, department/group creation, role bindings. Admin only throughout."""
 
+import math
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
+from app.db import LockKind
 from app.directory import Directory
 from app.errors import ApiError, invalid_request
 from app.models import Department, Grp, Policy, RoleBinding
@@ -18,6 +21,31 @@ _PLAIN_KEYS = ("overalloc_factor_default", "thresholds")
 _ALLOWED_KEYS = frozenset({*_RANGE_KEYS, *_PLAIN_KEYS, "overalloc_factors"})
 
 
+def _policy_number(value) -> bool:
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
+def _creation_conflict(exc: IntegrityError) -> None:
+    # asyncpg exposes constraint_name on the wrapped PostgreSQL exception.
+    constraint = getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
+    fields = {
+        "department_litellm_org_id_key": "litellm_org_id",
+        "grp_litellm_team_id_key": "litellm_team_id",
+        "uq_department_ad_group_dn": "ad_group_dn",
+        "uq_grp_ad_group_dn": "ad_group_dn",
+        "uq_grp_department_staff": "kind",
+    }
+    if constraint in fields:
+        field = fields[constraint]
+        message = (
+            "Department already has a staff group (D13)"
+            if field == "kind"
+            else f"{field} already exists"
+        )
+        raise invalid_request(message, {"field": field}) from exc
+    raise exc
+
+
 async def set_policies(ctx: WriteContext, principal: Principal, body: dict) -> list[dict]:
     role = can_manage_platform(principal)
     for key in body:
@@ -26,30 +54,61 @@ async def set_policies(ctx: WriteContext, principal: Principal, body: dict) -> l
     for key in _RANGE_KEYS:
         if key in body:
             v = body[key]
+            if (
+                not isinstance(v, dict)
+                or set(v) != {"min", "default", "max"}
+                or any(type(n) is not int for n in v.values())
+            ):
+                raise invalid_request(
+                    f"{key}: expected integer min, default and max", {"field": key}
+                )
             if not v["min"] <= v["default"] <= v["max"]:
                 raise invalid_request(f"{key}: min must be <= default <= max", {"field": key})
+    if "thresholds" in body:
+        v = body["thresholds"]
+        if (
+            not isinstance(v, dict)
+            or not set(v) <= {"near", "full"}
+            or any(not _policy_number(n) for n in v.values())
+        ):
+            raise invalid_request(
+                "thresholds must map near/full to numbers", {"field": "thresholds"}
+            )
     if "overalloc_factor_default" in body:
         v = body["overalloc_factor_default"]
-        if not 1.0 <= v <= 2.0:
+        if not _policy_number(v) or not 1 <= v <= 2:
             raise invalid_request(
                 "overalloc_factor_default must be within [1.0, 2.0]",
                 {"field": "overalloc_factor_default"},
             )
 
-    overalloc_factors: dict[str, float] = body.get("overalloc_factors") or {}
+    overalloc_factors = body.get("overalloc_factors", {})
+    if not isinstance(overalloc_factors, dict):
+        raise invalid_request(
+            "overalloc_factors must be a group-id map", {"field": "overalloc_factors"}
+        )
+    for k, factor in overalloc_factors.items():
+        if (
+            not isinstance(k, str)
+            or not k.isascii()
+            or not k.isdigit()
+            or len(k) > 19
+            or not 0 < int(k) <= 9223372036854775807
+        ):
+            raise invalid_request("Invalid group id", {"field": "overalloc_factors"})
+        if not _policy_number(factor) or not 1 <= factor <= 2:
+            raise invalid_request(
+                "overalloc_factors value must be within [1.0, 2.0]",
+                {"field": "overalloc_factors"},
+            )
     groups: dict[int, Grp] = {}
     if overalloc_factors:
         ids = [int(k) for k in overalloc_factors]
         groups = {g.id: g for g in await ctx.db.scalars(select(Grp).where(Grp.id.in_(ids)))}
-        for k, factor in overalloc_factors.items():
+        for k in overalloc_factors:
             gid = int(k)
             if gid not in groups:
                 raise invalid_request("Unknown group id", {"group_id": gid})
-            if not 1.0 <= factor <= 2.0:
-                raise invalid_request(
-                    "overalloc_factors value must be within [1.0, 2.0]",
-                    {"field": "overalloc_factors"},
-                )
 
     entities = []
     for key, value in body.items():
@@ -82,6 +141,7 @@ async def create_department(
     ctx: WriteContext, principal: Principal, body: DepartmentCreateIn
 ) -> list[dict]:
     role = can_manage_platform(principal)
+    await ctx.lock(LockKind.PLATFORM, 0)
     if await ctx.db.scalar(
         select(Department.id).where(Department.litellm_org_id == body.litellm_org_id)
     ):
@@ -96,7 +156,10 @@ async def create_department(
         budget=body.budget, budget_period=body.budget_period,
     )  # fmt: skip
     ctx.db.add(dept)
-    await ctx.db.flush()
+    try:
+        await ctx.db.flush()
+    except IntegrityError as exc:
+        _creation_conflict(exc)
     after = {
         "name": dept.name, "litellm_org_id": dept.litellm_org_id, "ad_group_dn": dept.ad_group_dn,
         "budget": dept.budget, "budget_period": dept.budget_period,
@@ -110,6 +173,8 @@ async def create_group(
     ctx: WriteContext, principal: Principal, department_id: int, body: GroupCreateIn
 ) -> list[dict]:
     role = can_manage_platform(principal)
+    await ctx.lock(LockKind.PLATFORM, 1)
+    await ctx.lock(LockKind.DEPARTMENT, department_id)
     if await ctx.db.get(Department, department_id) is None:
         raise ApiError(404, "NOT_FOUND", "Department not found")
     if await ctx.db.scalar(select(Grp.id).where(Grp.litellm_team_id == body.litellm_team_id)):
@@ -129,7 +194,10 @@ async def create_group(
         default_member_cap=body.default_member_cap, status="active",
     )  # fmt: skip
     ctx.db.add(group)
-    await ctx.db.flush()
+    try:
+        await ctx.db.flush()
+    except IntegrityError as exc:
+        _creation_conflict(exc)
     after = {
         "name": group.name, "litellm_team_id": group.litellm_team_id,
         "ad_group_dn": group.ad_group_dn, "kind": group.kind,
@@ -202,9 +270,18 @@ async def put_role_bindings(
         )
     )
     existing_dns = {r.ad_group_dn for r in existing}
-    for row in existing:
-        if row.ad_group_dn not in new_dns:
-            await ctx.db.delete(row)
+    removed_dns = existing_dns - new_dns
+    if removed_dns:
+        await ctx.db.execute(
+            delete(RoleBinding).where(
+                RoleBinding.role == body.role,
+                RoleBinding.scope_kind == body.scope_kind,
+                RoleBinding.scope_id.is_(None)
+                if body.scope_id is None
+                else RoleBinding.scope_id == body.scope_id,
+                RoleBinding.ad_group_dn.in_(removed_dns),
+            )
+        )
     for dn in new_dns - existing_dns:
         ctx.db.add(
             RoleBinding(

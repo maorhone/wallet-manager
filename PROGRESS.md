@@ -6,6 +6,7 @@ Latest `./scripts/test.sh` (Step 3.1): green; pytest 477 passed (6 skipped real-
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.2 review fixes (Codex fallback): fixed policy shape/type validation, NULL-safe global binding deletion, and serialized creation with DB DN/staff uniqueness; all three findings confirmed; regressions reproduced before fixes; pytest 527 passed/6 skipped, vitest 43 and Playwright 34 passed, lint/format/typecheck green (full script stopped at read-only browser cache; installer passed separately with writable temp cache); next: Step 3.3; blockers: none.
 - Step 2.10: UI `NotificationsBell` (header; unread count, drawer, mark read, scope link) and `NotificationPrefs` (on My wallet;
   critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
   `notifications.spec.ts` (+1, 34 total). Prefs come from `GET /me/notifications` (no separate GET prefs endpoint). Full

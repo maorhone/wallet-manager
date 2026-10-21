@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -40,6 +41,7 @@ def _created() -> Mapped[datetime]:
 
 class Department(Base):
     __tablename__ = "department"
+    __table_args__ = (Index("uq_department_ad_group_dn", "ad_group_dn", unique=True),)
     id: Mapped[int] = mapped_column(BigInteger, **ID)
     litellm_org_id: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
@@ -62,6 +64,13 @@ class DepartmentModelAllowance(Base):
 class Grp(Base):
     __tablename__ = "grp"
     __table_args__ = (
+        Index("uq_grp_ad_group_dn", "ad_group_dn", unique=True),
+        Index(
+            "uq_grp_department_staff",
+            "department_id",
+            unique=True,
+            postgresql_where=text("kind = 'department_staff'"),
+        ),
         CheckConstraint(_in("kind", "regular", "department_staff"), name="ck_grp_kind"),
         CheckConstraint(
             _in("status", "active", "pending_dept_move", "archived"), name="ck_grp_status"
