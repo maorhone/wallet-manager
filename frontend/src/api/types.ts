@@ -138,7 +138,7 @@ export interface MemberSlim {
 }
 
 export interface GroupSummary extends PeriodEnvelope {
-  group: { id: number; name: string; default_member_cap: number };
+  group: { id: number; department_id: number; name: string; default_member_cap: number };
   wallet: {
     total: number;
     allocated: number;

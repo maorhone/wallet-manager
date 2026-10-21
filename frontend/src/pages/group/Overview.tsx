@@ -58,9 +58,14 @@ export default function Overview({ summary: s }: { summary: GroupSummary }) {
         allocated={w.allocated}
         unallocated={w.unallocated}
       />
-      {(s.actions.edit_members || me?.roles.some((r) => r.role === 'viewer')) && (
-        <Usage scope="group" id={String(s.group.id)} period={period} controls={false} />
-      )}
+      {(s.actions.edit_members ||
+        me?.roles.some(
+          (r) =>
+            r.role === 'viewer' &&
+            (r.scope_kind === 'global' ||
+              (r.scope_kind === 'department' && r.scope_id === s.group.department_id) ||
+              (r.scope_kind === 'group' && r.scope_id === s.group.id)),
+        )) && <Usage scope="group" id={String(s.group.id)} period={period} controls={false} />}
       <Card withBorder data-testid="pots">
         <Title order={5}>{t.pots}</Title>
         {s.pots.length === 0 ? (

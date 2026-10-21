@@ -393,6 +393,7 @@ async def group_summary(
         **_envelope(pc, spend),
         "group": {
             "id": group.id,
+            "department_id": group.department_id,
             "name": group.name,
             "default_member_cap": group.default_member_cap,
         },  # fmt: skip

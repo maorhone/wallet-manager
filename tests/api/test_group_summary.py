@@ -42,6 +42,7 @@ async def test_viewer_aggregates_only(login, seeded, snapshot):
     await _prep(seeded, snapshot)
     viewer = await login("viewer")
     body = (await viewer.get("/groups/1/summary")).json()
+    assert body["group"]["department_id"] == 1
     assert body["wallet"]["remaining"] == 190000
     assert body["top_consumers"] == [] and body["actions"] == NO_ACTIONS
     assert (await viewer.get("/groups/1/members")).status_code == 403

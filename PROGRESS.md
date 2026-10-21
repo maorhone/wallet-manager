@@ -245,6 +245,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 4.5 review fix: group overview usage visibility now matches backend scope permissions; summary exposes the group department ID, with regressions for unrelated/scoped viewers and member editors. No blockers; next remains unchanged.
 - Step 4.7: no SPEC/PLAN behavior conflicts. Reused Step 4.2's live, scoped
   `/reports/concurrency-peaks`, existing Recharts and shared report states. The selected calendar
   month stays within the API's 31-local-date limit; member rows show the API's current personal
