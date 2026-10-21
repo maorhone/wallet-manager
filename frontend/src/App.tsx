@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { apiPost } from './api/client';
 import { useMe } from './api/queries';
 import { ErrorState } from './components/ErrorState';
+import { NotificationsBell } from './components/NotificationsBell';
 import { Num } from './components/Num';
 import { PeriodSelector } from './components/PeriodSelector';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
@@ -32,6 +33,7 @@ export function Shell() {
             <PeriodSelector />
           </Group>
           <Group>
+            <NotificationsBell />
             <Text size="sm">
               {me.display_name} (<Num>{me.upn}</Num>)
             </Text>

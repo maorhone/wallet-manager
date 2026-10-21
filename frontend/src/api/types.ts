@@ -324,4 +324,27 @@ export interface GrantShare {
   closed_reason: string | null;
 }
 
+export interface AppNotification {
+  id: number;
+  kind: string;
+  critical: boolean;
+  scope_kind: string | null;
+  scope_id: number | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface NotificationPref {
+  kind: string;
+  critical: boolean;
+  muted: boolean;
+}
+
+export interface NotificationsList {
+  items: AppNotification[];
+  unread_count: number;
+  prefs: NotificationPref[];
+}
+
 export type Policies = Record<string, { min?: number; default?: number; max?: number }>;

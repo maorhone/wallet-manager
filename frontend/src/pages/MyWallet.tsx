@@ -4,6 +4,7 @@ import type { MyWallet as Wallet } from '../api/types';
 import { ErrorState } from '../components/ErrorState';
 import { LimitsBox } from '../components/LimitsBox';
 import { ModelTable } from '../components/ModelTable';
+import { NotificationPrefs } from '../components/NotificationPrefs';
 import { Num } from '../components/Num';
 import { OwnersBox } from '../components/OwnersBox';
 import { usePeriod } from '../components/PeriodSelector';
@@ -93,6 +94,7 @@ export default function MyWallet() {
         cap={w.total}
       />
       <OwnersBox owner={d.owners.base_cap} />
+      <NotificationPrefs />
     </Stack>
   );
 }

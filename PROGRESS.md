@@ -1,11 +1,15 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Next = Step 2.10.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Next = Phase 3.
 Latest `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 2.10: UI `NotificationsBell` (header; unread count, drawer, mark read, scope link) and `NotificationPrefs` (on My wallet;
+  critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
+  `notifications.spec.ts` (+1, 34 total). Prefs come from `GET /me/notifications` (no separate GET prefs endpoint). Full
+  `./scripts/test.sh` about 4m40s (Playwright ~1.9 min). Phase 2 acceptance tests all exist. No new owner questions.
 - Step 2.9: UI Department Group heads tab (`/department/:id/group-heads`); `group_heads` in the department summary; Playwright +1
   (Playwright 33 total), pytest +1 (`test_group_heads_rows_for_rep`). `./scripts/test.sh` green.
 - Step 2.8: UI Group Grants tab with share create, change and close; U5 and U2 grant half (see Notes).
@@ -151,7 +155,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 2.10: UI notifications bell and preferences; Phase 2 wrap-up.
+- Step (none; Phase 2 ends with Step 2.10). Next = Phase 3.
 
 ## Blockers
 - None.

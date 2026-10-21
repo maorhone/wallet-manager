@@ -122,7 +122,7 @@ A mapping that points at another employee's key is re-pointed to the employee's 
 new, no new key). Corrections are queued under the employee/group/department outbox entities, so
 they block move/delete/place until applied, and run under the same locks as those actions.
 
-### 4.7 Notifications (FR-N) - Phase 2: Backend Done (Step 2.4); UI Planned (Step 2.10)
+### 4.7 Notifications (FR-N) - Phase 2: Done (backend Step 2.4, UI Step 2.10)
 
 In-app notifications, deduplicated per person and event. Written by the scheduler job (every 15 min): employee at 80% / 100%
 of their total (the employee), group at 80% / 100% (group heads), grant expiring in 7 days and grant under 20% used with 7 days
@@ -130,7 +130,9 @@ left (group heads and the department's PMO), failed outbox rows (platform admins
 pending placement (the department's representatives, or platform admins when the department is unknown), a member moved into a
 group (the new group head), a grant created (the group heads). 100% and outbox-failure kinds are critical and cannot be muted;
 the others can (`PUT /me/notification-prefs`). API: `GET /me/notifications?unread=`, `POST /me/notifications/{id}/read`.
-Optional email copy (`NOTIFY_EMAIL_ENABLED`, off by default, needs an internal relay). Bell and preferences UI: Step 2.10.
+Optional email copy (`NOTIFY_EMAIL_ENABLED`, off by default, needs an internal relay). UI Done in Step 2.10: a bell in the
+header shows the unread count and opens a drawer with the list (mark read, link to the scope: a grant opens the group's Grants
+tab); "My wallet" has a preferences card with a checkbox per kind, critical kinds shown checked and disabled.
 The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 
 ### 4.8 UI screens - Phase 1/1b: Done; Phase 2: Planned
@@ -138,7 +140,7 @@ The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 RTL Hebrew React app: my wallet, group (overview, members with actions, history), department (overview, split, pending),
 scope switcher, change-summary dialog, PMO page (pool and grants with the create wizard; Done in Step 2.6; a PMO scope opens
 `/pmo/<dept>/pool`; grant actions and Projects tab Done in Step 2.7). Group Grants tab with share dialogs Done in Step 2.8.
-Group heads tab Done in Step 2.9. Planned: notifications.
+Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10.
 
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned
 

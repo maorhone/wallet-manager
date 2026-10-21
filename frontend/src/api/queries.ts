@@ -21,6 +21,8 @@ import type {
   MembersList,
   MoveTarget,
   MyWallet,
+  NotificationPref,
+  NotificationsList,
   PendingPlacement,
   PmoPool,
   Policies,
@@ -38,6 +40,7 @@ export const keys = {
   groupSummary: (id: string, period: string) => ['group', id, 'summary', period] as const,
   members: (id: string, period: string) => ['group', id, 'members', period] as const,
   policies: ['policies'] as const,
+  notifications: ['notifications'] as const,
   audit: (entity: string, id: string) => ['audit', entity, id] as const,
 };
 
@@ -79,6 +82,37 @@ export const useRetryOutbox = () => {
     mutationFn: (id: number | string) => apiPost(`/outbox/${id}/retry`, undefined),
     onSuccess: () => qc.invalidateQueries(),
   });
+};
+
+export const useNotifications = () =>
+  useQuery({
+    queryKey: keys.notifications,
+    queryFn: () => apiFetch<NotificationsList>('/me/notifications'),
+    refetchInterval: 30000,
+  });
+
+export const useMarkRead = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPost(`/me/notifications/${id}/read`, undefined),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.notifications }),
+  });
+};
+
+/** Prefs come with the notifications list; muting a kind is a plain PUT (no change reason). */
+export const useNotificationPrefs = () => {
+  const qc = useQueryClient();
+  const list = useNotifications();
+  const set = useMutation({
+    mutationFn: (v: { kind: string; muted: boolean }) =>
+      apiFetch<NotificationPref[]>('/me/notification-prefs', {
+        method: 'PUT',
+        body: JSON.stringify({ [v.kind]: v.muted }),
+      }),
+    onSuccess: (prefs) =>
+      qc.setQueryData<NotificationsList>(keys.notifications, (old) => old && { ...old, prefs }),
+  });
+  return { prefs: list.data?.prefs, isPending: list.isPending, error: list.error, set };
 };
 
 export const useMyWallet = (period: string) =>
