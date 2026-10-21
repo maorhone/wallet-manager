@@ -2,9 +2,9 @@
 
 ## Status
 Step 4.2 done: usage series, concurrency peaks and blocked spend backend. Next = Step 4.3 (not started).
-Latest `./scripts/test.sh` (Step 4.2): green; pytest 502 passed / 5 skipped (187.44 s),
-vitest 43 passed, Playwright 34 passed (2.1 min); ruff, formatting, frontend lint/typecheck pass.
-25 new Step 4.2 tests. E2E used env overrides 4140–4142; default ports 4120–4122,
+Latest `./scripts/test.sh` (Step 4.2 timeout investigation): green; pytest 502 passed / 5 skipped (190.46 s),
+vitest 43 passed, Playwright 34 passed (2.2 min); ruff, formatting, frontend lint/typecheck pass.
+25 new Step 4.2 tests. Original Step 4.2 E2E used overrides 4140–4142; timeout verification used default ports 4120–4122.
 E2E env handling and test scripts are unchanged. No new blockers or owner questions; no commit/push.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
@@ -184,6 +184,13 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None.
 
 ## Notes
+- Step 4.2 failure investigation: `e2e/pending.spec.ts:38`, "U12 rep places a pending user of the department",
+  timed out after 30 s while setting up Playwright's `context` fixture, before page setup or application actions.
+  The saved error context contains only that fixture timeout. Step 4.2 leaves browser context setup unchanged;
+  this matches the earlier unrelated browser-context timeout recorded for `member-actions.spec.ts` U9 below.
+  The single full `./scripts/test.sh` verification passed (502 pytest, 5 skipped; 43 Vitest; 34 Playwright),
+  including this test unchanged in 4.8 s. Classified as an intermittent timeout unrelated to Step 4.2;
+  stopped after that run as requested. No test assertions, timeouts or application behavior changed.
 - Step 4.2 SPEC/PLAN difference: FR-R5 explicitly names base-cap or model-cap exhaustion; PLAN says base cap plus active
   shares for the base row. Followed FR-R5: blocked-report base rows compare against current base_cap, even with active shares.
   Wallet/usage-chart totals still include active shares. `/reports/blocked` is PLAN's endpoint for FR-R5 (not listed in §11.1).
