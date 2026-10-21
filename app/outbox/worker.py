@@ -102,7 +102,10 @@ async def drain(
         ids = list(
             await s.scalars(
                 select(LitellmWrite.id)
-                .where(LitellmWrite.status == "pending")
+                .where(
+                    LitellmWrite.status == "pending",
+                    LitellmWrite.endpoint != "/key/service-account/generate",
+                )
                 .order_by(LitellmWrite.id)
             )
         )

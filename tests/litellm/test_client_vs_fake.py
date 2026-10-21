@@ -256,3 +256,25 @@ async def test_bad_master_key_is_permanent(fake_app):
         await client.organization_info("org-a")
     assert exc.value.status == 401
     assert "wrong-key" not in repr(exc.value)
+
+
+async def test_service_account_generate_returns_key_and_hash(litellm):
+    import hashlib
+
+    from app.litellm_client import ServiceAccountKeyGenerate
+
+    await _seed_team(litellm)
+    gen = await litellm.key_service_account_generate(
+        ServiceAccountKeyGenerate(
+            team_id="team-a",
+            key_alias="bot",
+            max_budget=3,
+            max_parallel_requests=2,
+            rpm_limit=100,
+            models=["test-model"],
+        )
+    )
+    assert gen.key.startswith("sk-")
+    assert gen.token == hashlib.sha256(gen.key.encode()).hexdigest()
+    keys = (await litellm.key_list("")).keys
+    assert gen.key not in str(keys)

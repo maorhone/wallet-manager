@@ -35,3 +35,32 @@ def check_limit(field: str, value, policy: dict, is_admin: bool) -> ApiError | N
     if value >= policy["min"] and (is_admin or value <= policy["max"]):
         return None
     return limit_out_of_policy(field, value, policy["min"], policy["max"])
+
+
+async def key_allocated(db, owner_kind: str, owner_id: int) -> Decimal:
+    """Pending keys reserve budget while synchronous generation is in flight."""
+    from sqlalchemy import func, select
+
+    from app.models import ServiceKey
+
+    return await db.scalar(
+        select(func.coalesce(func.sum(ServiceKey.max_budget), 0)).where(
+            ServiceKey.owner_kind == owner_kind,
+            ServiceKey.owner_id == owner_id,
+            ServiceKey.status.in_(("active", "pending")),
+        )
+    )
+
+
+async def group_allocated(db, group) -> Decimal:
+    from sqlalchemy import func, select
+
+    from app.models import Employee
+
+    members = await db.scalar(
+        select(func.coalesce(func.sum(Employee.base_cap), 0)).where(
+            Employee.group_id == group.id,
+            Employee.status != "left",
+        )
+    )
+    return members + await key_allocated(db, "group", group.id)

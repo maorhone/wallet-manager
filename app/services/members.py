@@ -15,7 +15,7 @@ from app.permissions import (
 )
 from app.schemas.groups import MemberCapIn, MemberDefaultsIn, MemberLimitsIn
 from app.services.personal_values import authorize, authorize_rows
-from app.services.validation import check_limit, check_model_sums, check_sum
+from app.services.validation import check_limit, check_model_sums, check_sum, group_allocated
 from app.writes import WriteContext
 
 
@@ -59,6 +59,9 @@ async def set_caps(
 
     new = {r.upn: r.base_cap for r in body}
     total = sum((new.get(u, e.base_cap) for u, e in members.items()), Decimal(0))
+    total += await group_allocated(ctx.db, group) - sum(
+        (e.base_cap for e in members.values()), Decimal(0)
+    )
     changed = [r.upn for r in body if members[r.upn].base_cap != r.base_cap]
     rows = [{"upn": u, "code": "PARENT_OVERALLOCATED"} for u in changed]
     if err := check_sum(total, group.base_budget, group.overalloc_factor, rows):

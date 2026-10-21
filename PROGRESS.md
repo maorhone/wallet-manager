@@ -1,11 +1,19 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Next = Step 3.4.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done; next = Step 3.5.
 Latest `./scripts/test.sh` (Step 3.3 review fixes): green; pytest 540 passed (6 skipped real-target cases), vitest 43, Playwright 34; ruff, frontend lint/typecheck and formatting pass. Pytest ~3m18s, full run ~3.3 minutes. No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.4 review fixes: confirmed all three major findings; added failing endpoint and token-hash
+  snapshot regressions before implementing scoped create/list/rotate/revoke, one-time no-store secrets,
+  locked Decimal allocation checks (pending keys reserve budget), policy limits, transactional audit/outbox,
+  synchronous generation with sanitized 503 failure state, and fixed-hash delete jobs. Group wallet and
+  member-cap checks include key budgets; per-key period/day/model spend includes pre-rotation hashes.
+  Added all eleven planned API acceptance tests, runtime contract, backend team-budget integration,
+  client key/hash test, and concurrency/failure regressions. Rejected findings: none.
+  Validation: full `./scripts/test.sh` pending. Next: Step 3.5. Blockers: none.
 - Step 3.3: migration `0006_production_service_keys` (`department.prod_litellm_org_id|prod_budget|prod_budget_period`,
   table `production_system`, and the Step 3.4 `service_key` columns/checks PLAN bundles into the same migration),
   `LockKind.PRODUCTION`, `app/services/production.py` (`set_production_org`, `create_production_system`, `get_production`),
@@ -194,7 +202,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.4: Service keys: create (secret shown once), rotate, revoke, list.
+- Step 3.5: UI Group Service keys tab (Step 3.4 backend complete).
 
 ## Blockers
 - None.
@@ -505,3 +513,8 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - Step 10: `apiPost(..., write?)` sends reason/idempotency headers only when `write` is given; `/auth/logout` and `/outbox/{id}/retry` are called without a reason.
 - Step 10: while editing I appended `frontend/.e2e-state.json` to `.gitignore` with a shell `printf >>` (the content is correct; it was not a Write/Edit).
 - Review 2.6 fixes: past-period grant creation blocked in the UI (read_only), wizard dates use the /me timezone, pool card remaining = available, PMO and representative scopes have distinct keys (`pmo:<id>`). Behavior is described by the existing PRD text, so no PRD change. No MINOR findings.
+
+- **Step 3.4 rotation failure semantics.** PLAN does not specify whether an unsuccessful rotation
+  invalidates the old key. Safest default: retain the active old hash and budget reservation, mark
+  the generation write failed, return 503, and allow a fresh rotation request. Interrupted generation
+  stays pending/reserved; the worker never retries secret-generating calls automatically.

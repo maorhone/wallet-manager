@@ -224,3 +224,24 @@ def tier_from_bindings(bindings: list[Binding]) -> str:
 async def target_tier(session: AsyncSession, directory: Directory, upn: str) -> str:
     """Highest role the target holds, from directory groups ∩ role_binding (DR9)."""
     return tier_from_bindings(await load_bindings(session, directory.groups_of(upn)))
+
+
+async def can_view_service_keys(session, p: Principal, owner_kind: str, owner_id: int) -> str:
+    if owner_kind == "group":
+        roles = await _group_roles(session, p, owner_id)
+        return _pick(roles, (ADMIN, REP, HEAD, VIEWER), _GROUP_VIEW)
+    from app.models import ProductionSystem
+
+    system = await session.get(ProductionSystem, owner_id)
+    if system is None:
+        raise _not_found("System")
+    return await can_view_production(session, p, system.department_id)
+
+
+async def can_manage_service_keys(session, p: Principal, owner_kind: str, owner_id: int) -> str:
+    await can_view_service_keys(session, p, owner_kind, owner_id)
+    if p.is_admin:
+        return ADMIN
+    if owner_kind == "group" and p.has(HEAD, "group", owner_id):
+        return HEAD
+    raise _forbidden()

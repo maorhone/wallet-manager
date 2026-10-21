@@ -27,6 +27,7 @@ from app.permissions import (
     ADMIN,
     HEAD,
     REP,
+    VIEWER,
     Principal,
     can_view_department,
     can_view_group,
@@ -40,6 +41,7 @@ from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
 from app.services.spend import Spend, month_bounds
+from app.services.validation import key_allocated
 from app.writes import sync_status
 
 ZERO = Decimal(0)
@@ -163,8 +165,9 @@ class _Group:
             group.id, ZERO
         )
         active = [m.upn for m in members if m.status != "left"]
+        keys_budget = await key_allocated(db, "group", group.id)
         card = wallet.group_wallet(
-            base, grants, sum((values[u]["base_cap"] for u in active), ZERO),
+            base, grants, sum((values[u]["base_cap"] for u in active), ZERO) + keys_budget,
             sum((shares.get(u, ZERO) for u in active), ZERO), spend.used("group", group.id),
         )  # fmt: skip
         card["base"], card["grants"] = base, grants
@@ -419,6 +422,10 @@ async def group_summary(
             "edit_members": bool(roles & {ADMIN, REP, HEAD}),
             "edit_pots_limits": bool(roles & {ADMIN, REP}),
             "edit_defaults": bool(roles & {ADMIN, HEAD}),
+            "service_keys": {
+                "view": bool(roles & {ADMIN, REP, HEAD, VIEWER}),
+                "manage": bool(roles & {ADMIN, HEAD}),
+            },
         },
     }
 

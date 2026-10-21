@@ -30,6 +30,7 @@ from app.routers import (
     production,
     reports,
     role_bindings,
+    service_keys,
 )
 from app.security_headers import SecurityHeadersMiddleware
 from app.writes import install_replay_handler
@@ -116,6 +117,7 @@ def create_app(
     app.include_router(reports.router)
     app.include_router(platform.router)
     app.include_router(production.router)
+    app.include_router(service_keys.router)
     app.include_router(role_bindings.router)
     app.include_router(audit.router)
 

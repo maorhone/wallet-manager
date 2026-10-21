@@ -2,7 +2,12 @@ from periods import CURRENT
 
 from app.models import EmployeeModelCap, GroupModelPot
 
-NO_ACTIONS = {"edit_members": False, "edit_pots_limits": False, "edit_defaults": False}
+NO_ACTIONS = {
+    "edit_members": False,
+    "edit_pots_limits": False,
+    "edit_defaults": False,
+    "service_keys": {"view": False, "manage": False},
+}
 
 
 async def _prep(seeded, snapshot):
@@ -43,7 +48,10 @@ async def test_viewer_aggregates_only(login, seeded, snapshot):
     viewer = await login("viewer")
     body = (await viewer.get("/groups/1/summary")).json()
     assert body["wallet"]["remaining"] == 190000
-    assert body["top_consumers"] == [] and body["actions"] == NO_ACTIONS
+    assert body["top_consumers"] == [] and body["actions"] == {
+        **NO_ACTIONS,
+        "service_keys": {"view": True, "manage": False},
+    }
     assert (await viewer.get("/groups/1/members")).status_code == 403
 
 
@@ -58,6 +66,7 @@ async def test_head_sees_consumers_and_actions(login, seeded, snapshot):
         "edit_members": True,
         "edit_pots_limits": False,
         "edit_defaults": True,
+        "service_keys": {"view": True, "manage": True},
     }
     assert body["period"] == CURRENT and body["read_only"] is False
     assert body["group"]["default_member_cap"] == 0  # prefill for the defaults dialog

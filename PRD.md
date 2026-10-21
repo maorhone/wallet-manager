@@ -149,7 +149,7 @@ scope switcher, change-summary dialog, PMO page (pool and grants with the create
 `/pmo/<dept>/pool`; grant actions and Projects tab Done in Step 2.7). Group Grants tab with share dialogs Done in Step 2.8.
 Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10.
 
-### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.3)
+### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.4)
 
 A platform admin sets a department's production budget (DR4: a separate LiteLLM Organization from
 the department's own, so employee spending can never block production) and creates systems (Teams)
@@ -161,8 +161,17 @@ sync status (admin only edits); other roles have no access. Production is not re
 only re-derives the §8.1 fields). Production org/system LiteLLM ids are generated (`{org}-prod`,
 `sys-{id}`); DR4 reserves these patterns, so platform department/group creation rejects an id ending
 in `-prod` or starting with `sys-`, which would otherwise let a department's own org or an employee
-team collide with a production object. Service keys (create with a one-time secret, rotate, revoke)
-are Planned for Step 3.4.
+team collide with a production object.
+
+Step 3.4 service-key backend is complete: group heads and admins manage group keys; admins manage
+system keys. Scoped representatives/viewers can list group keys, and representatives can list
+system keys. Creation and rotation show the secret once with no-store caching; only hashes reach
+storage, audits and deletion jobs. Replays omit secrets. Pending/active key budgets count with member
+caps against the group base times its allocation factor, or against the system budget. Policy limits
+apply, with the existing admin maximum override. Upstream failure returns 503 and failed creation
+reserves no budget; failed rotation preserves the old active key. Rotation/revocation delete the fixed
+old hash through the outbox. Per-key period, daily and model spend includes earlier rotated hashes.
+UI tabs remain Steps 3.5–3.6.
 
 ### 4.10 Directory (section 5.1, 9.1) - Phase 3: In progress (Step 3.1)
 

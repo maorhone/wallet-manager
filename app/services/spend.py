@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Employee, Grp, ProductionSystem, SpendSnapshot
+from app.models import Employee, Grp, LitellmWrite, ProductionSystem, ServiceKey, SpendSnapshot
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,21 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
     async with sf() as db:
         groups = {g.litellm_team_id: g for g in await db.scalars(select(Grp))}
         systems = {s.litellm_team_id: s for s in await db.scalars(select(ProductionSystem))}
+        keys = {
+            k.litellm_token_hash: k.id
+            for k in await db.scalars(select(ServiceKey))
+            if k.litellm_token_hash
+        }
+        # Frozen deletion payloads preserve former hashes after rotation, including pending
+        # deletions, so a refresh never drops spend from an earlier key generation.
+        for write in await db.scalars(
+            select(LitellmWrite).where(
+                LitellmWrite.entity == "service_key",
+                LitellmWrite.endpoint == "/key/delete",
+            )
+        ):
+            for token in (write.payload or {}).get("keys", []):
+                keys[token] = int(write.entity_id)
         member_group = dict((await db.execute(select(Employee.upn, Employee.group_id))).all())
         have_previous = await db.scalar(
             select(SpendSnapshot.period).where(SpendSnapshot.period == previous_period(current))
@@ -57,6 +72,8 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
             else:
                 system = systems.get(r.team_id)
                 scopes = [("system", str(system.id))] if system is not None else []
+            if r.api_key in keys:
+                scopes.append(("service_key", str(keys[r.api_key])))
             for kind, scope_id in scopes:
                 day = r.day.isoformat()
                 # day rows stay inside the calendar month so periods never share a key

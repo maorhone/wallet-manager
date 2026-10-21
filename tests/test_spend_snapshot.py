@@ -98,3 +98,67 @@ async def test_system_spend_snapshotted(seeded, fake_app, fake_engine, ro_engine
     assert snap[("system", "1", "2026-06", None)] == 12
     assert snap[("system", "1", "2026-06", "gpt-4")] == 12
     assert ("group", "1", "2026-06", None) not in snap  # a system is not a department group
+
+
+async def test_service_key_spend_by_hash_period_day_model(seeded):
+    from app.litellm_client.readonly import SpendRow
+    from app.models import ServiceKey
+
+    async with seeded() as db:
+        key = ServiceKey(
+            owner_kind="group", owner_id=1, litellm_token_hash="dummy-hash", max_budget=10
+        )
+        db.add(key)
+        await db.commit()
+        key_id = str(key.id)
+
+    class Reader:
+        async def spend_rows(self, start, end):
+            if not start <= NOW < end:
+                return []
+            return [
+                SpendRow("A1", None, "dummy-hash", "gpt-4", NOW.date(), Decimal("1.25")),
+                SpendRow("A1", None, "other-hash", "gpt-4", NOW.date(), Decimal("2")),
+            ]
+
+    await take_snapshot(seeded, Reader(), NOW)
+    snap = await _snap(seeded)
+    for period in ("2026-06", "2026-06-15"):
+        for model in (None, "gpt-4"):
+            assert snap[("service_key", key_id, period, model)] == Decimal("1.25")
+    assert snap[("group", "1", "2026-06", None)] == Decimal("3.25")
+
+
+async def test_service_key_spend_survives_rotation(seeded):
+    from app.litellm_client.readonly import SpendRow
+    from app.models import LitellmWrite, ServiceKey
+
+    async with seeded() as db:
+        key = ServiceKey(
+            owner_kind="group", owner_id=1, litellm_token_hash="new-hash", max_budget=10
+        )
+        db.add(key)
+        await db.flush()
+        key_id = str(key.id)
+        db.add(
+            LitellmWrite(
+                entity="service_key",
+                entity_id=key_id,
+                endpoint="/key/delete",
+                payload={"keys": ["old-hash"]},
+                idempotency_key="rotation-delete",
+            )
+        )
+        await db.commit()
+
+    class Reader:
+        async def spend_rows(self, start, end):
+            if not start <= NOW < end:
+                return []
+            return [
+                SpendRow("A1", None, token, "gpt-4", NOW.date(), Decimal("1.25"))
+                for token in ("old-hash", "new-hash")
+            ]
+
+    await take_snapshot(seeded, Reader(), NOW)
+    assert (await _snap(seeded))[("service_key", key_id, "2026-06", None)] == Decimal("2.50")
