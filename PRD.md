@@ -76,8 +76,9 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 - Report alerts - Done (Step 4.3). Every over-allocation finding sends a critical notification to platform admins
   and the affected department's representatives, once per finding/model/local day, including live LiteLLM breaches.
   Unknown departments notify admins only. The daily scheduler examines yesterday's SpendLogs overlaps in APP_TIMEZONE;
-  when employees reach their configured key concurrency limit, admins receive one summary with the full count and
-  the top 100 affected members (peak, UTC timestamp, limit). This pilot input for D6 can be muted.
+  when employees reach their effective key concurrency limit (personal override or `concurrency.default`), admins receive
+  one summary with the full count and the top 100 affected members (peak, UTC timestamp, effective limit).
+  Members with no effective limit are excluded. This pilot input for D6 can be muted.
   The same job updates `wm_concurrency_peak{scope="global"}` and `wm_blocked_employees` for yesterday; the latter counts
   distinct employees at a base or model cap using snapshots and FR-R5. Report UI remains planned (Step 4.4 onward).
 

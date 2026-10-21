@@ -19,6 +19,7 @@ from app.config import Settings
 from app.db import LockKind
 from app.directory import Directory
 from app.models import AuditLog, Employee, Grant, GrantShare
+from app.outbox.desired import _policy
 from app.permissions import ADMIN, Binding, Principal
 from app.services import grants as grants_service
 from app.services import notify_scan, reports
@@ -186,23 +187,21 @@ async def run_report_alerts(
     global_peak = max((r.peak for r in peaks if r.user is None), default=0)
     by_user = {r.user: r for r in peaks if r.user is not None}
     async with sf() as db:
+        concurrency = await _policy(db, "concurrency", {})
         members = []
         for member in await db.scalars(
             select(Employee).where(Employee.status != "left", Employee.group_id.is_not(None))
         ):
             peak = by_user.get(member.upn)
-            if (
-                peak is not None
-                and member.max_parallel is not None
-                and peak.peak >= member.max_parallel
-            ):
+            max_parallel = member.max_parallel or concurrency.get("default")
+            if peak is not None and max_parallel is not None and peak.peak >= max_parallel:
                 members.append(
                     dict(
                         upn=member.upn,
                         display_name=member.display_name,
                         peak=peak.peak,
                         at=peak.at.isoformat(),
-                        max_parallel=member.max_parallel,
+                        max_parallel=max_parallel,
                     )
                 )
         members.sort(key=lambda m: (-m["peak"], m["upn"]))

@@ -16,8 +16,10 @@ from app.models import (
     GroupModelPot,
     Notification,
     NotificationPref,
+    Policy,
     SpendSnapshot,
 )
+from app.outbox.desired import build
 from app.scheduler import jobs
 from app.scheduler.loop import build_jobs
 from app.services.overallocation import scheduled_check
@@ -123,6 +125,65 @@ async def test_concurrency_at_limit_alert_to_admins(report_run, provisioned, fak
     output = generate_latest(metrics.REGISTRY).decode()
     assert 'wm_concurrency_peak{scope="global"} 2.0' in output
     assert "wm_blocked_employees 1.0" in output
+
+
+@pytest.mark.parametrize(
+    "policy_default,override,peak,at_limit",
+    [
+        (4, None, 4, True),
+        (4, None, 3, False),
+        (4, None, 5, True),
+        (7, None, 7, True),
+        (4, 6, 4, False),
+        (None, None, 4, False),
+    ],
+)
+async def test_concurrency_alert_uses_effective_key_limit(
+    report_run, provisioned, fake_app, prov_settings, policy_default, override, peak, at_limit
+):
+    async with provisioned() as db:
+        member = await db.get(Employee, DANI)
+        member.max_parallel = override
+        policy = await db.get(Policy, "concurrency")
+        if policy_default is None:
+            await db.delete(policy)
+        else:
+            policy.value = {**policy.value, "default": policy_default}
+        await db.commit()
+        key = await build(db, prov_settings, "/key/update", DANI)
+        assert key.max_parallel_requests == (override or policy_default)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_app), base_url="http://fake"
+    ) as c:
+        response = await c.post(
+            "/_test/spend/bulk",
+            json=[
+                dict(
+                    team_id="A1",
+                    user_id=DANI,
+                    model="m",
+                    amount=0,
+                    start="2026-06-02T10:00:00Z",
+                    end="2026-06-02T11:00:00Z",
+                )
+                for _ in range(peak)
+            ],
+        )
+        assert response.status_code == 200, response.text
+    await report_run()
+    notifications = await rows(provisioned, "concurrency_at_limit")
+    if not at_limit:
+        assert notifications == []
+        return
+    [notification] = notifications
+    assert notification.upn == ADMIN
+    assert notification.payload["count"] == 1
+    [member] = notification.payload["members"]
+    assert (member["upn"], member["peak"], member["max_parallel"]) == (
+        DANI,
+        peak,
+        key.max_parallel_requests,
+    )
 
 
 async def test_run_twice_no_duplicates(report_run, provisioned, fake_app):

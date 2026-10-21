@@ -3,17 +3,23 @@
 ## Status
 Step 4.3 done: critical over-allocation alerts, daily concurrency-at-limit summary and report gauges.
 Next = Step 4.4 (not started).
-Latest `./scripts/test.sh` (Step 4.3 timeout investigation): green; pytest 512 passed / 5 skipped (184.49 s),
+Latest `./scripts/test.sh` (Step 4.3 review fixes): green; pytest 518 passed / 5 skipped (204.60 s),
 vitest 43 passed, Playwright 34 passed (2.3 min); ruff, formatting, frontend lint/typecheck pass.
-10 new Step 4.3 tests; required tests observed failing before implementation. No blockers; no commit/push.
-E2E env handling, default ports and test scripts are unchanged; this run uses overrides 4140–4142.
-The prior unrelated pytest timeout warning and this investigation are recorded under Notes; the full script exited 0.
+10 original Step 4.3 tests plus 6 review regression cases; failing cases observed before implementation.
+No blockers; no commit/push. E2E env handling, default ports and test scripts are unchanged.
+The prior unrelated pytest timeout investigation is recorded under Notes; this full script exited 0 without that warning.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete.
 Historical `./scripts/test.sh` (Step 2.5): green; pytest 449 passed (5 skipped real-target cases), vitest 24, Playwright 27; ruff, frontend lint/typecheck and formatting pass. Pytest 2m35s, Playwright 1.8 min, roughly 4.5–5 minutes including lint/setup (above the ~4-minute target; prior baseline 4m25s). No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 4.3 review fixes: confirmed the major default-concurrency finding; daily alerts now compare peaks against
+  the personal override or `concurrency.default`, matching key provisioning, and report that effective limit.
+  Added six regression cases for default/changed default, threshold boundaries, override precedence and no limit;
+  observed the three default-limit alert cases fail before the fix. No findings rejected. PRD updated.
+  Validation: `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 43 passed,
+  Playwright 34 passed; ruff format/check and frontend lint/typecheck passed. Next Step 4.4; no blockers, no commit/push.
 - Step 4.3: `scheduled_check` sends critical `overallocation` notifications to admins and department representatives,
   deduplicated by level/entity/model/local day, including live LiteLLM breaches and WM checks. Unknown scopes notify admins only.
   Daily `run_report_alerts` uses yesterday's local-day overlaps through the existing reader, counts all members reaching
@@ -190,7 +196,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   `./scripts/test.sh`: pytest 417 passed, 5 skipped; vitest 24; Playwright 27 (2.0 min).
 
 ## Next
-- Step 4.3: Alerts: over-allocation breach and concurrency at the key limit (not started).
+- Step 4.4: UI: Reports page shell, Allocation and Over-allocation tabs (not started).
 
 ## Blockers
 - None.
@@ -209,7 +215,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   (184.49 s), Vitest 43 passed, Playwright 34 passed (2.3 min); ruff lint/format and frontend
   lint/typecheck passed. The timeout did not recur; stopped after this run as requested.
 - Step 4.3: no SPEC/PLAN conflicts. Breach dedupe dates and yesterday's alert window use APP_TIMEZONE;
-  peak timestamps stay UTC. Concurrency limits use the configured employee key limit, as in Step 4.2 reports.
+  peak timestamps stay UTC. Concurrency alerts use the effective key limit (override or policy default; review fix).
   `wm_blocked_employees` defaults to yesterday's distinct FR-R5 employees (see owner question); zero-activity runs reset gauges.
   Gauges remain process-local, matching existing scheduler/worker metrics; no new metrics server or persistence added.
   Notification inserts reuse the existing transaction/dedupe/mute conventions; there are no allocation/outbox writes.
