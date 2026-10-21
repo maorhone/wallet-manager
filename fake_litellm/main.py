@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
@@ -493,6 +494,19 @@ def create_app(
     @app.get("/health/liveliness", dependencies=[Depends(check_outage)])  # unauthenticated
     async def liveliness():
         return "I'm alive!"
+
+    @app.get("/health/readiness", dependencies=[Depends(check_outage)])  # unauthenticated
+    async def readiness(request: Request):
+        """§5.4 Redis row: ``redis`` config controls ``cache``/``status`` (no real Redis used)."""
+        redis = request.app.state.fake.redis
+        body = {"litellm_version": "fake-0.0.0"}
+        if redis == "none":
+            return {**body, "status": "healthy", "db": "ok", "cache": None}
+        if redis == "ok":
+            return {**body, "status": "healthy", "db": "ok", "cache": "redis"}
+        return JSONResponse(
+            {**body, "status": "unhealthy", "db": "ok", "cache": "redis"}, status_code=503
+        )
 
     for router in (_org_router(), _team_router(), _key_router()):
         app.include_router(router, dependencies=[Depends(guard)])

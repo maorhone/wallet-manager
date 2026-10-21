@@ -188,6 +188,21 @@ async def can_view_pending(session, p: Principal, department_id: int | None) -> 
     return await can_place(session, p, department_id)
 
 
+def can_manage_platform(p: Principal) -> str:
+    """§12.5.5: policies, department/group creation and role bindings are admin only."""
+    if not p.is_admin:
+        raise _forbidden()
+    return ADMIN
+
+
+# §11.1 PUT /role-bindings: roles allowed per scope kind
+ROLE_BINDING_SCOPES: dict[str, tuple[str, ...]] = {
+    "department": (REP, PMO, VIEWER),
+    "group": (HEAD, VIEWER),
+    "global": (ADMIN, VIEWER),
+}
+
+
 def tier_from_bindings(bindings: list[Binding]) -> str:
     """Highest role among ``bindings`` (DR9)."""
     roles = {b.role for b in bindings}

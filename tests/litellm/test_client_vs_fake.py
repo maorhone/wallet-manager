@@ -40,6 +40,23 @@ async def test_health(litellm):
     assert await litellm.health() is True
 
 
+async def test_health_readiness_shapes(litellm, fake_app):
+    default = await litellm.health_readiness()
+    assert (default.status, default.cache) == ("healthy", None)
+
+    fake_app.state.fake.redis = "ok"
+    connected = await litellm.health_readiness()
+    assert (connected.status, connected.cache) == ("healthy", "redis")
+
+    fake_app.state.fake.redis = "down"
+    down = await litellm.health_readiness()
+    assert (down.status, down.cache) == ("unhealthy", "redis")
+
+    fake_app.state.fake.outage = True
+    with pytest.raises(LiteLLMTransientError):
+        await litellm.health_readiness()
+
+
 async def test_organization_roundtrip(litellm):
     await litellm.organization_new(
         OrganizationNew(

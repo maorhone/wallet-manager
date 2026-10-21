@@ -189,6 +189,13 @@ class JwtKeyMappingDelete(_Req):
 # --- responses --------------------------------------------------------------------------------
 
 
+class HealthReadiness(_Resp):
+    status: str
+    db: str | None = None
+    cache: str | None = None
+    litellm_version: str | None = None
+
+
 class BudgetRecord(_Resp):
     max_budget: float | None = None
     budget_duration: str | None = None

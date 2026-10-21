@@ -4,10 +4,25 @@ from sqlalchemy import select
 from app.auth.session import CurrentPrincipal, Db
 from app.models import Department
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services import departments, views
+from app.schemas.platform import DepartmentCreateIn, GroupCreateIn
+from app.services import departments, platform, views
 from app.writes import Write, write_response
 
 router = APIRouter()
+
+
+@router.post("/departments")
+async def create_department(body: DepartmentCreateIn, ctx: Write, principal: CurrentPrincipal):
+    entities = await platform.create_department(ctx, principal, body)
+    return await write_response(ctx, entities)
+
+
+@router.post("/departments/{department_id}/groups")
+async def create_group(
+    department_id: int, body: GroupCreateIn, ctx: Write, principal: CurrentPrincipal
+):
+    entities = await platform.create_group(ctx, principal, department_id, body)
+    return await write_response(ctx, entities)
 
 
 @router.get("/departments/{department_id}/summary")

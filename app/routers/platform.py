@@ -6,7 +6,8 @@ from sqlalchemy import func, select
 from app import metrics
 from app.auth.session import CurrentPrincipal, Db
 from app.errors import ApiError, invalid_request
-from app.models import LitellmWrite, SpendSnapshot
+from app.litellm_client import HealthReadiness
+from app.models import Employee, LitellmWrite, SpendSnapshot
 from app.permissions import ADMIN
 from app.writes import Write
 
@@ -14,27 +15,47 @@ router = APIRouter()
 HEALTH_TTL_S = 10
 
 
-async def _reachable(request: Request) -> bool:
+async def _health(request: Request) -> HealthReadiness | None:
+    """One cached call serves both ``litellm_reachable`` and the Redis row (§5.4)."""
     cached = getattr(request.app.state, "litellm_health", None)
     if cached and time.monotonic() - cached[0] < HEALTH_TTL_S:
         return cached[1]
     try:
-        ok = await request.app.state.litellm.health()
+        result = await request.app.state.litellm.health_readiness()
     except Exception:
-        ok = False
-    request.app.state.litellm_health = (time.monotonic(), ok)
-    return ok
+        result = None
+    request.app.state.litellm_health = (time.monotonic(), result)
+    return result
+
+
+def _redis_status(health: HealthReadiness | None) -> str:
+    if health is None:
+        return "unknown"
+    if health.cache is None:
+        return "not_configured"
+    if health.cache == "redis" and health.status == "healthy":
+        return "connected"
+    return "unreachable"
 
 
 @router.get("/status")
 async def status(request: Request, principal: CurrentPrincipal, db: Db):
-    """§5.4 banner data. No secrets; Redis status arrives in Phase 3."""
+    """§5.4 banner data. No secrets."""
     counts = await metrics.outbox_counts(db)
     oldest = await db.scalar(
         select(func.min(LitellmWrite.created_at)).where(LitellmWrite.status == "pending")
     )
+    health = await _health(request)
+    pending_placements = None
+    if principal.is_admin:
+        pending_placements = await db.scalar(
+            select(func.count()).select_from(Employee).where(Employee.status == "pending_placement")
+        )
     return {
-        "litellm_reachable": await _reachable(request),
+        "litellm_reachable": health is not None,
+        "redis": _redis_status(health),
+        "litellm_version": health.litellm_version if health else None,
+        "pending_placements": pending_placements,
         "outbox": {
             "pending": counts["pending"],
             "failed": counts["failed"],

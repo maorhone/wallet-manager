@@ -14,6 +14,7 @@ class FakeState:
     in_flight: dict[str, int] = field(default_factory=dict)  # R7 per-token counter
     failures: dict[str, list[int]] = field(default_factory=dict)  # path -> [status, times left]
     clock_offset_s: float = 0  # test clock: added to the wall clock by ``now()``
+    redis: str = "none"  # none | ok | down (§5.4 Redis status, reported by /health/readiness)
 
     def now(self) -> datetime:
         return datetime.now(UTC) + timedelta(seconds=self.clock_offset_s)
@@ -25,3 +26,4 @@ class FakeState:
         self.latency_ms = 0
         self.cost_per_request = 1
         self.in_flight.clear()
+        self.redis = "none"

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from .errors import LiteLLMPermanentError, LiteLLMTransientError
 from .models import (
+    HealthReadiness,
     JwtKeyMappingDelete,
     JwtKeyMappingList,
     JwtKeyMappingNew,
@@ -87,6 +88,17 @@ class LiteLLMClient:
     async def health(self) -> bool:
         await self._call("GET", "/health/liveliness", None)
         return True
+
+    async def health_readiness(self) -> HealthReadiness:
+        """Parses the body on every response (incl. a 503), since an unhealthy cache is expected."""
+        try:
+            resp = await self._http.request("GET", "/health/readiness")
+        except httpx.TransportError as exc:
+            raise LiteLLMTransientError(f"GET /health/readiness: {type(exc).__name__}") from None
+        try:
+            return HealthReadiness.model_validate(resp.json())
+        except ValueError:
+            raise LiteLLMTransientError(f"GET /health/readiness: HTTP {resp.status_code}") from None
 
     # --- organizations ---
     async def organization_new(self, body: OrganizationNew) -> OrganizationInfo:

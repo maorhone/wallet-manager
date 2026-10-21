@@ -3,6 +3,7 @@
 from .client import LiteLLMClient
 from .errors import LiteLLMError, LiteLLMPermanentError, LiteLLMTransientError
 from .models import (
+    HealthReadiness,
     JwtKeyMappingDelete,
     JwtKeyMappingNew,
     JwtKeyMappingUpdate,
@@ -26,6 +27,7 @@ from .models import (
 from .readonly import LiteLLMReader
 
 __all__ = [
+    "HealthReadiness",
     "JwtKeyMappingDelete",
     "JwtKeyMappingNew",
     "JwtKeyMappingUpdate",

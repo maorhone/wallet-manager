@@ -21,6 +21,7 @@ class Outage(BaseModel):
 class Config(BaseModel):
     latency_ms: int = 0
     cost_per_request: float = 1
+    redis: Literal["none", "ok", "down"] = "none"
 
 
 class Fail(BaseModel):
@@ -54,6 +55,7 @@ async def outage(body: Outage, request: Request):
 async def config(body: Config, request: Request):
     request.app.state.fake.latency_ms = body.latency_ms
     request.app.state.fake.cost_per_request = body.cost_per_request
+    request.app.state.fake.redis = body.redis
     return body
 
 
