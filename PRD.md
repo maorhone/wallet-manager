@@ -1,6 +1,7 @@
 # Wallet Manager for LiteLLM: Product Requirements (living document)
 
-Source of truth for requirements is SPEC.md; this file summarises the product and tracks status per area.
+Source of truth is SPEC.md for v1, with the local spec v2 and owner decisions taking precedence
+for Phase 5. This file summarises the product and tracks status per area.
 Update it whenever a step changes product functionality. Status: Done / In progress / Planned.
 
 ## 1. Purpose
@@ -47,6 +48,19 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 - Platform review fixes (Step 3.2): malformed policy values return 422 before any change; global role bindings can be
   replaced or removed (the last admin binding remains protected). Concurrent creation rejects duplicate department/group
   DNs and second staff groups with 422; database constraints also enforce these rules.
+
+### 4.1.1 Organization and nested-group schema - Phase 5 Step 5.1: Done
+
+Existing departments belong to one default Wallet Manager organization. The organization stores
+separate Decimal credit envelopes for departments and organization systems, plus a budget period;
+the root itself creates no LiteLLM object. Upgrade initializes the department envelope from existing
+department budgets and the systems envelope at zero, preserving existing allocations and systems.
+Legacy department creation continues to attach to the default organization.
+
+Groups can reference a parent in the same department. The database rejects self-parenting, cycles
+and trees deeper than four group levels (a root group is level one), including subtree moves and
+multi-row changes. Organization-scoped `org_allocator` bindings can be stored and seeded using
+scope `default`. Hierarchy management APIs and role authorization are planned for Step 5.2.
 
 ### 4.2 Wallets and reports (FR-E, FR-R, FR-V) - Phase 1: Done
 

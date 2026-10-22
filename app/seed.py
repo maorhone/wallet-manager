@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import yaml
@@ -15,6 +16,7 @@ from app.models import (
     GrantShare,
     Grp,
     LitellmWrite,
+    Organization,
     Policy,
     RoleBinding,
 )
@@ -120,6 +122,26 @@ async def seed(
         # reading these tables, and a plain TRUNCATE can deadlock with them (seen in e2e).
         await truncate_with_retry(engine, f"TRUNCATE {tables} RESTART IDENTITY CASCADE")
     async with factory() as session, session.begin():
+        org = await session.get(Organization, 1)
+        if org is None:
+            org = Organization(id=1, name="Default organization")
+            session.add(org)
+            await session.flush()
+            await session.execute(
+                text(
+                    "SELECT setval(pg_get_serial_sequence('organization', 'id'), "
+                    "GREATEST((SELECT max(id) FROM organization), "
+                    "(SELECT last_value FROM organization_id_seq)))"
+                )
+            )
+        # A fresh migration creates an empty root before the fixture departments exist.
+        # Initialize it once; subsequent seeding preserves an established envelope.
+        if org.departments_envelope == 0 and not await session.scalar(
+            select(Department.id).where(Department.organization_id == org.id).limit(1)
+        ):
+            org.departments_envelope = sum(
+                (Decimal(str(d.get("budget", 0))) for d in data["departments"]), Decimal(0)
+            )
         for key, value in data.get("policies", {}).items():
             await session.merge(Policy(key=key, value=value))
 
@@ -164,7 +186,10 @@ async def seed(
             )
 
         await session.execute(delete(RoleBinding))
-        scope_ids = {"global": {None: None}, "department": dept_ids, "group": group_ids}
+        scope_ids = {
+            "global": {None: None}, "department": dept_ids, "group": group_ids,
+            "organization": {"default": org.id},
+        }  # fmt: skip
         for b in data.get("role_bindings", []):
             session.add(
                 RoleBinding(

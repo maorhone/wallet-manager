@@ -1,6 +1,12 @@
 # Progress — Wallet Manager
 
 ## Status
+Phase 5 on `phase-5`: Step 5.1 (organization root and nestable-group schema) done; Next = Step 5.2.
+Latest `./scripts/test.sh`: green; pytest 624 passed / 7 skipped / 1 xfailed (242.04s),
+Vitest 57 passed, Playwright 42 passed / 1 skipped (2.8m). Ruff format/check, frontend lint/typecheck
+and repository hygiene pass. E2E ports 4130–4132 were supplied via env; defaults are unchanged.
+Prior-phase history follows.
+
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done. Step 3.5 (group Service keys tab) done. Steps 3.7 (Platform shell and Departments UI), 3.8 (Operations tab) and 3.9 (Policies and Audit search) done on phase-3b and merged into main (22/10). Phase 4 (reports, Steps 4.1–4.7: allocation, usage, concurrency peaks, blocked and grants reports, alerts, Reports UI) done on phase-4 and merged into main (22/10). Next = Step 3.6 (Department Production tab, resume from wip/main-3.6).
 Latest `./scripts/test.sh` on phase-4 (Step 4.7): green; pytest 518 passed / 5 existing skips; Vitest 48; Playwright 38. Full runs of the merged tree are the builder's to do (Playwright not run at merge).
 Latest `./scripts/test.sh` on phase-3b (Step 3.9): green; pytest 528 passed / 6 skipped / 1 xfailed; Vitest 44; Playwright 37. The owner-approved date-dependent share-expiry xfail stays (single `xfail(strict=False)` mark on main's version of the test).
@@ -9,6 +15,21 @@ Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 5.1: migration `0007_org_hierarchy` adds the WM-only organization root with separate
+  Decimal department/system envelopes, period, optional systems LiteLLM org id and UTC creation time.
+  Every existing department attaches to the default root; legacy creation keeps that default.
+  Nullable group parents use a same-department composite FK, self-parent check and advisory-locked
+  statement validation for cycles and depth <= 4, including subtree and concurrent changes.
+  Seed creates/initializes the default root idempotently and resolves organization-scoped
+  `org_allocator` bindings. No LiteLLM root is provisioned. PRD and exact schema assertions updated.
+  TDD: the four planned tests were written before implementation; backfill failed on the missing table.
+  Added concurrency, seed/allocator and fresh-migration seed regressions (7 new pytest cases total);
+  the latter reproduced an empty-root envelope before the seed fix. Focused schema checks: 8 passed.
+  Final `./scripts/test.sh` exited 0: pytest 624 passed / 7 skipped / 1 xfailed, Vitest 57,
+  Playwright 42 / 1 skipped; ruff format/check and frontend lint/typecheck passed. The seven new
+  tests add about 5 seconds of isolated schema coverage. Step 5.2 was not started. No new blockers.
+  No commit or push; the existing U9 timing flake is recorded in Notes.
+
 - Merge of phase-3b and phase-4 into main (22/10): conflicts in PRD.md, PROGRESS.md, `frontend/src/api/queries.ts`,
   `frontend/src/api/types.ts` and `tests/e2e_backend/test_a1_wm.py` (phase-3b) and the phase-4 files were resolved as a union
   of both sides; the share-expiry test keeps main's single `xfail(strict=False)` mark. Step 3.6 (Department Production tab) is
@@ -325,12 +346,31 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.6 Department Production tab (resume from wip/main-3.6).
+- Step 5.2 Hierarchy API on `phase-5` (not started).
+- Separate prior-phase backlog: Step 3.6 Department Production tab (resume from wip/main-3.6).
 
 ## Blockers
 - None. The known date-dependent share-expiry backend test stays marked `xfail(strict=False)` (owner-approved, one mark).
 
 ## Notes
+
+- Step 5.1: SoT §6 has numbered principles rather than a separate §6.3 heading; read principle 3
+  alongside §2.7 and the owner's decisions 1–3. No behavioral conflict was found. Default organization
+  id 1 is reserved for legacy creation; the migration/seed initializes its department envelope from
+  existing/fixture department budgets, systems envelope at zero and period `1mo`. Existing production
+  systems retain department funding. Depth counts group nodes only (root = 1, maximum = 4).
+  `role_binding` already uses unrestricted text, so organization/`org_allocator` persistence needs
+  no new columns; seed resolves scope `default`. API validation/authorization remains Step 5.2.
+  The composite parent/department FK protects both child and parent department changes. Hierarchy
+  triggers share the existing department advisory lock and check the final statement's complete tree.
+  No API prefixes, UI changes, test-script defaults or E2E environment handling were changed.
+  The second full gate passed pytest (624 / 7 skipped / 1 xfailed) and Vitest (57), but Playwright
+  U9 `member-actions.spec.ts:29` timed out at line 47 waiting for the restored member's sync badge
+  to become `applied` (remained `pending`). This matches the Step 2.1 flake already recorded below;
+  U9 passed in the first full run with this step's schema. No lifecycle/outbox code or tests changed.
+  Isolated U9 passed (7.7s test, 14.5s including stack startup); final full rerun exited 0 with
+  U9 passing in 7.3s and Playwright 42 passed / 1 existing skip. Existing skips/xfail are unchanged;
+  no test was disabled or weakened.
 
 - Quarantine (22/10, merge of phase-3b + phase-4): `group.spec.ts` "U3 save during LiteLLM outage shows pending + banner…" is `test.fixme` because its `status-banner` visibility check timed out intermittently (failed 1 of 3 full runs on the merged main; pre-existing flake, see the Step 1b note above). Root-cause fix pending (OPEN-ITEMS); restore `test()` afterwards. `department.spec.ts` "F1 split save pending then applied" timed out once on the first `page.goto` while another heavy job ran in parallel; it is not quarantined.
 - Step 3.5 flake (2026-10-22, unrelated to this step: no file it touches changed): a full `./scripts/test.sh` run

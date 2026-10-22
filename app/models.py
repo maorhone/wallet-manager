@@ -9,10 +9,12 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -39,10 +41,31 @@ def _created() -> Mapped[datetime]:
     return mapped_column(TS, server_default=func.now())
 
 
+class Organization(Base):
+    """WM-only root; its optional systems org is a separate LiteLLM object."""
+
+    __tablename__ = "organization"
+    __table_args__ = (
+        CheckConstraint("departments_envelope >= 0", name="ck_org_departments_envelope"),
+        CheckConstraint("systems_envelope >= 0", name="ck_org_systems_envelope"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, **ID)
+    name: Mapped[str] = mapped_column(Text)
+    departments_envelope: Mapped[Decimal] = mapped_column(ALLOC, server_default="0")
+    systems_envelope: Mapped[Decimal] = mapped_column(ALLOC, server_default="0")
+    budget_period: Mapped[str] = mapped_column(Text, server_default="1mo")
+    systems_litellm_org_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = _created()
+
+
 class Department(Base):
     __tablename__ = "department"
     __table_args__ = (Index("uq_department_ad_group_dn", "ad_group_dn", unique=True),)
     id: Mapped[int] = mapped_column(BigInteger, **ID)
+    # Keep legacy department creation attached to the migration's default organization.
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organization.id"), server_default="1", index=True
+    )
     litellm_org_id: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     ad_group_dn: Mapped[str | None] = mapped_column(Text)
@@ -68,6 +91,14 @@ class DepartmentModelAllowance(Base):
 class Grp(Base):
     __tablename__ = "grp"
     __table_args__ = (
+        UniqueConstraint("id", "department_id", name="uq_grp_id_department"),
+        ForeignKeyConstraint(
+            ["parent_group_id", "department_id"],
+            ["grp.id", "grp.department_id"],
+            name="fk_grp_parent_department",
+        ),
+        CheckConstraint("parent_group_id <> id", name="ck_grp_not_self_parent"),
+        Index("ix_grp_parent_group_id", "parent_group_id"),
         Index("uq_grp_ad_group_dn", "ad_group_dn", unique=True),
         Index(
             "uq_grp_department_staff",
@@ -83,6 +114,7 @@ class Grp(Base):
     id: Mapped[int] = mapped_column(BigInteger, **ID)
     litellm_team_id: Mapped[str] = mapped_column(Text, unique=True)
     department_id: Mapped[int] = mapped_column(ForeignKey("department.id"))
+    parent_group_id: Mapped[int | None] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(Text)
     ad_group_dn: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(Text, server_default="regular")
@@ -236,7 +268,7 @@ class RoleBinding(Base):
     __mapper_args__ = {"primary_key": ["ad_group_dn", "role", "scope_kind", "scope_id"]}
     ad_group_dn: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text)
-    scope_kind: Mapped[str] = mapped_column(Text)
+    scope_kind: Mapped[str] = mapped_column(Text)  # also organization, role=org_allocator (v2)
     scope_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
