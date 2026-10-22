@@ -895,3 +895,4 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - 22/10/2026: test_a1_share_expiry_blocks_then_scheduler_closes_and_returns quarantined as xfail(strict=False): time-dependent failure (spend double-counted when the 11-day clock offset crosses a month boundary). Open item; fix properly after the merge.
 
 - flaky-e2e (22/10): restored 4 quarantined e2e tests (U3 stays fixme: ~1/8 recovery failure, see OPEN-ITEMS); fake() retries once on stale socket. Full run: 44 e2e passed. Open: F1 cold goto (not reproduced).
+- flaky quarantine: test_unknown_key_invalid (setup timeout under load).
