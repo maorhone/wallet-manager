@@ -109,7 +109,12 @@ export function ServiceKeysPanel({
           </Button>
         </Group>
       )}
-      <ServiceKeyList items={keys.data.items} onRotate={setRotating} onRevoke={setRevoking} />
+      <ServiceKeyList
+        items={keys.data.items}
+        manage={manage}
+        onRotate={setRotating}
+        onRevoke={setRevoking}
+      />
       {creating && (
         <ServiceKeyDialog
           ownerKind={ownerKind}
