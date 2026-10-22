@@ -342,7 +342,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - Step (none): Step 3.6 done; Phase 3 complete.
 
 ## Blockers
-- None. The known date-dependent share-expiry backend test stays marked `xfail(strict=False)` (owner-approved, one mark).
+- None. Share-expiry test fixed (22/10): the fake LiteLLM kept membership spend across months (real LiteLLM resets it), so October spend was counted in October and November. The fake now drops pre-month logged spend; the test is month-aware; xfail removed. Next unit: flaky-e2e.
 
 ## Notes
 

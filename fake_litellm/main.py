@@ -4,6 +4,7 @@ import hashlib
 import os
 import secrets
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -18,6 +19,7 @@ from app.litellm_client import models as m
 from . import db
 from .controls import router as controls_router
 from .db import budget, jwt_mapping, org_member, organization, team, team_member, token, user
+from .enforcement import member_month_spend
 from .enforcement import router as enforcement_router
 from .state import FakeState
 
@@ -174,7 +176,9 @@ def _team_values(body: m._Req) -> tuple[dict, dict]:
     return cols, meta
 
 
-async def _team_info(conn: AsyncConnection, team_id: str) -> m.TeamInfo:
+async def _team_info(
+    conn: AsyncConnection, team_id: str, now: datetime | None = None
+) -> m.TeamInfo:
     row = await _one(conn, team, "team_id", team_id, "team")
     memberships = (
         await conn.execute(
@@ -193,7 +197,9 @@ async def _team_info(conn: AsyncConnection, team_id: str) -> m.TeamInfo:
             m.TeamMembershipRecord(
                 user_id=r["user_id"],
                 team_id=team_id,
-                spend=r["spend"] or 0,
+                spend=await member_month_spend(
+                    conn, team_id, r["user_id"], r["spend"], now or datetime.now(UTC)
+                ),
                 litellm_budget_table=m.BudgetRecord(**r) if r["budget_id"] else None,
             )
             for r in memberships
@@ -253,7 +259,7 @@ def _team_router() -> APIRouter:
     @r.get("/team/info")
     async def team_info(team_id: str, request: Request):
         async with request.app.state.fake.engine.connect() as conn:
-            return await _team_info(conn, team_id)
+            return await _team_info(conn, team_id, request.app.state.fake.now())
 
     @r.post("/team/member_add")
     async def team_member_add(body: m.TeamMemberAdd, request: Request):
