@@ -111,8 +111,10 @@ async def drain(
         )
     for row_id in ids:
         async with sf() as s:
-            row = await s.get(LitellmWrite, row_id)
-            if row.status != "pending":
+            # The seed CLI can overlap the live worker. Hold the row through apply + commit
+            # so another drain rechecks its committed status before calling LiteLLM.
+            row = await s.get(LitellmWrite, row_id, with_for_update=True)
+            if row is None or row.status != "pending":
                 continue
             if (
                 row.depends_on

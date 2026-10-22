@@ -150,7 +150,46 @@ scope switcher, change-summary dialog, PMO page (pool and grants with the create
 Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10. Group Service keys tab Done in Step 3.5
 (see 4.9).
 
+### 4.8.1 Platform shell and Departments tab - Step 3.7: Done
+
+Platform admins enter `/platform`, which redirects to the existing Pending placement tab. The Departments tab
+lists current budgets and LiteLLM budget periods; admins can create departments, edit their budget and period,
+and create regular or department staff groups with a zero base budget and a sync badge. Each department links
+to its staff group's Members screen for representatives' personal values (DR9). A role editor assigns AD group
+DNs per department role and shows resolved member names; changes require a reason in the shared change summary.
+Past-period selection disables changes. Operations, Policies and Audit tabs are reserved for subsequent steps.
+
+### 4.8.2 Platform Operations tab - Step 3.8: Done
+
+Platform admins open `/platform/operations` to see LiteLLM reachability, Redis status (including
+"לא מוגדר" when Redis is not configured), outbox depth with pending and failed counts, pending placements,
+and spend freshness with its timestamp. The outbox table defaults to failed writes and can show
+pending, applied or all writes, including error text. Pending and failed writes can be retried
+through the shared change summary with a required reason and Idempotency-Key; polling updates
+their status after application. The drift log uses the existing reconciliation audit filter and
+shared history timeline. Overlapping outbox consumers serialize each write through application
+and commit, preventing duplicate provisioning calls and preserving the resulting applied or failed
+status. Policies and Audit search remain reserved for Step 3.9.
+
+### 4.8.3 Platform Policies and Audit search tabs - Step 3.9: Done
+
+Platform admins open `/platform/policies` to edit concurrency and rpm minimum/default/maximum,
+notification thresholds, the default over-allocation factor and each group's factor (1–2).
+Changes show before/after values and require a reason; requests include an Idempotency-Key.
+Invalid ranges/factors cannot be saved, and past-period selections disable changes. Saved values
+are reloaded from the API; department summaries now include each group's current factor. Existing
+personal limits are left as saved when a policy is lowered; a later save outside the new range
+shows the Hebrew `LIMIT_OUT_OF_POLICY` error with the allowed range.
+
+`/platform/audit` searches across all audit records with optional entity, id, actor and from/to
+filters. Date/time inputs use the browser's local time and are sent as UTC instants. Results use
+the shared history timeline with actor, reason, before/after values and LiteLLM call status. Empty
+filters search everything. Both tabs are restricted to platform admins. The phase-3b acceptance
+mapping is recorded in PROGRESS.md; Steps 3.3–3.6 are verified at merge into main.
+
 ### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.5)
+
+> > > > > > > origin/phase-3b
 
 A platform admin sets a department's production budget (DR4: a separate LiteLLM Organization from
 the department's own, so employee spending can never block production) and creates systems (Teams)

@@ -4,7 +4,7 @@ import { Shell } from './App';
 import Login from './pages/Login';
 import GroupPage from './pages/group/GroupPage';
 import MyWallet from './pages/MyWallet';
-import Platform from './pages/Platform';
+import PlatformPage from './pages/platform/PlatformPage';
 import PmoPage from './pages/pmo/PmoPage';
 
 export const router = createBrowserRouter([
@@ -20,7 +20,8 @@ export const router = createBrowserRouter([
       { path: 'department/:id/:tab', element: <DepartmentPage /> },
       { path: 'pmo/:id', element: <Navigate to="pool" replace /> },
       { path: 'pmo/:id/:tab', element: <PmoPage /> },
-      { path: 'platform', element: <Platform /> },
+      { path: 'platform', element: <Navigate to="pending" replace /> },
+      { path: 'platform/:tab', element: <PlatformPage /> },
     ],
   },
 ]);

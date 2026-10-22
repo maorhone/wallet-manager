@@ -34,12 +34,27 @@ export interface Me {
 
 export interface Status {
   litellm_reachable: boolean;
+  redis: 'not_configured' | 'connected' | 'unreachable' | 'unknown';
+  litellm_version: string | null;
+  pending_placements: number | null;
   outbox: { pending: number; failed: number; oldest_pending_at: string | null };
   spend_taken_at: string | null;
   last_sync: string | null;
 }
 
 export type SyncStatus = 'pending' | 'applied' | 'failed';
+
+export interface OutboxEntry {
+  id: number;
+  entity: string;
+  entity_id: string;
+  endpoint: string;
+  status: SyncStatus;
+  attempts: number;
+  last_error: string | null;
+  idempotency_key: string;
+  created_at: string;
+}
 
 export interface WriteEntity {
   entity: string;
@@ -201,6 +216,7 @@ export interface DepartmentSummary extends PeriodEnvelope {
     id: number;
     name: string;
     kind: string;
+    overalloc_factor: number;
     base: number;
     grants: number;
     total: number;
@@ -355,8 +371,6 @@ export interface NotificationsList {
   prefs: NotificationPref[];
 }
 
-export type Policies = Record<string, { min?: number; default?: number; max?: number }>;
-
 export type ServiceKeyStatus = 'pending' | 'active' | 'revoked' | 'failed';
 
 export interface ServiceKey {
@@ -393,4 +407,63 @@ export interface ServiceKeyIn {
 /** Create and rotate responses carry the one-time secret; it is never cached. */
 export interface ServiceKeyWriteResponse extends WriteResponse {
   secret?: string;
+}
+
+export interface PolicyRange {
+  min: number;
+  default: number;
+  max: number;
+}
+
+export interface Policies {
+  concurrency: PolicyRange;
+  rpm: PolicyRange;
+  overalloc_factor_default: number;
+  thresholds: { near?: number; full?: number };
+}
+
+export type PoliciesIn = Partial<Policies> & { overalloc_factors?: Record<string, number> };
+
+export interface AuditFilters {
+  entity?: string;
+  id?: string;
+  actor?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface DepartmentRecord {
+  id: number;
+  name: string;
+  budget: number;
+  budget_period: string;
+}
+
+export interface DepartmentIn {
+  name: string;
+  litellm_org_id: string;
+  ad_group_dn: string | null;
+  budget: number;
+  budget_period: string;
+}
+
+export interface GroupIn {
+  name: string;
+  litellm_team_id: string;
+  ad_group_dn: string | null;
+  kind: 'regular' | 'department_staff';
+}
+
+export interface RoleBindingScope {
+  scope_kind: 'global' | 'department' | 'group';
+  scope_id?: number;
+}
+
+export interface RoleBindingIn extends RoleBindingScope {
+  role: string;
+  ad_group_dns: string[];
+}
+
+export interface RoleBinding extends RoleBindingIn {
+  members: Person[];
 }

@@ -1,5 +1,8 @@
+import asyncio
 import uuid
+from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy import select
 
 from app.models import AuditLog, Department, Employee, LitellmWrite
@@ -25,6 +28,27 @@ async def test_drain_applies_and_marks_applied(provisioned, litellm):
     assert statuses == {"applied"}
     assert (await litellm.organization_info("D1")).litellm_budget_table.max_budget == 1000000
     assert (await litellm.team_info("A1")).team_info.organization_id == "D1"
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_concurrent_drains_apply_each_row_once(
+    seeded, prov_settings, litellm, fake_app, monkeypatch, failed
+):
+    # The seed CLI and the running worker can both consume this row during an e2e reset.
+    await _enqueue(seeded, prov_settings, "department", "1", "/organization/new")
+    create = AsyncMock(wraps=litellm.organization_new)
+    monkeypatch.setattr(litellm, "organization_new", create)
+    if failed:
+        fake_app.state.fake.failures["/organization/new"] = [400, 1]
+
+    results = await asyncio.gather(
+        drain(seeded, litellm, prov_settings), drain(seeded, litellm, prov_settings)
+    )
+
+    assert create.await_count == 1
+    assert sum(r.applied for r in results) == (0 if failed else 1)
+    assert sum(r.failed for r in results) == (1 if failed else 0)
+    assert await _statuses(seeded) == ["failed" if failed else "applied"]
 
 
 async def test_outage_keeps_pending_then_applies_after_recovery(

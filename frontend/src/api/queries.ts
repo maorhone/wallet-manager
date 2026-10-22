@@ -5,10 +5,17 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { apiFetch, apiPatch, apiPost, apiPut } from './client';
+import { apiFetch, apiPatch, apiPost, apiPut, type WriteOptions } from './client';
 import type {
   AuditEntry,
+  AuditFilters,
   DepartmentSummary,
+  DepartmentRecord,
+  DepartmentIn,
+  GroupIn,
+  RoleBinding,
+  RoleBindingIn,
+  RoleBindingScope,
   DevUser,
   Grant,
   GrantIn,
@@ -23,13 +30,16 @@ import type {
   MyWallet,
   NotificationPref,
   NotificationsList,
+  OutboxEntry,
   PendingPlacement,
   PmoPool,
   Policies,
   ServiceKeyIn,
   ServiceKeysList,
   ServiceKeyWriteResponse,
+  PoliciesIn,
   Status,
+  SyncStatus,
   UsagePoint,
   WriteResponse,
 } from './types';
@@ -80,10 +90,25 @@ export function applyWriteResponse<T>(
   qc.setQueryData<T>(key, (old) => (old === undefined ? old : merge(old, response)));
 }
 
+export const useOutbox = (status: SyncStatus | '') =>
+  useQuery({
+    queryKey: ['outbox', status],
+    queryFn: () => apiFetch<OutboxEntry[]>(`/outbox${status ? `?status=${status}` : ''}`),
+    refetchInterval: 2000,
+  });
+
+export const useReconciliationAudit = () =>
+  useQuery({
+    queryKey: ['audit', 'reconcile'],
+    queryFn: () => apiFetch<AuditEntry[]>('/audit?actor=system:reconcile'),
+    refetchInterval: 5000,
+  });
+
 export const useRetryOutbox = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number | string) => apiPost(`/outbox/${id}/retry`, undefined),
+    mutationFn: ({ id, ...write }: WriteOptions & { id: number | string }) =>
+      apiPost(`/outbox/${id}/retry`, undefined, write),
     onSuccess: () => qc.invalidateQueries(),
   });
 };
@@ -165,6 +190,7 @@ export const useDepartmentWrite = () => {
       apiPut<WriteResponse>(v.path, v.body, { reason: v.reason, idempotencyKey: v.key }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['departments'] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });
@@ -180,6 +206,26 @@ export const useGroupMembers = (id: string, period: string, enabled = true) =>
 
 export const usePolicies = () =>
   useQuery({ queryKey: keys.policies, queryFn: () => apiFetch<Policies>('/policies') });
+
+export const usePoliciesWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: PoliciesIn; reason: string; key: string }) =>
+      apiPut<WriteResponse>('/policies', v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useAuditSearch = (filters: AuditFilters | null) => {
+  const params = new URLSearchParams(
+    Object.entries(filters ?? {}).filter((entry): entry is [string, string] => !!entry[1]),
+  ).toString();
+  return useQuery({
+    queryKey: ['audit', 'search', params],
+    queryFn: () => apiFetch<AuditEntry[]>(`/audit${params ? `?${params}` : ''}`),
+    enabled: filters !== null,
+  });
+};
 
 export const useGroupAudit = (id: string) =>
   useQuery({
@@ -263,6 +309,53 @@ export const useDepartmentIds = (enabled: boolean) =>
     enabled,
     select: (rows) => rows.map((d) => d.id),
   });
+
+export const useDepartments = () =>
+  useQuery({
+    queryKey: ['departments'],
+    queryFn: () => apiFetch<DepartmentRecord[]>('/departments'),
+  });
+
+const usePlatformCreate = <T>(path: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: T; reason: string; key: string }) =>
+      apiPost<WriteResponse>(path, v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: () => {
+      for (const k of ['departments', 'department', 'me', 'audit'])
+        qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+};
+
+export const useCreateDepartment = () => usePlatformCreate<DepartmentIn>('/departments');
+export const useCreateGroup = (departmentId: number) =>
+  usePlatformCreate<GroupIn>(`/departments/${departmentId}/groups`);
+
+export const useRoleBindings = (scope: RoleBindingScope) =>
+  useQuery({
+    queryKey: ['role-bindings', scope.scope_kind, scope.scope_id],
+    queryFn: () => {
+      const params = new URLSearchParams({ scope_kind: scope.scope_kind });
+      if (scope.scope_id !== undefined) params.set('scope_id', String(scope.scope_id));
+      return apiFetch<RoleBinding[]>(`/role-bindings?${params}`);
+    },
+  });
+
+export const useRoleBindingsWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: RoleBindingIn; reason: string; key: string }) =>
+      apiPut<WriteResponse>('/role-bindings', v.body, {
+        reason: v.reason,
+        idempotencyKey: v.key,
+      }),
+    onSuccess: () => {
+      for (const k of ['role-bindings', 'me', 'department', 'group', 'audit'])
+        qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+};
 
 /** Place a pending employee into a group; the list and the department views refresh. */
 export const usePlace = () => {

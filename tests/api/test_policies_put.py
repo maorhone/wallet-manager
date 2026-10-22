@@ -81,6 +81,10 @@ async def test_overalloc_factor_per_group_then_caps_check_uses_it(login, put, pr
     async with provisioned() as s:
         assert float((await s.get(Grp, A1)).overalloc_factor) == 1.2
 
+    summary = (await admin.get("/departments/1/summary")).json()
+    group = next(g for g in summary["groups"] if g["id"] == A1)
+    assert group["overalloc_factor"] == 1.2
+
     dana = await login("dana")
     assert (await put(dana, f"/groups/{A1}/members/caps", caps(dani=250000))).status_code == 200
     over = await put(dana, f"/groups/{A1}/members/caps", caps(yael=40000))  # 305000 > 300000

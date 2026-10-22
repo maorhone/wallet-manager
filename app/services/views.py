@@ -525,6 +525,7 @@ async def department_summary(
                 "id": g.id,
                 "name": g.name,
                 "kind": g.kind,
+                "overalloc_factor": g.overalloc_factor,
                 "base": base,
                 "grants": gr,
                 "total": w["total"],
