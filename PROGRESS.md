@@ -217,6 +217,22 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   as instructed by the owner; its fix remains on main and must be resolved at merge.
 
 ## Notes
+- Step 3.9 failure investigation (2026-10-22): one `./scripts/test.sh` run passed ruff
+  and formatting, then stopped at
+  `tests/test_truncate_retry.py::test_gives_up_after_the_last_attempt` with
+  `pytest-timeout` (>60 s): 472 passed / 6 skipped / 1 xfailed / 1 failed in 646.49 s.
+  The timeout occurred during the test call; the stack ends in pytest-asyncio's runner →
+  asyncio event loop → `EpollSelector.poll`. It does not identify which await was suspended
+  (lock acquisition, the bounded TRUNCATE retries, or connection cleanup). The test holds
+  a read lock and expects a database lock error after two attempts with a 100 ms lock timeout.
+  This test and `app/db.py` are unchanged by Step 3.9; the run also passed the JWT tests
+  near the supplied output tail. Evidence points to an unrelated intermittent execution
+  timeout; its underlying cause is not established by this stack. Stopped without a focused
+  rerun or another full-gate attempt, as instructed. No application code, assertions,
+  timeouts or markers changed; the owner-approved share-expiry xfail was already present.
+  The frontend stages were not reached, so this investigation does not claim the full
+  script green. Historical green results above remain historical; Next remains
+  merge phase-3b and phase-4 into main.
 - Step 3.9 scope: no SPEC/PLAN conflicts. The existing API supports rpm min/default/max in
   addition to the spec's rpm default. The sole backend addition is the real `overalloc_factor`
   read field in the existing department summary; no new endpoints, writes or LiteLLM calls.
