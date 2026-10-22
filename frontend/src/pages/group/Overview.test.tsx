@@ -45,7 +45,12 @@ const summary = {
   top_consumers: [],
   near_limit_members: [],
   pending_sync_count: 0,
-  actions: { edit_members: false, edit_pots_limits: false, edit_defaults: false },
+  actions: {
+    edit_members: false,
+    edit_pots_limits: false,
+    edit_defaults: false,
+    service_keys: { view: false, manage: false },
+  },
 } satisfies GroupSummary;
 
 afterEach(() => {

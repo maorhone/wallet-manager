@@ -150,7 +150,7 @@ async def test_concurrency_alert_uses_effective_key_limit(
         else:
             policy.value = {**policy.value, "default": policy_default}
         await db.commit()
-        key = await build(db, prov_settings, "/key/update", DANI)
+        key = await build(db, prov_settings, "employee", "/key/update", DANI)
         assert key.max_parallel_requests == (override or policy_default)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=fake_app), base_url="http://fake"

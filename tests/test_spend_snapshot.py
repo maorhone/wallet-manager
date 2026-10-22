@@ -113,7 +113,7 @@ async def test_service_key_spend_by_hash_period_day_model(seeded):
         key_id = str(key.id)
 
     class Reader:
-        async def spend_rows(self, start, end):
+        async def spend_rows(self, start, end, *, timezone="UTC"):
             if not start <= NOW < end:
                 return []
             return [
@@ -152,7 +152,7 @@ async def test_service_key_spend_survives_rotation(seeded):
         await db.commit()
 
     class Reader:
-        async def spend_rows(self, start, end):
+        async def spend_rows(self, start, end, *, timezone="UTC"):
             if not start <= NOW < end:
                 return []
             return [
