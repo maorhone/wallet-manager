@@ -5,6 +5,8 @@ import { he } from '../../i18n/he';
 import Departments from './Departments';
 import Operations from './Operations';
 import Pending from './Pending';
+import Policies from './Policies';
+import Audit from './Audit';
 
 const TABS = ['pending', 'departments', 'operations', 'policies', 'audit'];
 
@@ -27,12 +29,7 @@ export default function PlatformPage() {
       >
         <Tabs.List>
           {TABS.map((key) => (
-            <Tabs.Tab
-              key={key}
-              value={key}
-              data-testid={`tab-${key}`}
-              disabled={key === 'policies' || key === 'audit'}
-            >
+            <Tabs.Tab key={key} value={key} data-testid={`tab-${key}`}>
               {he.platformPage.tabs[key]}
             </Tabs.Tab>
           ))}
@@ -41,6 +38,8 @@ export default function PlatformPage() {
       {tab === 'pending' && <Pending />}
       {tab === 'departments' && <Departments />}
       {tab === 'operations' && <Operations />}
+      {tab === 'policies' && <Policies />}
+      {tab === 'audit' && <Audit />}
     </Stack>
   );
 }

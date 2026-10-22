@@ -8,6 +8,7 @@ import {
 import { apiFetch, apiPatch, apiPost, apiPut, type WriteOptions } from './client';
 import type {
   AuditEntry,
+  AuditFilters,
   DepartmentSummary,
   DepartmentRecord,
   DepartmentIn,
@@ -33,6 +34,7 @@ import type {
   PendingPlacement,
   PmoPool,
   Policies,
+  PoliciesIn,
   Status,
   SyncStatus,
   UsagePoint,
@@ -201,6 +203,26 @@ export const useGroupMembers = (id: string, period: string, enabled = true) =>
 
 export const usePolicies = () =>
   useQuery({ queryKey: keys.policies, queryFn: () => apiFetch<Policies>('/policies') });
+
+export const usePoliciesWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: PoliciesIn; reason: string; key: string }) =>
+      apiPut<WriteResponse>('/policies', v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useAuditSearch = (filters: AuditFilters | null) => {
+  const params = new URLSearchParams(
+    Object.entries(filters ?? {}).filter((entry): entry is [string, string] => !!entry[1]),
+  ).toString();
+  return useQuery({
+    queryKey: ['audit', 'search', params],
+    queryFn: () => apiFetch<AuditEntry[]>(`/audit${params ? `?${params}` : ''}`),
+    enabled: filters !== null,
+  });
+};
 
 export const useGroupAudit = (id: string) =>
   useQuery({

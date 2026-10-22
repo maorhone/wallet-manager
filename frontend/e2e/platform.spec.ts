@@ -183,3 +183,101 @@ test('Admin creates a department, its staff group and a representative binding; 
   await expect(page.getByText('הגישה לפלטפורמה מוגבלת למנהלי פלטפורמה')).toBeVisible();
   await expect(page.getByRole('button', { name: 'יצירת מחלקה', exact: true })).toHaveCount(0);
 });
+
+test('Admin lowers the concurrency maximum; a head saving a limit above it gets LIMIT_OUT_OF_POLICY', async ({
+  page,
+}) => {
+  await loginAs(page, 'admin@corp.example');
+  await page.goto('/platform');
+  await page.getByRole('tab', { name: 'מדיניות', exact: true }).click();
+  await page.getByTestId('policy-concurrency-max').fill('3');
+  await expect(page.getByTestId('policies-review')).toBeDisabled();
+  await page.getByTestId('policy-concurrency-max').fill('6');
+  await page.getByTestId('policy-rpm-default').fill('100');
+  await page.getByTestId('policy-thresholds-near').fill('0.75');
+  await page.getByTestId('policy-overalloc_factor_default').fill('1.1');
+  await page.getByTestId('policies-review').click();
+  await expect(page.getByTestId('change-summary')).toContainText('8');
+  await expect(page.getByTestId('change-summary')).toContainText('6');
+  await expect(page.getByTestId('confirm-change')).toBeDisabled();
+  await page.getByTestId('change-reason').fill('הורדת תקרת מקביליות');
+  const saved = page.waitForResponse(
+    (res) => res.url().endsWith('/policies') && res.request().method() === 'PUT',
+  );
+  await page.getByTestId('confirm-change').click();
+  const response = await saved;
+  expect(response.ok()).toBeTruthy();
+  expect(response.request().postDataJSON()).toEqual({
+    concurrency: { min: 1, default: 4, max: 6 },
+    rpm: { min: 1, default: 100, max: 600 },
+    thresholds: { near: 0.75, full: 1 },
+    overalloc_factor_default: 1.1,
+  });
+  expect(decodeURIComponent(response.request().headers()['x-change-reason'])).toBe(
+    'הורדת תקרת מקביליות',
+  );
+  expect(response.request().headers()['idempotency-key']).toBeTruthy();
+  await expect(page.getByTestId('confirm-change')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId('policy-concurrency-max')).toHaveValue('6');
+  await expect(page.getByTestId('policy-rpm-default')).toHaveValue('100');
+  await expect(page.getByTestId('policy-thresholds-near')).toHaveValue('0.75');
+  await expect(page.getByTestId('policy-overalloc_factor_default')).toHaveValue('1.1');
+
+  const factors = page.getByTestId('department-factors-1');
+  await expect(factors.getByTestId('group-factor-1')).toHaveValue('1');
+  await factors.getByTestId('group-factor-1').fill('3');
+  await expect(factors.getByRole('button', { name: 'סקירת שינוי' })).toBeDisabled();
+  await factors.getByTestId('group-factor-1').fill('1.2');
+  await factors.getByRole('button', { name: 'סקירת שינוי' }).click();
+  await page.getByTestId('change-reason').fill('עדכון מקדם לקבוצה');
+  await page.getByTestId('confirm-change').click();
+  await expect(page.getByTestId('confirm-change')).toHaveCount(0);
+  await page.reload();
+  await expect(factors.getByTestId('group-factor-1')).toHaveValue('1.2');
+  await page.getByTestId('period-selector').selectOption({ index: 1 });
+  await expect(page.getByTestId('policy-concurrency-max')).toHaveAttribute('readonly');
+  await expect(page.getByTestId('policies-review')).toBeDisabled();
+  await expect(factors.getByRole('button', { name: 'סקירת שינוי' })).toBeDisabled();
+  await page.goto('/platform/policies');
+
+  await page.getByRole('tab', { name: 'חיפוש ביקורת', exact: true }).click();
+  await page.getByLabel('ישות', { exact: true }).fill('policy');
+  await page.getByLabel('מזהה ישות').fill('concurrency');
+  await page.getByLabel('מבצע').fill('admin@corp.example');
+  await page.getByRole('button', { name: 'חיפוש', exact: true }).click();
+  await expect(page.getByTestId('history-timeline')).toContainText('הורדת תקרת מקביליות');
+  await expect(page.getByTestId('history-timeline')).toContainText('"max":8');
+  await expect(page.getByTestId('history-timeline')).toContainText('"max":6');
+  await expect(page.getByTestId('history-timeline')).not.toContainText('עדכון מקדם לקבוצה');
+
+  await loginAs(page, 'dana@corp.example');
+  await page.goto('/group/1/members');
+  await page.locator('[data-row="dani@corp.example"]').getByTestId('open-panel').click();
+  await page.getByTestId('limit-parallel').fill('7');
+  await page.getByTestId('panel-review').click();
+  await page.getByTestId('change-reason').fill('בקשת מקביליות מעל התקרה');
+  const rejected = page.waitForResponse(
+    (res) => res.url().includes('/members/dani') && res.url().endsWith('/limits'),
+  );
+  await page.getByTestId('confirm-change').click();
+  const error = await rejected;
+  expect(error.status()).toBe(422);
+  expect((await error.json()).code).toBe('LIMIT_OUT_OF_POLICY');
+  await expect(page.getByTestId('summary-error')).toContainText('מחוץ לטווח המותר (1–6)');
+  const head = await apiAs('dana@corp.example');
+  try {
+    const members = (await (await head.get('/groups/1/members')).json()).members;
+    expect(
+      members.find((m: { upn: string }) => m.upn === 'dani@corp.example').max_parallel,
+    ).toBeNull();
+  } finally {
+    await head.dispose();
+  }
+  for (const tab of ['policies', 'audit']) {
+    await page.goto(`/platform/${tab}`);
+    await expect(page.getByText('הגישה לפלטפורמה מוגבלת למנהלי פלטפורמה')).toBeVisible();
+    await expect(page.getByTestId('policies-review')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'חיפוש', exact: true })).toHaveCount(0);
+  }
+});

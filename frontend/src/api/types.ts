@@ -211,6 +211,7 @@ export interface DepartmentSummary extends PeriodEnvelope {
     id: number;
     name: string;
     kind: string;
+    overalloc_factor: number;
     base: number;
     grants: number;
     total: number;
@@ -365,7 +366,28 @@ export interface NotificationsList {
   prefs: NotificationPref[];
 }
 
-export type Policies = Record<string, { min?: number; default?: number; max?: number }>;
+export interface PolicyRange {
+  min: number;
+  default: number;
+  max: number;
+}
+
+export interface Policies {
+  concurrency: PolicyRange;
+  rpm: PolicyRange;
+  overalloc_factor_default: number;
+  thresholds: { near?: number; full?: number };
+}
+
+export type PoliciesIn = Partial<Policies> & { overalloc_factors?: Record<string, number> };
+
+export interface AuditFilters {
+  entity?: string;
+  id?: string;
+  actor?: string;
+  from?: string;
+  to?: string;
+}
 
 export interface DepartmentRecord {
   id: number;

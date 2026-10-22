@@ -1,11 +1,26 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Steps 3.7 (Platform shell and Departments UI) and 3.8 (Operations tab) done on phase-3b. Next = Step 3.9.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Steps 3.7 (Platform shell and Departments UI) and 3.8 (Operations tab) done on phase-3b. Step 3.9 (Policies and Audit search) done: `./scripts/test.sh` green (pytest 528 passed / 6 skipped / 1 xfailed; Vitest 44; Playwright 37; 6m46.145s). Next = merge phase-3b and phase-4 into main.
 Step 3.8 failed-count regression: reproduced concurrent seed/worker drains creating the same organization twice. Each outbox row is now locked through application and commit; a waiting consumer rechecks the committed status. Regression coverage checks both successful and permanently failed writes. Full `./scripts/test.sh` verification is in progress; the owner-approved date-dependent share-expiry xfail remains unchanged. Earlier timeout investigations and historical green runs are recorded in Notes.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.9: enabled admin-only `/platform/policies` and `/platform/audit`. Policies edit concurrency
+  and rpm ranges, notification thresholds, the default over-allocation factor and per-group factors
+  through `ChangeSummaryDialog` with a required reason and Idempotency-Key. Invalid ranges/factors
+  cannot be reviewed; past periods disable policy changes. Saved group factors are now included in
+  department summaries so the editor displays the actual before value and survives reloads.
+  Audit search submits optional entity/id/actor/from/to filters to the existing API and renders
+  `HistoryTimeline`; browser-local date/time inputs become UTC instants, and an empty search covers
+  everything. Repeated searches refresh the results; shared loading/error/empty states are reused.
+  TDD: Audit Vitest failed on the missing page; Playwright failed on the disabled Policies tab;
+  the factor read-back assertion failed on the missing summary field before implementation.
+  Focused checks: 29 backend tests, 44 Vitest tests and the new Playwright acceptance test pass.
+  Final `./scripts/test.sh`: green, pytest 528 passed / 6 skipped / 1 xfailed (237.40s),
+  Vitest 44 (3.62s), Playwright 37 (2.5m); total 6m46.145s. Includes hygiene, ruff, frontend lint
+  and typecheck. This final run supersedes the earlier in-progress verification notes.
+  No new owner questions or blockers; the known xfail is resolved at merge with main.
 - Step 3.8: enabled `/platform/operations` for platform admins with LiteLLM reachability, all Redis
   states (including `לא מוגדר`), outbox depth/counts, pending placements and spend freshness/timestamp.
   The outbox table filters pending/failed/applied/all writes and shows errors; pending and failed writes
@@ -194,13 +209,55 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.9: Platform Policies and Audit search tabs; Phase 3 wrap-up on the phase-3b track.
+- merge phase-3b and phase-4 into main.
 
 ## Blockers
+- None for Step 3.9. Steps 3.3–3.6 acceptance remains verified at merge into main.
 - None for Step 3.8. The known date-dependent backend test is marked xfail on this branch
   as instructed by the owner; its fix remains on main and must be resolved at merge.
 
 ## Notes
+- Step 3.9 scope: no SPEC/PLAN conflicts. The existing API supports rpm min/default/max in
+  addition to the spec's rpm default. The sole backend addition is the real `overalloc_factor`
+  read field in the existing department summary; no new endpoints, writes or LiteLLM calls.
+  `/policies` and `/audit` are already proxied, so no Vite change is needed. No Steps 3.3–3.6
+  implementation, stubs, Production or Service keys tabs were added; no automatic AD sync.
+  The owner's branch-only non-strict xfail was already present on the single share-expiry test
+  and remains unchanged; resolve it with main's fix at merge. No commits or pushes.
+- Step 3.9 Phase 3 acceptance audit (phase-3b scope; all available mapped tests pass in the final gate):
+
+| PLAN acceptance row | Verification on this branch |
+|---|---|
+| FR-K1 production Organization | verified at merge into main (3.3, 3.6) |
+| FR-K2 system Team and service keys | verified at merge into main (3.3, 3.4, 3.6) |
+| FR-K3 group service keys | verified at merge into main (3.4, 3.5) |
+| FR-K4 rotate/revoke | verified at merge into main (3.4, 3.5) |
+| FR-K4/NFR5 secret shown once | verified at merge into main (3.4, 3.5) |
+| DR4 production key organization | verified at merge into main (3.3) |
+| Service key and production permissions | verified at merge into main (3.3–3.5) |
+| ldap3 onboarding/names/login roles (3.1) | `tests/directory/test_directory_contract.py::test_contract_groups_of`, `::test_contract_members_of`, `::test_contract_display_name` for fixture and ldap; `test_oidc.py::test_login_without_groups_claim_uses_directory`; `test_me_wallet.py::test_owner_names_degrade_when_directory_down` |
+| LDAP errors/503/no writes (3.1) | `test_ldap_directory.py::test_bind_failure_raises_directory_unavailable`, `::test_socket_error_raises_directory_unavailable`; `test_onboarding.py::test_ldap_directory_down_503_nothing_written` |
+| Offline directory contract (3.1) | Six fixture/ldap MOCK_SYNC cases above; `test_real_ldap[real]` remains opt-in via `LDAP_TEST_URL` and is skipped without a real directory |
+| No AD sync | Directory call-site review: onboarding, owner/role-holder names and login only (including dev login); no directory reads in scheduler/jobs |
+| PUT /policies (3.2, 3.9) | `test_policies_put.py` (23 cases); `platform.spec.ts` “Admin lowers the concurrency maximum…” |
+| Redis status (3.2, 3.8) | `test_status_outbox.py::test_status_redis_not_configured_by_default`, `::test_status_redis_connected_and_down`, `::test_status_litellm_down_redis_unknown`; `platform.spec.ts` “Admin sees Redis not configured…” |
+| Group creation at zero budget (3.2, 3.7) | `test_platform_create.py::test_create_group_team_new_zero_budget_after_drain`; `platform.spec.ts` “Admin creates a department…” |
+| Department Production tab | verified at merge into main (3.6) |
+| Group Service keys tab | verified at merge into main (3.5) |
+| Platform screens (3.7–3.9) | All three `platform.spec.ts` tests; `Audit.test.tsx` query construction/timeline; existing `pending.spec.ts` unchanged |
+| FR-V1 locks on new production/key parents | verified at merge into main (3.3, 3.4) |
+| NFR10 hygiene | `test_repo_hygiene.py::test_tracked_files_have_no_secrets_or_internal_names` |
+
+- Step 3.9 runtime budget: no additional pytest cases (one existing test gains a factor read-back
+  assertion); one additional Vitest and one Playwright test. Phase-3b adds three Playwright tests
+  over Phase 2, with the other three Phase 3 cases verified at merge into main (six planned total).
+  Full gate: 406.145s; pytest: 237.40s (528 passed / 6 skipped / 1 xfailed); Vitest: 44 passed
+  in 3.62s; Playwright: 37 passed in 2.5m (the new acceptance case took 6.0s). Pytest is 49.92s
+  above the previously recorded Step 3.7 run of 187.48s; this is an elapsed-time comparison,
+  not a measurement of Step 3.9 overhead. A comparable Phase 2 pytest-only baseline is not in
+  the recorded results, so total Phase 3 pytest growth cannot be established here. The full
+  run exceeds the approximate 300s target; this step adds no backend test cases and one browser
+  case, and leaves the test script, timeouts, default ports and E2E env handling unchanged.
 - Step 3.8 failed-count investigation (2026-10-22): `frontend/e2e/platform.spec.ts` expected
   one failed write but saw two. `resetData()` invokes the seed CLI's drain while the live worker
   also drains the same rows. Without a row lock both can observe a pending row, probe an absent

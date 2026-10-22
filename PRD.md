@@ -170,6 +170,22 @@ shared history timeline. Overlapping outbox consumers serialize each write throu
 and commit, preventing duplicate provisioning calls and preserving the resulting applied or failed
 status. Policies and Audit search remain reserved for Step 3.9.
 
+### 4.8.3 Platform Policies and Audit search tabs - Step 3.9: Done
+
+Platform admins open `/platform/policies` to edit concurrency and rpm minimum/default/maximum,
+notification thresholds, the default over-allocation factor and each group's factor (1–2).
+Changes show before/after values and require a reason; requests include an Idempotency-Key.
+Invalid ranges/factors cannot be saved, and past-period selections disable changes. Saved values
+are reloaded from the API; department summaries now include each group's current factor. Existing
+personal limits are left as saved when a policy is lowered; a later save outside the new range
+shows the Hebrew `LIMIT_OUT_OF_POLICY` error with the allowed range.
+
+`/platform/audit` searches across all audit records with optional entity, id, actor and from/to
+filters. Date/time inputs use the browser's local time and are sent as UTC instants. Results use
+the shared history timeline with actor, reason, before/after values and LiteLLM call status. Empty
+filters search everything. Both tabs are restricted to platform admins. The phase-3b acceptance
+mapping is recorded in PROGRESS.md; Steps 3.3–3.6 are verified at merge into main.
+
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned
 
 Production organizations, service keys, rotate/revoke.
