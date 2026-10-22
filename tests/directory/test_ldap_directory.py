@@ -130,6 +130,37 @@ def test_default_connect_requires_certificate_validation():
     assert conn.server.tls.validate == ssl.CERT_REQUIRED
 
 
+def test_default_connect_never_follows_referrals_and_uses_int_timeouts():
+    """A followed ``ldap://`` referral would send the bind password in clear text; ldap3 2.9.1
+    also rejects float timeouts on Linux."""
+    settings = Settings(
+        _env_file=None,
+        ldap_url="ldaps://dc.corp.example",
+        ldap_user_base="OU=Users,DC=corp,DC=example",
+        ldap_timeout_s=2.5,
+    )
+    conn = LdapDirectory(settings)._default_connect()
+    assert conn.auto_referrals is False
+    assert isinstance(conn.receive_timeout, int)
+    assert isinstance(conn.server.connect_timeout, int)
+
+
+def test_unbind_failure_is_not_a_server_error_and_does_not_mask_the_result():
+    from ldap3.core.exceptions import LDAPSocketCloseError
+
+    class BadUnbind(FakeConnection):
+        def unbind(self):
+            raise LDAPSocketCloseError("closed")
+
+    ok = BadUnbind(entries=[_entry(memberOf=["CN=g,DC=corp,DC=example"])])
+    assert LdapDirectory(SETTINGS, connect=lambda: ok).groups_of("a@corp.example") == [
+        "CN=g,DC=corp,DC=example"
+    ]
+    bad = BadUnbind(bind_ok=False)
+    with pytest.raises(DirectoryUnavailable):
+        LdapDirectory(SETTINGS, connect=lambda: bad).groups_of("a@corp.example")
+
+
 def test_members_of_cached_until_ttl():
     calls = []
     entries = [_entry(userPrincipalName=["dana@corp.example"])]
