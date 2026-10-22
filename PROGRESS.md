@@ -2,7 +2,7 @@
 
 ## Status
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Steps 3.7 (Platform shell and Departments UI) and 3.8 (Operations tab) done on phase-3b. Next = Step 3.9.
-Latest `./scripts/test.sh` (Step 3.8): green; pytest 526 passed / 6 skipped / 1 xfailed in 194.51 s (the owner-approved date-dependent share-expiry xfail; see Notes), Vitest 43 passed, Playwright 36 passed (2.6 min; new Operations test 3.7 s). Ruff/format, frontend lint and typecheck pass. This run used E2E ports 4150–4152; no scripts, default ports or env handling changed.
+Latest reported `./scripts/test.sh` (Step 3.8): stopped on an intermittent outbox fixture timeout; the focused outbox file passes (5 tests in 2.97 s). Stopped after the focused check per the owner's timeout instruction; see Notes. Earlier green Step 3.8 run: pytest 526 passed / 6 skipped / 1 xfailed in 194.51 s (the owner-approved date-dependent share-expiry xfail), Vitest 43 passed, Playwright 36 passed (2.6 min; new Operations test 3.7 s). Ruff/format, frontend lint and typecheck passed in that earlier run, using E2E ports 4150–4152; no scripts, default ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -201,6 +201,20 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   as instructed by the owner; its fix remains on main and must be resolved at merge.
 
 ## Notes
+- Step 3.8 outbox-timeout investigation (2026-10-22): the reported full gate stopped at
+  `tests/test_outbox.py::test_personal_key_plaintext_never_stored` during fixture setup
+  (395 passed / 6 skipped / 1 xfailed / 1 setup error in 754.28 s). The supplied tail shows
+  an outbox INSERT for `/team/member_add`, `pmo@corp.example`, team `D1-staff`, interrupted
+  by the 60 s pytest timeout in SQLAlchemy `Connection.execute` → `_distill_params_20`,
+  before database execution. This matches the `provisioned` → `seed` → `_provision` →
+  `enqueue` → `session.flush` setup path; the plaintext assertion had not run.
+  Step 3.8 changed no backend code, fixtures or timeout configuration. One focused check,
+  `uv run pytest -q -x tests/test_outbox.py --durations=10`, passed all 5 tests in 2.97 s;
+  the reported test took 0.45 s setup and 0.12 s teardown (its call was below the displayed
+  slowest ten durations). Evidence points to an unrelated intermittent fixture timeout;
+  the supplied tail does not establish the underlying cause of the pause. No application
+  code, tests or timeouts changed. Stopped per the owner's instruction instead of retrying
+  the full gate; this investigation does not claim `./scripts/test.sh` green.
 - Step 3.8 resumed verification: applied the owner's branch-only marker to
   `tests/e2e_backend/test_a1_wm.py::test_a1_share_expiry_blocks_then_scheduler_closes_and_returns`:
   `@pytest.mark.xfail(strict=False, reason="time-dependent; fixed on main, resolved at merge")`.
