@@ -337,6 +337,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
+- Open-items pass: 3.6-fixes done (f120bb6); 3.1-ldap done (LDAP referrals off, int timeouts, unbind contained; paging is not used, a size-limit error already maps to DirectoryUnavailable). Next unit: 3.5-fixes. Tests: pytest 621, vitest 57, Playwright 42. Ledger note: 3.6 items and the 3.1 LDAP items are closed; OPEN-ITEMS.md edits were denied in this session. A one-off flake in test_group_head_own_row_self_allocation_forbidden (passes alone) is not quarantined.
 - Step (none): Step 3.6 done; Phase 3 complete.
 
 ## Blockers
