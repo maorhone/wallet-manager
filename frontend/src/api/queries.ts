@@ -548,10 +548,10 @@ export const useServiceKeys = (ownerKind: 'group' | 'system', ownerId: number) =
   });
 
 /** Create, rotate or revoke a service key; create/rotate responses carry the one-time secret. */
-export const useServiceKeyWrite = () => {
+export const useServiceKeyWrite = (onSecret?: (secret: string) => void) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (
+    mutationFn: async (
       v:
         | { action: 'create'; body: ServiceKeyIn; reason: string; key: string }
         | {
@@ -564,9 +564,13 @@ export const useServiceKeyWrite = () => {
           },
     ) => {
       const write = { reason: v.reason, idempotencyKey: v.key };
-      return v.action === 'create'
-        ? apiPost<ServiceKeyWriteResponse>('/service-keys', v.body, write)
-        : apiPost<ServiceKeyWriteResponse>(`/service-keys/${v.id}/${v.action}`, {}, write);
+      const res =
+        v.action === 'create'
+          ? await apiPost<ServiceKeyWriteResponse>('/service-keys', v.body, write)
+          : await apiPost<ServiceKeyWriteResponse>(`/service-keys/${v.id}/${v.action}`, {}, write);
+      // The one-time secret goes to the caller only, never into the TanStack mutation cache.
+      if (res.secret) onSecret?.(res.secret);
+      return { ...res, secret: undefined };
     },
     onSuccess: (_res, v) => {
       const [ownerKind, ownerId] =

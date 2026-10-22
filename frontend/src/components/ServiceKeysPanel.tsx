@@ -82,17 +82,20 @@ export function ServiceKeysPanel({
   ownerKind,
   ownerId,
   manage,
+  parent,
 }: {
   ownerKind: 'group' | 'system';
   ownerId: number;
   manage: boolean;
+  /** Group wallet allocation before creating a key (shown in the change summary). */
+  parent?: { allocated: number; base: number };
 }) {
   const keys = useServiceKeys(ownerKind, ownerId);
-  const write = useServiceKeyWrite();
+  const [secret, setSecret] = useState<string | null>(null);
+  const write = useServiceKeyWrite(setSecret);
   const [creating, setCreating] = useState(false);
   const [rotating, setRotating] = useState<ServiceKey | null>(null);
   const [revoking, setRevoking] = useState<ServiceKey | null>(null);
-  const [secret, setSecret] = useState<string | null>(null);
 
   if (keys.isPending) return <Loader aria-label={he.loading} />;
   if (keys.error || !keys.data) return <ErrorState error={keys.error} onRetry={keys.refetch} />;
@@ -115,7 +118,7 @@ export function ServiceKeysPanel({
           onConfirm={(body, reason, key) =>
             write.mutateAsync({ action: 'create', body, reason, key })
           }
-          onCreated={setSecret}
+          parent={parent}
         />
       )}
       {rotating && (
@@ -124,7 +127,7 @@ export function ServiceKeysPanel({
           serviceKey={rotating}
           onClose={() => setRotating(null)}
           onConfirm={async (reason, key) => {
-            const res = await write.mutateAsync({
+            await write.mutateAsync({
               action: 'rotate',
               id: rotating.id,
               ownerKind,
@@ -132,7 +135,6 @@ export function ServiceKeysPanel({
               reason,
               key,
             });
-            if (res.secret) setSecret(res.secret);
           }}
         />
       )}

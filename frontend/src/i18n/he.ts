@@ -451,6 +451,7 @@ export const he = {
     rpm: 'לדקה',
     models: 'מודלים מותרים',
     allModels: 'כל המודלים',
+    parentAllocated: 'הוקצה בקבוצה',
     status: 'סטטוס',
     rotate: 'סבב מפתח',
     revoke: 'ביטול',

@@ -13,7 +13,8 @@ export default function ServiceKeys({
     <ServiceKeysPanel
       ownerKind="group"
       ownerId={Number(groupId)}
-      manage={summary.actions.service_keys.manage}
+      manage={summary.actions.service_keys.manage && !summary.read_only}
+      parent={{ allocated: summary.wallet.allocated, base: summary.wallet.base }}
     />
   );
 }
