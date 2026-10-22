@@ -7,6 +7,7 @@ import { he } from '../../i18n/he';
 import GroupHeads from './GroupHeads';
 import Overview from './Overview';
 import Pending from './Pending';
+import Production from './Production';
 import Split from './Split';
 
 const TABS = ['overview', 'split'];
@@ -23,6 +24,7 @@ export default function DepartmentPage() {
     ...TABS,
     ...(summary.data?.group_heads.length ? ['group-heads'] : []),
     ...(summary.data?.actions.place ? ['pending'] : []),
+    ...(summary.data?.actions.view_production ? ['production'] : []),
   ];
   if (summary.data && !tabs.includes(tab))
     return <Navigate to={`/department/${id}/overview`} replace />;
@@ -53,6 +55,7 @@ export default function DepartmentPage() {
       {tab === 'split' && <Split summary={s} />}
       {tab === 'group-heads' && <GroupHeads summary={s} period={period} />}
       {tab === 'pending' && <Pending summary={s} />}
+      {tab === 'production' && <Production summary={s} />}
     </Stack>
   );
 }

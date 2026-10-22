@@ -2,6 +2,7 @@
 
 ## Status
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done. Step 3.5 (group Service keys tab) done. Steps 3.7 (Platform shell and Departments UI), 3.8 (Operations tab) and 3.9 (Policies and Audit search) done on phase-3b and merged into main (22/10). Phase 4 (reports, Steps 4.1–4.7: allocation, usage, concurrency peaks, blocked and grants reports, alerts, Reports UI) done on phase-4 and merged into main (22/10). Next = Step 3.6 (Department Production tab, resume from wip/main-3.6).
+Latest `./scripts/test.sh` (Step 3.6, merged main): green; pytest 617 passed / 7 skipped / 1 xfailed; Vitest 57; Playwright 43 passed / 1 skipped.
 Latest `./scripts/test.sh` on phase-4 (Step 4.7): green; pytest 518 passed / 5 existing skips; Vitest 48; Playwright 38. Full runs of the merged tree are the builder's to do (Playwright not run at merge).
 Latest `./scripts/test.sh` on phase-3b (Step 3.9): green; pytest 528 passed / 6 skipped / 1 xfailed; Vitest 44; Playwright 37. The owner-approved date-dependent share-expiry xfail stays (single `xfail(strict=False)` mark on main's version of the test).
 Step 3.8 failed-count regression: reproduced concurrent seed/worker drains creating the same organization twice. Each outbox row is now locked through application and commit; a waiting consumer rechecks the committed status. Regression coverage checks both successful and permanently failed writes.
@@ -9,6 +10,12 @@ Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.6: department "ייצור" tab (`pages/department/Production.tsx`, `/department/:id/production`, shown when
+  `actions.view_production`): org `WalletCard` (reset date from the department summary), systems table, admin-only
+  set-budget/add-system dialogs through `ChangeSummaryDialog`, per-system keys drawer. The group tab body moved to the
+  shared `components/ServiceKeysPanel.tsx` (`ownerKind` group|system) so both reuse it; `pages/group/ServiceKeys.tsx`
+  is now a thin wrapper. `useProduction`/`useProductionWrite`, `he.production`. Representatives get no keys button
+  (read-only). One Playwright test added (written first). No proxy change (`/production` already proxied).
 - Merge of phase-3b and phase-4 into main (22/10): conflicts in PRD.md, PROGRESS.md, `frontend/src/api/queries.ts`,
   `frontend/src/api/types.ts` and `tests/e2e_backend/test_a1_wm.py` (phase-3b) and the phase-4 files were resolved as a union
   of both sides; the share-expiry test keeps main's single `xfail(strict=False)` mark. Step 3.6 (Department Production tab) is
@@ -325,7 +332,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.6 Department Production tab (resume from wip/main-3.6).
+- Step (none): Step 3.6 done; Phase 3 complete.
 
 ## Blockers
 - None. The known date-dependent share-expiry backend test stays marked `xfail(strict=False)` (owner-approved, one mark).

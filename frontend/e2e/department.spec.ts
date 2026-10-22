@@ -96,3 +96,52 @@ test('admin edits the budget inline on Split', async ({ page }) => {
   await page.getByTestId('confirm-change').click();
   await expect(page.getByTestId('alloc-footer')).toContainText('1,100,000', { timeout: 15_000 });
 });
+
+test('Admin creates the production organization and a system with a key; the representative sees the Production tab read-only', async ({
+  page,
+}) => {
+  await loginAs(page, 'admin@corp.example');
+  const id = await departmentId(page);
+  await page.goto(`/department/${id}/production`);
+  await expect(page.getByTestId('production-empty')).toBeVisible();
+
+  await page.getByTestId('production-set-budget').click();
+  await page.getByTestId('production-budget-input').fill('100000');
+  await page.getByTestId('production-budget-review').click();
+  await page.getByTestId('change-reason').fill('הקמת ייצור');
+  await page.getByTestId('confirm-change').click();
+  await expect(page.getByTestId('wallet-card')).toContainText('100,000', { timeout: 15_000 });
+
+  await page.getByTestId('production-create-system').click();
+  await page.getByTestId('production-system-name').fill('Sys A');
+  await page.getByTestId('production-system-budget').fill('40000');
+  await page.getByTestId('production-system-review').click();
+  await page.getByTestId('change-reason').fill('מערכת ראשונה');
+  await page.getByTestId('confirm-change').click();
+  const row = page.locator('[data-system-name="Sys A"]');
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  const sysId = (await row.getAttribute('data-testid'))!.replace('production-system-', '');
+
+  await page.getByTestId(`production-system-keys-${sysId}`).click();
+  await page.getByTestId('create-service-key').click();
+  await page.getByTestId('service-key-alias').fill('sys-bot');
+  await page.getByTestId('service-key-budget').fill('1000');
+  await page.getByTestId('service-key-concurrency').fill('2');
+  await page.getByTestId('service-key-rpm').fill('100');
+  await page.getByTestId('service-key-review').click();
+  await page.getByTestId('change-reason').fill('מפתח מערכת');
+  await page.getByTestId('confirm-change').click();
+  await expect(page.getByTestId('secret-once')).toBeVisible();
+  const secret = await page.getByTestId('secret-value').inputValue();
+  expect(secret.length).toBeGreaterThan(0);
+  await page.getByTestId('secret-close').click();
+  await expect(page.locator('[data-alias="sys-bot"]')).toBeVisible();
+
+  await loginAs(page, 'rep@corp.example');
+  await page.goto(`/department/${id}/production`);
+  await expect(page.getByTestId('wallet-card')).toContainText('100,000');
+  await expect(page.locator('[data-system-name="Sys A"]')).toContainText('40,000');
+  await expect(page.getByTestId('production-set-budget')).toHaveCount(0);
+  await expect(page.getByTestId('production-create-system')).toHaveCount(0);
+  await expect(page.locator(`[data-testid="production-system-keys-${sysId}"]`)).toHaveCount(0);
+});

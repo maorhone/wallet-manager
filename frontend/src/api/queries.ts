@@ -40,6 +40,9 @@ import type {
   PendingPlacement,
   PmoPool,
   Policies,
+  Production,
+  ProductionOrgIn,
+  ProductionSystemIn,
   ServiceKeyIn,
   ServiceKeysList,
   ServiceKeyWriteResponse,
@@ -571,6 +574,37 @@ export const useServiceKeyWrite = () => {
       qc.invalidateQueries({ queryKey: ['service-keys', ownerKind, ownerId] });
       qc.invalidateQueries({ queryKey: ['group'] });
       qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};
+
+const hasPendingProduction = (d: Production) =>
+  d.org?.sync_status === 'pending' || d.systems.some((s) => s.sync_status === 'pending');
+
+export const useProduction = (deptId: string) =>
+  useQuery({
+    queryKey: ['production', deptId],
+    queryFn: () => apiFetch<Production>(`/production/departments/${deptId}`),
+    refetchInterval: pollWhilePending(hasPendingProduction),
+  });
+
+/** Set the production organization (PUT) or add a system (POST); one write per confirm. */
+export const useProductionWrite = (deptId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      v:
+        | { kind: 'org'; body: ProductionOrgIn; reason: string; key: string }
+        | { kind: 'system'; body: ProductionSystemIn; reason: string; key: string },
+    ) => {
+      const write = { reason: v.reason, idempotencyKey: v.key };
+      return v.kind === 'org'
+        ? apiPut<WriteResponse>(`/production/departments/${deptId}`, v.body, write)
+        : apiPost<WriteResponse>(`/production/departments/${deptId}/systems`, v.body, write);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production', deptId] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });
