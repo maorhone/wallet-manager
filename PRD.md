@@ -255,8 +255,6 @@ mapping is recorded in PROGRESS.md; Steps 3.3–3.6 are verified at merge into m
 
 ### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.5)
 
-> > > > > > > origin/phase-3b
-
 A platform admin sets a department's production budget (DR4: a separate LiteLLM Organization from
 the department's own, so employee spending can never block production) and creates systems (Teams)
 under it with their own budget. Creating a system is rejected with the usual over-allocation error
