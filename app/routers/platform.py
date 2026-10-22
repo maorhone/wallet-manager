@@ -9,10 +9,17 @@ from app.errors import ApiError, invalid_request
 from app.litellm_client import HealthReadiness
 from app.models import Employee, LitellmWrite, SpendSnapshot
 from app.permissions import ADMIN
-from app.writes import Write
+from app.schemas.platform import OrganizationCreateIn
+from app.services import platform
+from app.writes import Write, write_response
 
 router = APIRouter()
 HEALTH_TTL_S = 10
+
+
+@router.post("/organizations")
+async def create_organization(body: OrganizationCreateIn, ctx: Write, principal: CurrentPrincipal):
+    return await write_response(ctx, await platform.create_organization(ctx, principal, body))
 
 
 async def _health(request: Request) -> HealthReadiness | None:

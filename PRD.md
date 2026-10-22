@@ -60,7 +60,29 @@ Legacy department creation continues to attach to the default organization.
 Groups can reference a parent in the same department. The database rejects self-parenting, cycles
 and trees deeper than four group levels (a root group is level one), including subtree moves and
 multi-row changes. Organization-scoped `org_allocator` bindings can be stored and seeded using
-scope `default`. Hierarchy management APIs and role authorization are planned for Step 5.2.
+scope `default`.
+
+### 4.1.2 Hierarchy management API - Phase 5 Step 5.2: Done
+
+Admins create Wallet Manager roots with `POST /organizations` and attach new departments with
+`POST /departments` using `organization_id` (omitting it keeps the default organization).
+The organization root creates no LiteLLM object.
+
+`POST /groups` takes `department_id` and an optional `parent_group_id`. Department representatives
+can add root groups or subgroups anywhere in their department; group heads can add below their own
+group or a descendant. Representatives can insert a new parent with `POST /groups/{id}/insert-parent`
+or move a whole subtree with `PATCH /groups/{id}/parent`; a null parent moves it to the department root.
+Admins can manage every tree. Organization-scoped `org_allocator` bindings are configurable through
+the existing role-binding API and provide representative/head management within that organization's tree.
+An ancestor group head inherits group-head permissions on descendants; reparenting immediately
+changes that authority, with authorization rechecked under the department lock.
+
+All hierarchy writes require a reason, support idempotency and record an audit entry atomically.
+Cross-department parenting, cycles and trees deeper than four group levels are rejected without
+partial changes. Creating a group queues one flat LiteLLM team with zero budget; inserting a parent
+preserves the child's existing parent above the new node. Moves preserve the subtree's budgets,
+members and LiteLLM team identities and queue no LiteLLM writes. The legacy admin-only group-creation
+route remains available. Nested budget calculations are still planned for Step 5.3.
 
 ### 4.2 Wallets and reports (FR-E, FR-R, FR-V) - Phase 1: Done
 

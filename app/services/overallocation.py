@@ -172,6 +172,6 @@ def visible_departments(principal: Principal) -> set[int] | None:
         return None
     return {
         b.scope_id
-        for b in principal.bindings
+        for b in principal.bindings + principal.inherited
         if b.role in (REP, VIEWER) and b.scope_kind == "department"
     }

@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from app.auth.session import CurrentPrincipal, Db
 from app.models import Department
+from app.permissions import can_manage_platform
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
 from app.schemas.platform import DepartmentCreateIn, GroupCreateIn
 from app.services import departments, platform, views
@@ -21,6 +22,7 @@ async def create_department(body: DepartmentCreateIn, ctx: Write, principal: Cur
 async def create_group(
     department_id: int, body: GroupCreateIn, ctx: Write, principal: CurrentPrincipal
 ):
+    can_manage_platform(principal)  # Preserve the legacy platform route's admin-only contract.
     entities = await platform.create_group(ctx, principal, department_id, body)
     return await write_response(ctx, entities)
 

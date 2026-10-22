@@ -9,7 +9,7 @@ from starlette.responses import Response
 from app.auth.csrf import set_csrf_cookie
 from app.errors import ApiError
 from app.models import RoleBinding
-from app.permissions import Principal, load_bindings
+from app.permissions import Principal, inherit_management, load_bindings
 
 SESSION_MAX_AGE = 8 * 3600
 
@@ -51,7 +51,9 @@ async def current_principal(request: Request, db: Db) -> Principal:
     if not s.get("upn") or s.get("exp", 0) < time.time():
         raise ApiError(401, "UNAUTHENTICATED", "Authentication required")
     bindings = await load_bindings(db, s.get("groups", []))
-    return Principal(s["upn"], s.get("name") or s["upn"], bindings)
+    principal = Principal(s["upn"], s.get("name") or s["upn"], bindings)
+    await inherit_management(db, principal)
+    return principal
 
 
 CurrentPrincipal = Annotated[Principal, Depends(current_principal)]

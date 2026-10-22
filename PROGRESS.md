@@ -1,9 +1,10 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 5 on `phase-5`: Step 5.1 (organization root and nestable-group schema) done; Next = Step 5.2.
-Latest `./scripts/test.sh`: green; pytest 624 passed / 7 skipped / 1 xfailed (242.04s),
-Vitest 57 passed, Playwright 42 passed / 1 skipped (2.8m). Ruff format/check, frontend lint/typecheck
+Phase 5 on `phase-5`: Step 5.2 (hierarchy management API and inherited permissions) done; Next = Step 5.3.
+Step 5.2 focused hierarchy API checks: 23 passed (6.75s).
+Latest `./scripts/test.sh`: green; pytest 647 passed / 7 skipped / 1 xfailed (215.51s),
+Vitest 57 passed, Playwright 42 passed / 1 skipped (2.5m). Ruff format/check, frontend lint/typecheck
 and repository hygiene pass. E2E ports 4130–4132 were supplied via env; defaults are unchanged.
 Prior-phase history follows.
 
@@ -15,6 +16,24 @@ Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 5.2: admin-only WM organization creation; department creation accepts `organization_id`
+  with the legacy default. New `POST /groups` supports scoped group creation below a parent;
+  representatives manage their department, heads create below their own group or descendants,
+  and admins manage all scopes. Insert-parent and subtree moves preserve the department and
+  flat LiteLLM team identities. Creation queues one zero-budget team; moves queue no LiteLLM writes.
+  Organization allocator bindings are configurable and inherit management within their root.
+  Ancestor heads inherit group permissions; hierarchy authorization rechecks after acquiring
+  the department lock, including when a concurrent move revokes a pending inherited write.
+  Every hierarchy operation validates the full prospective tree and records one audit entry
+  in the same transaction; insertion's compound audit includes the affected child and old/new parent.
+  New organization prefix added to Vite proxy; legacy admin-only creation route preserved.
+  TDD: all six planned tests (with role parametrization and additional rejection/concurrency cases)
+  written first; initial failure was 404 for the missing organization route. Focused tests: 23 passed.
+  PRD updated. Final `./scripts/test.sh` exited 0: pytest 647 / 7 skipped / 1 xfailed (215.51s),
+  Vitest 57, Playwright 42 / 1 skipped (2.5m); ruff format/check, frontend lint/typecheck and
+  repository hygiene passed. The 23 new tests take 6.75s in isolation; no new Playwright tests.
+  No new blockers; Step 5.3 not started. No commit or push.
+
 - Step 5.1: migration `0007_org_hierarchy` adds the WM-only organization root with separate
   Decimal department/system envelopes, period, optional systems LiteLLM org id and UTC creation time.
   Every existing department attaches to the default root; legacy creation keeps that default.
@@ -346,13 +365,34 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 5.2 Hierarchy API on `phase-5` (not started).
+- Step 5.3 Budget math for nested groups on `phase-5` (not started).
 - Separate prior-phase backlog: Step 3.6 Department Production tab (resume from wip/main-3.6).
 
 ## Blockers
 - None. The known date-dependent share-expiry backend test stays marked `xfail(strict=False)` (owner-approved, one mark).
 
 ## Notes
+
+- Step 5.2: no conflict with the cited v2 owner decisions or v1 §12.2 permissions pattern.
+  Kept the legacy `/departments/{id}/groups` platform route admin-only and added scoped hierarchy
+  creation at the planned `/groups` route. New group budgets stay zero and reparenting leaves all
+  allocations untouched; nested budget sums belong to Step 5.3. The org allocator's effective
+  representative/head scopes are derived, never stored as extra bindings; hierarchy audits retain
+  `org_allocator` as the authorizing role. Direct role/tier reporting stays separate from inherited
+  scopes. The root's envelopes default to zero when omitted. Insert-parent derives its parent from
+  the current tree (an explicit non-null parent is rejected). Cycle/depth checks cover the entire
+  moved subtree under the same department lock used by Step 5.1's database triggers.
+  The existing over-allocation report filter now includes derived department scopes; a failing
+  allocator regression reproduced its omission before the one-line fix.
+  Test-script defaults, E2E env handling and ports are unchanged.
+  First full pytest run passed (647 / 7 skipped / 1 xfailed, 402.67s), with an unrelated
+  `PytestUnraisableExceptionWarning` in
+  `tests/scheduler/test_report_alerts_job.py::test_unknown_live_scope_alerts_admins_only`:
+  pytest-timeout's 60s signal fired inside SQLAlchemy `ReversibleProxy._target_gced`
+  (asyncio/base.py:96) and was reported as an ignored callback exception. Scheduler/job
+  code is unchanged. The isolated test passed in 1.77s. First full gate exited 0;
+  final full gate after the report-filter fix also exited 0 (pytest 215.51s) without
+  the timeout warning. No test weakened, skipped or deleted.
 
 - Step 5.1: SoT §6 has numbered principles rather than a separate §6.3 heading; read principle 3
   alongside §2.7 and the owner's decisions 1–3. No behavioral conflict was found. Default organization

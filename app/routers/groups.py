@@ -3,10 +3,34 @@ from fastapi import APIRouter, Request
 from app.auth.session import CurrentPrincipal, Db
 from app.schemas.departments import ModelAmounts
 from app.schemas.groups import GroupLimitsIn, MemberCapIn, MemberDefaultsIn, MemberLimitsIn
-from app.services import groups, members, views
+from app.schemas.platform import GroupAtDepartmentIn, GroupCreateIn, GroupParentIn
+from app.services import groups, members, platform, views
 from app.writes import Write, write_response
 
 router = APIRouter()
+
+
+@router.post("/groups")
+async def create_group(body: GroupAtDepartmentIn, ctx: Write, principal: CurrentPrincipal):
+    return await write_response(
+        ctx, await platform.create_group(ctx, principal, body.department_id, body)
+    )
+
+
+@router.post("/groups/{group_id}/insert-parent")
+async def insert_parent(
+    group_id: int, body: GroupCreateIn, ctx: Write, principal: CurrentPrincipal
+):
+    return await write_response(
+        ctx, await platform.insert_group_parent(ctx, principal, group_id, body)
+    )
+
+
+@router.patch("/groups/{group_id}/parent")
+async def move_parent(group_id: int, body: GroupParentIn, ctx: Write, principal: CurrentPrincipal):
+    return await write_response(
+        ctx, await platform.move_group(ctx, principal, group_id, body.parent_group_id)
+    )
 
 
 @router.get("/groups/{group_id}/summary")

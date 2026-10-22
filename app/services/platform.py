@@ -1,4 +1,4 @@
-"""§11.1 Platform: policies, department/group creation, role bindings. Admin only throughout."""
+"""Platform configuration and scoped organization/group hierarchy management."""
 
 import math
 from decimal import Decimal
@@ -8,10 +8,23 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db import LockKind
 from app.directory import Directory
-from app.errors import ApiError, invalid_request
-from app.models import Department, Grp, Policy, RoleBinding
-from app.permissions import ADMIN, ROLE_BINDING_SCOPES, Principal, can_manage_platform
-from app.schemas.platform import DepartmentCreateIn, GroupCreateIn, RoleBindingIn
+from app.errors import ApiError, invalid_request, scope_forbidden
+from app.models import Department, Grp, Organization, Policy, RoleBinding
+from app.permissions import (
+    ADMIN,
+    ROLE_BINDING_SCOPES,
+    Principal,
+    can_create_group,
+    can_manage_platform,
+    hierarchy_role,
+    inherit_management,
+)
+from app.schemas.platform import (
+    DepartmentCreateIn,
+    GroupCreateIn,
+    OrganizationCreateIn,
+    RoleBindingIn,
+)
 from app.services.owners import holders
 from app.writes import WriteContext
 
@@ -142,6 +155,8 @@ async def create_department(
 ) -> list[dict]:
     role = can_manage_platform(principal)
     await ctx.lock(LockKind.PLATFORM, 0)
+    if await ctx.db.get(Organization, body.organization_id) is None:
+        raise ApiError(404, "NOT_FOUND", "Organization not found")
     if body.litellm_org_id.endswith("-prod"):
         # DR4: the "-prod" suffix is reserved for generated production org ids (FR-K1),
         # so a department can never be created with an id a future production org will claim.
@@ -159,7 +174,7 @@ async def create_department(
 
     dept = Department(
         name=body.name, litellm_org_id=body.litellm_org_id, ad_group_dn=body.ad_group_dn,
-        budget=body.budget, budget_period=body.budget_period,
+        budget=body.budget, budget_period=body.budget_period, organization_id=body.organization_id,
     )  # fmt: skip
     ctx.db.add(dept)
     try:
@@ -169,6 +184,7 @@ async def create_department(
     after = {
         "name": dept.name, "litellm_org_id": dept.litellm_org_id, "ad_group_dn": dept.ad_group_dn,
         "budget": dept.budget, "budget_period": dept.budget_period,
+        "organization_id": dept.organization_id,
     }  # fmt: skip
     ctx.audit("department", dept.id, {}, after, role)
     await ctx.enqueue("department", dept.id, "/organization/new")
@@ -176,13 +192,20 @@ async def create_department(
 
 
 async def create_group(
-    ctx: WriteContext, principal: Principal, department_id: int, body: GroupCreateIn
+    ctx: WriteContext,
+    principal: Principal,
+    department_id: int,
+    body: GroupCreateIn,
+    *,
+    audit: bool = True,
 ) -> list[dict]:
-    role = can_manage_platform(principal)
     await ctx.lock(LockKind.PLATFORM, 1)
     await ctx.lock(LockKind.DEPARTMENT, department_id)
-    if await ctx.db.get(Department, department_id) is None:
-        raise ApiError(404, "NOT_FOUND", "Department not found")
+    await inherit_management(ctx.db, principal)
+    role = await can_create_group(ctx.db, principal, department_id, body.parent_group_id)
+    parents = await _parents(ctx, department_id)
+    await _check_parent(ctx, body.parent_group_id, parents)
+    _check_tree({**parents, -1: body.parent_group_id})
     if body.litellm_team_id.startswith("sys-"):
         # DR4: the "sys-" prefix is reserved for generated production system ids (FR-K2),
         # so a group can never be created with an id a future production system will claim.
@@ -204,6 +227,7 @@ async def create_group(
         litellm_team_id=body.litellm_team_id, department_id=department_id, name=body.name,
         ad_group_dn=body.ad_group_dn, kind=body.kind, base_budget=Decimal(0),
         default_member_cap=body.default_member_cap, status="active",
+        parent_group_id=body.parent_group_id,
     )  # fmt: skip
     ctx.db.add(group)
     try:
@@ -214,10 +238,124 @@ async def create_group(
         "name": group.name, "litellm_team_id": group.litellm_team_id,
         "ad_group_dn": group.ad_group_dn, "kind": group.kind,
         "default_member_cap": group.default_member_cap,
+        "department_id": department_id, "parent_group_id": group.parent_group_id,
     }  # fmt: skip
-    ctx.audit("group", group.id, {}, after, role, department_id=department_id)
+    if audit:
+        ctx.audit("group", group.id, {}, after, role, department_id=department_id)
     await ctx.enqueue("group", group.id, "/team/new")
     return [{"entity": "group", "id": group.id, "values": after}]
+
+
+async def create_organization(
+    ctx: WriteContext, principal: Principal, body: OrganizationCreateIn
+) -> list[dict]:
+    role = can_manage_platform(principal)
+    await ctx.lock(LockKind.PLATFORM, 2)
+    org = Organization(**body.model_dump())
+    ctx.db.add(org)
+    await ctx.db.flush()
+    after = body.model_dump()
+    ctx.audit("organization", org.id, {}, after, role)
+    # The hierarchy root is WM-only; it has no LiteLLM outbox write.
+    return [{"entity": "organization", "id": org.id, "values": after}]
+
+
+async def _parents(ctx: WriteContext, department_id: int) -> dict[int, int | None]:
+    return dict(
+        (
+            await ctx.db.execute(
+                select(Grp.id, Grp.parent_group_id).where(Grp.department_id == department_id)
+            )
+        ).all()
+    )
+
+
+async def _check_parent(ctx, parent_id, parents) -> None:
+    if parent_id is None or parent_id in parents:
+        return
+    parent = await ctx.db.get(Grp, parent_id)
+    if parent is None:
+        raise ApiError(404, "NOT_FOUND", "Parent group not found")
+    raise scope_forbidden("Parent group must be in the same department")
+
+
+def _check_tree(parents: dict[int, int | None]) -> None:
+    """Validate the entire prospective subtree under the department lock (DB backstop too)."""
+    for gid in parents:
+        seen = set()
+        while gid is not None:
+            if gid in seen:
+                raise invalid_request(
+                    "Group hierarchy cannot contain a cycle", {"field": "parent_group_id"}
+                )
+            seen.add(gid)
+            if len(seen) > 4:
+                raise invalid_request(
+                    "Group hierarchy cannot exceed four levels", {"field": "parent_group_id"}
+                )
+            gid = parents[gid]
+
+
+async def _locked_group(ctx: WriteContext, principal: Principal, group_id: int):
+    group = await ctx.db.get(Grp, group_id)
+    if group is None:
+        raise ApiError(404, "NOT_FOUND", "Group not found")
+    await ctx.lock(LockKind.DEPARTMENT, group.department_id)
+    # The initial lookup may have waited for a concurrent move; reload its current parent.
+    await ctx.db.refresh(group)
+    await inherit_management(ctx.db, principal)
+    role = await hierarchy_role(ctx.db, principal, group.department_id, group_id=group_id)
+    # A group head can see the group but cannot insert above it or move it.
+    return group, role
+
+
+async def move_group(
+    ctx: WriteContext, principal: Principal, group_id: int, parent_group_id: int | None
+) -> list[dict]:
+    group, role = await _locked_group(ctx, principal, group_id)
+    parents = await _parents(ctx, group.department_id)
+    await _check_parent(ctx, parent_group_id, parents)
+    _check_tree({**parents, group_id: parent_group_id})
+    before = {"parent_group_id": group.parent_group_id}
+    group.parent_group_id = parent_group_id
+    after = {
+        "parent_group_id": parent_group_id,
+        "department_id": group.department_id,
+        "group_id": group.id,
+    }
+    ctx.audit(
+        "group", group.id, before, after, role, department_id=group.department_id, group_id=group.id
+    )
+    # Teams stay flat in LiteLLM; no team or member update is queued for reparenting.
+    return [{"entity": "group", "id": group.id, "values": after}]
+
+
+async def insert_group_parent(
+    ctx: WriteContext, principal: Principal, group_id: int, body: GroupCreateIn
+) -> list[dict]:
+    # Match create_group's lock order: the global team registry precedes the department.
+    await ctx.lock(LockKind.PLATFORM, 1)
+    group, role = await _locked_group(ctx, principal, group_id)
+    if body.parent_group_id is not None:
+        raise invalid_request(
+            "Inserted parent inherits the existing parent", {"field": "parent_group_id"}
+        )
+    parents = await _parents(ctx, group.department_id)
+    before = {"child_parent_group_id": group.parent_group_id}
+    _check_tree({**parents, -1: group.parent_group_id, group_id: -1})
+    entities = await create_group(
+        ctx,
+        principal,
+        group.department_id,
+        body.model_copy(update={"parent_group_id": group.parent_group_id}),
+        audit=False,
+    )
+    new_id = entities[0]["id"]
+    group.parent_group_id = new_id
+    after = {**entities[0]["values"], "child_id": group_id, "child_parent_group_id": new_id}
+    ctx.audit("group", new_id, before, after, role, department_id=group.department_id)
+    entities[0]["values"] = after
+    return entities
 
 
 async def list_role_bindings(
@@ -260,9 +398,10 @@ async def put_role_bindings(
             raise invalid_request("A global scope has no scope_id", {"field": "scope_id"})
     elif body.scope_id is None:
         raise invalid_request("scope_id is required for this scope_kind", {"field": "scope_id"})
-    elif body.scope_kind == "department":
-        if await ctx.db.get(Department, body.scope_id) is None:
-            raise ApiError(404, "NOT_FOUND", "Department not found")
+    elif body.scope_kind in ("organization", "department"):
+        model = Organization if body.scope_kind == "organization" else Department
+        if await ctx.db.get(model, body.scope_id) is None:
+            raise ApiError(404, "NOT_FOUND", "Scope not found")
     elif await ctx.db.get(Grp, body.scope_id) is None:
         raise ApiError(404, "NOT_FOUND", "Group not found")
 

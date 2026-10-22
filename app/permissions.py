@@ -1,19 +1,21 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import LockKind, lock_parent
 from app.directory import Directory
 from app.errors import ApiError
 from app.models import Department, Grp, RoleBinding
 
 ADMIN, REP, PMO, HEAD, VIEWER = "platform_admin", "department_rep", "pmo", "group_head", "viewer"
+ORG_ALLOCATOR = "org_allocator"
 
 
 @dataclass(frozen=True)
 class Binding:
     role: str
-    scope_kind: str  # global | department | group
+    scope_kind: str  # global | organization | department | group
     scope_id: int | None
 
 
@@ -22,9 +24,10 @@ class Principal:
     upn: str
     display_name: str
     bindings: list[Binding]
+    inherited: list[Binding] = field(default_factory=list)
 
     def has(self, role: str, scope_kind: str, scope_id: int | None = None) -> bool:
-        return Binding(role, scope_kind, scope_id) in self.bindings
+        return Binding(role, scope_kind, scope_id) in self.bindings + self.inherited
 
     @property
     def is_admin(self) -> bool:
@@ -55,6 +58,75 @@ async def load_bindings(session: AsyncSession, groups: list[str]) -> list[Bindin
         await session.execute(select(RoleBinding).where(RoleBinding.ad_group_dn.in_(groups)))
     ).scalars()
     return list(dict.fromkeys(Binding(r.role, r.scope_kind, r.scope_id) for r in rows))
+
+
+async def inherit_management(session: AsyncSession, p: Principal) -> None:
+    """Derive effective management scopes; never persist inherited role bindings.
+
+    The top-node manager delegates as a representative and group head below its org.
+    Direct bindings stay separate for /me and role/tier reporting. Recompute on each
+    request and after acquiring a hierarchy write lock so moves immediately revoke access.
+    """
+    p.inherited = []
+    roots = [b.scope_id for b in p.bindings if b.role == HEAD and b.scope_kind == "group"]
+    orgs = [
+        b.scope_id for b in p.bindings if b.role == ORG_ALLOCATOR and b.scope_kind == "organization"
+    ]
+    if orgs:
+        departments = list(
+            await session.scalars(select(Department.id).where(Department.organization_id.in_(orgs)))
+        )
+        p.inherited.extend(Binding(REP, "department", did) for did in departments)
+        p.inherited.extend(
+            Binding(HEAD, "group", gid)
+            for gid in await session.scalars(
+                select(Grp.id).where(Grp.department_id.in_(departments))
+            )
+        )
+    if roots:
+        tree = select(Grp.id, Grp.department_id).where(Grp.id.in_(roots)).cte(recursive=True)
+        tree = tree.union_all(
+            select(Grp.id, Grp.department_id).join(
+                tree,
+                (Grp.parent_group_id == tree.c.id) & (Grp.department_id == tree.c.department_id),
+            )
+        )
+        p.inherited.extend(
+            Binding(HEAD, "group", gid) for gid in await session.scalars(select(tree.c.id))
+        )
+
+
+async def hierarchy_role(
+    session, p: Principal, department_id: int, *, group_id: int | None = None
+) -> str:
+    """Management above a group's root: admin, org allocator or department rep."""
+    dept = await session.get(Department, department_id)
+    if dept is None:
+        raise _not_found("Department")
+    if p.is_admin:
+        return ADMIN
+    if p.has(ORG_ALLOCATOR, "organization", dept.organization_id):
+        return ORG_ALLOCATOR
+    roles = p.department_roles(department_id)
+    if group_id is not None and (
+        p.has(HEAD, "group", group_id) or p.has(VIEWER, "group", group_id)
+    ):
+        roles.add(VIEWER)
+    return _pick(roles, (REP,), _DEPT_VIEW)
+
+
+async def can_create_group(session, p: Principal, department_id: int, parent_id: int | None) -> str:
+    if await session.get(Department, department_id) is None:
+        raise _not_found("Department")
+    if p.department_roles(department_id) & {ADMIN, REP}:
+        return await hierarchy_role(session, p, department_id)
+    if parent_id is not None:
+        parent = await session.get(Grp, parent_id)
+        # Check department before acquiring the parent's lock: never lock another
+        # department on behalf of a client-supplied parent scope.
+        if parent is not None and parent.department_id == department_id:
+            return _pick(await _group_roles(session, p, parent_id), (HEAD,), _GROUP_VIEW)
+    return await hierarchy_role(session, p, department_id)
 
 
 def _forbidden() -> ApiError:
@@ -89,6 +161,10 @@ async def _group_roles(session: AsyncSession, p: Principal, group_id: int) -> se
     group = await session.get(Grp, group_id)
     if group is None:
         raise _not_found("Group")
+    if any(b.role in (HEAD, ORG_ALLOCATOR) for b in p.bindings):
+        # Serialize inherited authorization with reparenting for existing write paths too.
+        await lock_parent(session, LockKind.DEPARTMENT, group.department_id)
+        await inherit_management(session, p)
     return p.group_roles(group_id, group.department_id)
 
 
@@ -206,6 +282,7 @@ def can_manage_platform(p: Principal) -> str:
 
 # §11.1 PUT /role-bindings: roles allowed per scope kind
 ROLE_BINDING_SCOPES: dict[str, tuple[str, ...]] = {
+    "organization": (ORG_ALLOCATOR,),
     "department": (REP, PMO, VIEWER),
     "group": (HEAD, VIEWER),
     "global": (ADMIN, VIEWER),
@@ -215,7 +292,12 @@ ROLE_BINDING_SCOPES: dict[str, tuple[str, ...]] = {
 def tier_from_bindings(bindings: list[Binding]) -> str:
     """Highest role among ``bindings`` (DR9)."""
     roles = {b.role for b in bindings}
-    for role, tier in ((ADMIN, "platform_admin"), (REP, "department_rep"), (HEAD, "group_head")):
+    for role, tier in (
+        (ADMIN, "platform_admin"),
+        (ORG_ALLOCATOR, "department_rep"),
+        (REP, "department_rep"),
+        (HEAD, "group_head"),
+    ):
         if role in roles:
             return tier
     return "member"
