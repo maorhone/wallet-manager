@@ -166,7 +166,9 @@ and spend freshness with its timestamp. The outbox table defaults to failed writ
 pending, applied or all writes, including error text. Pending and failed writes can be retried
 through the shared change summary with a required reason and Idempotency-Key; polling updates
 their status after application. The drift log uses the existing reconciliation audit filter and
-shared history timeline. Policies and Audit search remain reserved for Step 3.9.
+shared history timeline. Overlapping outbox consumers serialize each write through application
+and commit, preventing duplicate provisioning calls and preserving the resulting applied or failed
+status. Policies and Audit search remain reserved for Step 3.9.
 
 ### 4.9 Production and service keys (FR-K) - Later phase: Planned
 

@@ -2,7 +2,7 @@
 
 ## Status
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) done. Steps 3.7 (Platform shell and Departments UI) and 3.8 (Operations tab) done on phase-3b. Next = Step 3.9.
-Latest reported `./scripts/test.sh` (Step 3.8): stopped on an intermittent outbox fixture timeout; the focused outbox file passes (5 tests in 2.97 s). Stopped after the focused check per the owner's timeout instruction; see Notes. Earlier green Step 3.8 run: pytest 526 passed / 6 skipped / 1 xfailed in 194.51 s (the owner-approved date-dependent share-expiry xfail), Vitest 43 passed, Playwright 36 passed (2.6 min; new Operations test 3.7 s). Ruff/format, frontend lint and typecheck passed in that earlier run, using E2E ports 4150–4152; no scripts, default ports or env handling changed.
+Step 3.8 failed-count regression: reproduced concurrent seed/worker drains creating the same organization twice. Each outbox row is now locked through application and commit; a waiting consumer rechecks the committed status. Regression coverage checks both successful and permanently failed writes. Full `./scripts/test.sh` verification is in progress; the owner-approved date-dependent share-expiry xfail remains unchanged. Earlier timeout investigations and historical green runs are recorded in Notes.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
@@ -201,6 +201,16 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   as instructed by the owner; its fix remains on main and must be resolved at merge.
 
 ## Notes
+- Step 3.8 failed-count investigation (2026-10-22): `frontend/e2e/platform.spec.ts` expected
+  one failed write but saw two. `resetData()` invokes the seed CLI's drain while the live worker
+  also drains the same rows. Without a row lock both can observe a pending row, probe an absent
+  organization, and create it; a duplicate create can overwrite an applied status with failed.
+  A new concurrent-drain regression failed before the fix (`organization_new` called twice).
+  `drain` now uses `SELECT FOR UPDATE` through apply/commit, rechecks the status, and tolerates
+  rows removed by a reset. Tests cover one external create and preserved applied/failed states;
+  the Operations test's exact counts and all existing assertions remain unchanged.
+  Focused outbox/chain/status checks passed (19 tests before adding the permanent-error variant).
+  No Steps 3.3–3.6 or Step 3.9 implementation was added; scripts and timeouts are unchanged.
 - Step 3.8 outbox-timeout investigation (2026-10-22): the reported full gate stopped at
   `tests/test_outbox.py::test_personal_key_plaintext_never_stored` during fixture setup
   (395 passed / 6 skipped / 1 xfailed / 1 setup error in 754.28 s). The supplied tail shows
