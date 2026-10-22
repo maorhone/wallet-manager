@@ -136,6 +136,14 @@ test('Admin creates the production organization and a system with a key; the rep
   expect(secret.length).toBeGreaterThan(0);
   await page.getByTestId('secret-close').click();
   await expect(page.locator('[data-alias="sys-bot"]')).toBeVisible();
+  // The systems table's key count refreshes after the key mutation.
+  await expect(row.locator('td').nth(3)).toHaveText('1', { timeout: 15_000 });
+
+  // A past period is read-only: no edit actions.
+  await page.goto(`/department/${id}/production?period=2020-01`);
+  await expect(page.getByTestId('wallet-card')).toBeVisible();
+  await expect(page.getByTestId('production-set-budget')).toHaveCount(0);
+  await expect(page.locator(`[data-testid="production-system-keys-${sysId}"]`)).toHaveCount(0);
 
   await loginAs(page, 'rep@corp.example');
   await page.goto(`/department/${id}/production`);

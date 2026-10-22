@@ -25,8 +25,14 @@ async def post_production_system(
 
 
 @router.get("/production/departments/{department_id}")
-async def get_production(department_id: int, request: Request, principal: CurrentPrincipal, db: Db):
+async def get_production(
+    department_id: int,
+    request: Request,
+    principal: CurrentPrincipal,
+    db: Db,
+    period: str | None = None,
+):
     app = request.app
     return await production.get_production(
-        db, app.state.settings, app.state.clock, principal, department_id
+        db, app.state.settings, app.state.clock, principal, department_id, period
     )

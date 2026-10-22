@@ -574,6 +574,7 @@ export const useServiceKeyWrite = () => {
       qc.invalidateQueries({ queryKey: ['service-keys', ownerKind, ownerId] });
       qc.invalidateQueries({ queryKey: ['group'] });
       qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['production'] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });
@@ -582,10 +583,11 @@ export const useServiceKeyWrite = () => {
 const hasPendingProduction = (d: Production) =>
   d.org?.sync_status === 'pending' || d.systems.some((s) => s.sync_status === 'pending');
 
-export const useProduction = (deptId: string) =>
+export const useProduction = (deptId: string, period: string) =>
   useQuery({
-    queryKey: ['production', deptId],
-    queryFn: () => apiFetch<Production>(`/production/departments/${deptId}`),
+    queryKey: ['production', deptId, period],
+    queryFn: () => apiFetch<Production>(`/production/departments/${deptId}?period=${period}`),
+    enabled: period !== '',
     refetchInterval: pollWhilePending(hasPendingProduction),
   });
 

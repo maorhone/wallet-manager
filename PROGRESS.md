@@ -16,6 +16,11 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   shared `components/ServiceKeysPanel.tsx` (`ownerKind` group|system) so both reuse it; `pages/group/ServiceKeys.tsx`
   is now a thin wrapper. `useProduction`/`useProductionWrite`, `he.production`. Representatives get no keys button
   (read-only). One Playwright test added (written first). No proxy change (`/production` already proxied).
+- Step 3.6 review fixes: (1) `ProductionOrgIn.budget_period` is optional and the service keeps the existing period
+  (was silently reset to "1mo"); (2) `GET /production/departments/{id}?period=` reads that month's spend and returns
+  `read_only` + `actions.edit=false` for past periods, the tab passes the selected period; (3) service-key mutations
+  also invalidate `['production']` so `keys_count` refreshes. Tests: two in `test_production.py`, assertions added to
+  the department.spec production test.
 - Merge of phase-3b and phase-4 into main (22/10): conflicts in PRD.md, PROGRESS.md, `frontend/src/api/queries.ts`,
   `frontend/src/api/types.ts` and `tests/e2e_backend/test_a1_wm.py` (phase-3b) and the phase-4 files were resolved as a union
   of both sides; the share-expiry test keeps main's single `xfail(strict=False)` mark. Step 3.6 (Department Production tab) is

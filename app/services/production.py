@@ -2,7 +2,6 @@
 
 import asyncio
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +15,7 @@ from app.permissions import ADMIN, Principal, can_manage_platform, can_view_prod
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn
 from app.services.spend import Spend
 from app.services.validation import check_sum
+from app.services.views import period_ctx
 from app.writes import WriteContext, sync_status
 
 ZERO = Decimal(0)
@@ -35,7 +35,9 @@ async def set_production_org(
     first = dept.prod_litellm_org_id is None
     if first:
         dept.prod_litellm_org_id = f"{dept.litellm_org_id}-prod"
-    dept.prod_budget, dept.prod_budget_period = body.budget, body.budget_period
+    # An omitted period keeps the current one ("1mo" on first set).
+    dept.prod_budget = body.budget
+    dept.prod_budget_period = body.budget_period or dept.prod_budget_period or "1mo"
     after = {
         "litellm_org_id": dept.prod_litellm_org_id, "budget": dept.prod_budget,
         "budget_period": dept.prod_budget_period,
@@ -87,9 +89,16 @@ async def create_production_system(
 
 
 async def get_production(
-    db: AsyncSession, settings: Settings, clock: Clock, principal: Principal, department_id: int
+    db: AsyncSession,
+    settings: Settings,
+    clock: Clock,
+    principal: Principal,
+    department_id: int,
+    raw_period: str | None = None,
 ) -> dict:
-    """§11.1 GET /production/departments/{id}: read-only for admin and the department's rep."""
+    """§11.1 GET /production/departments/{id}: read-only for admin and the department's rep.
+
+    A past ``period`` (§12.1) reads that month's spend and offers no edit actions."""
     await can_view_production(db, principal, department_id)
     dept = await db.get(Department, department_id)
     systems = list(
@@ -102,8 +111,8 @@ async def get_production(
             .order_by(ProductionSystem.id)
         )
     )
-    period = clock.now().astimezone(ZoneInfo(settings.app_timezone)).strftime("%Y-%m")
-    spend = await Spend.load(db, period)
+    pc = period_ctx(settings, raw_period, clock.now())
+    spend = await Spend.load(db, pc["period"])
     sys_sync = await sync_status(db, "production_system", [str(s.id) for s in systems])
     key_counts = dict(
         (
@@ -145,5 +154,6 @@ async def get_production(
     roles = principal.department_roles(department_id)
     return {
         "department_id": department_id, "org": org, "systems": system_rows,
-        "spend_taken_at": spend.taken_at, "actions": {"edit": ADMIN in roles},
+        "spend_taken_at": spend.taken_at, "read_only": pc["read_only"],
+        "actions": {"edit": ADMIN in roles and not pc["read_only"]},
     }  # fmt: skip

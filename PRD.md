@@ -265,7 +265,10 @@ sync status (admin only edits); other roles have no access. Production is not re
 only re-derives the §8.1 fields). Production org/system LiteLLM ids are generated (`{org}-prod`,
 `sys-{id}`); DR4 reserves these patterns, so platform department/group creation rejects an id ending
 in `-prod` or starting with `sys-`, which would otherwise let a department's own org or an employee
-team collide with a production object.
+team collide with a production object. Setting the production budget without a period keeps the
+current budget period ("1mo" the first time). The Production tab follows the selected period: a past
+period shows that month's spend and is read-only (no edit actions); system key counts refresh after
+key creation or revocation.
 
 Step 3.4 service-key backend is complete: group heads and admins manage group keys; admins manage
 system keys. Scoped representatives/viewers can list group keys, and representatives can list

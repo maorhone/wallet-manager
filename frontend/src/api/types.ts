@@ -605,6 +605,7 @@ export interface Production {
   org: ProductionOrg | null;
   systems: ProductionSystemRow[];
   spend_taken_at: string | null;
+  read_only: boolean;
   actions: { edit: boolean };
 }
 

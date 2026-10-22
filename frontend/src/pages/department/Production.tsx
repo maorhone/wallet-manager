@@ -17,6 +17,7 @@ import { ChangeSummaryDialog } from '../../components/ChangeSummaryDialog';
 import { Credits } from '../../components/Credits';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
+import { usePeriod } from '../../components/PeriodSelector';
 import { ServiceKeysPanel } from '../../components/ServiceKeysPanel';
 import { SyncBadge } from '../../components/SyncBadge';
 import { WalletCard } from '../../components/WalletCard';
@@ -27,7 +28,8 @@ const t = he.production;
 /** Tab "ייצור" (§12.5.4 tab 6): the production organization, its systems and their keys; admin edits. */
 export default function Production({ summary: s }: { summary: DepartmentSummary }) {
   const deptId = String(s.department.id);
-  const prod = useProduction(deptId);
+  const { period } = usePeriod();
+  const prod = useProduction(deptId, period);
   const write = useProductionWrite(deptId);
   const [dialog, setDialog] = useState<'org' | 'system' | null>(null);
   const [review, setReview] = useState(false);
