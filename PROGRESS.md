@@ -1,7 +1,8 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done. Step 3.5 (group Service keys tab) done. Steps 3.7 (Platform shell and Departments UI), 3.8 (Operations tab) and 3.9 (Policies and Audit search) done on phase-3b and merged into main (22/10); next = Step 3.6.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done. Step 3.5 (group Service keys tab) done. Steps 3.7 (Platform shell and Departments UI), 3.8 (Operations tab) and 3.9 (Policies and Audit search) done on phase-3b and merged into main (22/10). Phase 4 (reports, Steps 4.1–4.7: allocation, usage, concurrency peaks, blocked and grants reports, alerts, Reports UI) done on phase-4 and merged into main (22/10). Next = Step 3.6 (Department Production tab, resume from wip/main-3.6).
+Latest `./scripts/test.sh` on phase-4 (Step 4.7): green; pytest 518 passed / 5 existing skips; Vitest 48; Playwright 38. Full runs of the merged tree are the builder's to do (Playwright not run at merge).
 Latest `./scripts/test.sh` on phase-3b (Step 3.9): green; pytest 528 passed / 6 skipped / 1 xfailed; Vitest 44; Playwright 37. The owner-approved date-dependent share-expiry xfail stays (single `xfail(strict=False)` mark on main's version of the test).
 Step 3.8 failed-count regression: reproduced concurrent seed/worker drains creating the same organization twice. Each outbox row is now locked through application and commit; a waiting consumer rechecks the committed status. Regression coverage checks both successful and permanently failed writes.
 Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-target cases, unchanged), vitest 45, Playwright 36; ruff, frontend lint/typecheck and formatting pass. No scripts, E2E ports or env handling changed.
@@ -79,6 +80,81 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   SPEC §8.2 gap (owner question 28) and the `build()` signature change.
 - Step 3.3 review fixes: confirmed blocker — `Department.litellm_org_id`/`prod_litellm_org_id` and `Grp.litellm_team_id`/`ProductionSystem.litellm_team_id` are separate unique columns/tables, so platform creation only checked uniqueness within its own column and never against the other side's generated ids (`f"{litellm_org_id}-prod"`, `f"sys-{id}"`). `create_department` now rejects a `litellm_org_id` ending in the reserved `-prod` suffix and `create_group` rejects a `litellm_team_id` starting with the reserved `sys-` prefix (`app/services/platform.py`), which closes the collision in both creation orders without needing a shared lock (the reserved namespace is unconditional, not state-dependent). Regression tests: `tests/api/test_platform_create.py` (+2, reserved suffix/prefix rejected outright) and `tests/api/test_production.py` (+2, a production org/system created first still blocks a later colliding department/group). pytest 540 passed/6 skipped, vitest 43, Playwright 34; full `./scripts/test.sh` green (one rerun hit the same pre-existing `test_grants.py` 60s pytest-timeout CPU-contention flake noted below; passed alone and on rerun).
 - Step 3.2 review fixes (Codex fallback): fixed policy shape/type validation, NULL-safe global binding deletion, and serialized creation with DB DN/staff uniqueness; all three findings confirmed; regressions reproduced before fixes; pytest 527 passed/6 skipped, vitest 43 and Playwright 34 passed, lint/format/typecheck green (full script stopped at read-only browser cache; installer passed separately with writable temp cache); next: Step 3.3; blockers: none.
+- Step 4.7: Concurrency peaks tab with a daily scoped/global peak line and top-100 employee
+  table showing overlap peak, current personal `max_parallel` and UTC peak timestamp.
+  Reuses the live peaks API, selected period and report scopes; viewers see aggregates only,
+  PMO remains grants-only, employees see their own data. Shared loading/error/retry/empty states.
+  Required single Playwright test written first, observed failing, then passing; verifies overlapping
+  versus consecutive requests, ranked employee peaks/limits, period changes and viewer/PMO visibility.
+  All Phase 4 acceptance-mapping tests exist and pass, including repository hygiene.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, Vitest 48 passed,
+  Playwright 38 passed; ruff lint/format and frontend lint/typecheck pass. No intermittent timeouts.
+  PRD updated. Phase 4 complete; no further step started, no commit/push, no new blockers/questions.
+- Step 4.4 review fixes: confirmed the major per-model remaining clamp finding and removed it from
+  the shared Allocation adapter, so report and child model tables show negative balances for overspent caps.
+  Added two rendering regressions covering overspent, exact, under, zero and uncapped models;
+  both failed on the clamped zero before the fix. No findings rejected. PRD updated.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 48 passed,
+  Playwright 37 passed; ruff format/check and frontend lint/typecheck pass.
+  Next remains Step 4.7. No blockers; no commit/push.
+- Step 4.6: Grants-by-project report with project rows and aggregate counts/money totals; PMO's
+  Reports link opens its department grants with the PMO scope retained and only the Grants tab.
+  Blocked report shows daily base/model exhaustion, current cap, month-to-date/day spend for the
+  selected period, gated by member visibility. Shared loading/error/retry/empty and credits formatting.
+  Required single Playwright case written first, observed failing and then passing; scope regression updated.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 46 passed,
+  Playwright 37 passed; ruff/format/frontend lint/typecheck pass. No intermittent timeout warnings.
+  PRD updated. Step 4.7 untouched; no commit/push.
+- Step 4.5: generic shared UsageChart accepts bucket/key/spend series, stacks keys safely (including UPNs
+  with dots), fills missing key values with zero and retains cumulative spend/cap line and chart states.
+  My Wallet adapts its existing daily points. Added Usage reports for employee/group/department/global,
+  by-model or authorized by-member stacks, day/week/month buckets, selected-period range, current-cap label
+  and snapshot freshness. Added daily model charts to group/department overviews; PMO remains grants-only.
+  Required one Vitest and one Playwright case written first and observed failing, then passing.
+  Full `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 46 passed,
+  Playwright 36 passed; ruff/format/frontend lint/typecheck pass. No unrelated timeout warnings.
+  PRD updated; Step 4.6 untouched; no commit/push.
+- Step 4.4: `/report/:kind/:id/:tab` shell and selected-scope “דוחות” link; Allocation at own-wallet,
+  group, department and global levels, with shared WalletCard, ModelTable, StateBadge and PeriodSelector.
+  Child rows show allocation/spend/remaining/percent/state; group member rows include model caps/spend.
+  Global allocation reuses department report cards. Past-period values and snapshot freshness are shown.
+  Department/global Over-allocation tabs show scoped current findings, source, level, model and ceilings;
+  a clear label explains that findings are current-only even when a past period is selected.
+  Added the required single Playwright test (including past values and findings), plus two scope regression tests.
+  Observed all three new cases fail before implementation. Full `./scripts/test.sh` exited 0:
+  pytest 518 passed / 5 existing skips, vitest 45 passed, Playwright 35 passed; lint/format/typecheck pass.
+  PRD updated; Step 4.5 untouched. No commit/push.
+- Step 4.3 review fixes: confirmed the major default-concurrency finding; daily alerts now compare peaks against
+  the personal override or `concurrency.default`, matching key provisioning, and report that effective limit.
+  Added six regression cases for default/changed default, threshold boundaries, override precedence and no limit;
+  observed the three default-limit alert cases fail before the fix. No findings rejected. PRD updated.
+  Validation: `./scripts/test.sh` exited 0: pytest 518 passed / 5 existing skips, vitest 43 passed,
+  Playwright 34 passed; ruff format/check and frontend lint/typecheck passed. Next Step 4.4; no blockers, no commit/push.
+- Step 4.3: `scheduled_check` sends critical `overallocation` notifications to admins and department representatives,
+  deduplicated by level/entity/model/local day, including live LiteLLM breaches and WM checks. Unknown scopes notify admins only.
+  Daily `run_report_alerts` uses yesterday's local-day overlaps through the existing reader, counts all members reaching
+  their configured key limit, and sends admins one non-critical `concurrency_at_limit` summary with the top 100.
+  Both report gauges update in the job; blocked employees are distinct across exhausted base/model caps using FR-R5 snapshots.
+  Startup/daily scheduling uses the injected clock and a separate job advisory lock; worker checks share breach dedupe keys.
+  Existing notification UI gains Hebrew labels and preferences; critical mute returns 422. No migration or new API prefix.
+  Tests cover the required four cases plus timezone/midnight clipping, worker/scheduler dedupe, next day, muted/below-limit,
+  empty-day gauge reset, separate model keys, unknown scope, full count before top-100 truncation and left/unknown exclusion.
+  PRD updated; Step 4.4 untouched.
+- Step 4.2: `GET /reports/usage` (snapshot day/week/month series by model/member, current cap, snapshot time),
+  `/reports/concurrency-peaks` (live half-open interval overlaps, daily totals and top 100 visible employees),
+  `/reports/blocked` (daily base/model exhaustion, current cap and month-to-date/day spend).
+  Shared scope authorization enforces member visibility, employee self access, global admin/viewer access and PMO grants-only.
+  Snapshots now bucket in APP_TIMEZONE; UTC timestamps use the supplied snapshot clock. Existing group/department day rows reused.
+  Read-only peaks use one SQL statement with scoped team/user filters, midnight/window clipping and deterministic earliest ties.
+  Fake single/bulk spend setup supports start/end and key hashes; bulk rows/counters commit atomically. E2E fakeSpend helper added.
+  Required PLAN tests written first and observed failing before implementation; additional boundary/DST, rollback, visibility,
+  top-100, monthly reset, fractional spend and no-future-projection coverage added. PRD updated. Step 4.3 untouched.
+- Step 4.1: `GET /reports/allocation` (department/group/employee, period, snapshot spend and per-model rows)
+  and `GET /reports/grants` (visible grants by project, distinct department/group counts, grant count and money totals).
+  Reuses wallet/summary builders, period snapshots, audit history, effective model pots and the scoped grant list.
+  Department reports exclude PMO-only roles; member reports enforce D11, with self access for employees.
+  Added the nine named PLAN tests plus malformed-input, injectable-clock and closed-grant conservation coverage.
+  PRD updated; Step 4.2 untouched. No new API prefix (`reports` is already in the Vite proxy).
 - Step 2.10: UI `NotificationsBell` (header; unread count, drawer, mark read, scope link) and `NotificationPrefs` (on My wallet;
   critical kinds disabled), `useNotifications/useMarkRead/useNotificationPrefs`, `he.notifications.kinds`, Playwright
   `notifications.spec.ts` (+1, 34 total). Prefs come from `GET /me/notifications` (no separate GET prefs endpoint). Full
@@ -472,6 +548,86 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   write path needs that to fail closed (503) rather than guess, so a group head's action is never silently authorized
   against an admin wrongly treated as a plain member during an outage. The read path (`/me/wallet`'s owner names) only
   degrades the `holders()` name lookup; the role itself is still correct because `target_tier` ran first.
+- Step 4.5 review fix: group overview usage visibility now matches backend scope permissions; summary exposes the group department ID, with regressions for unrelated/scoped viewers and member editors. No blockers; next remains unchanged.
+- Step 4.7: no SPEC/PLAN behavior conflicts. Reused Step 4.2's live, scoped
+  `/reports/concurrency-peaks`, existing Recharts and shared report states. The selected calendar
+  month stays within the API's 31-local-date limit; member rows show the API's current personal
+  `max_parallel` (dash when unset), not an inferred policy limit. Viewers get aggregates only;
+  PMO stays grants-only. D6 pilot policy values are unchanged.
+  Per the owner's explicit run instruction, Next is Step (none; Phase 4 ends with this step;
+  merge into main follows), overriding PLAN 4.7's "Next = Phase 0 (real environment)" wording.
+  No new API prefix, backend/scheduler work or changes to test scripts/default ports/env handling.
+  Focused/full E2E uses env overrides 4130–4132. Required Playwright test failed on the missing
+  tab before implementation and passed afterward (2.5 s test; 9.5 s focused run).
+  All named Phase 4 acceptance-mapping tests exist; the new test is the fourth reports browser
+  case, within Phase 4's four-test allowance and the combined ten-test allowance.
+  Runtime budget: full script 371.318 s; pytest 197.54 s (+6.64 s versus the preceding 190.90 s run),
+  Vitest 4.94 s, Playwright 2.6 min. Step 4.7 adds no pytest work and one 2.2 s browser case.
+  Against the available historical pre-reports baseline (Step 2.5: about 155 s), pytest growth is
+  about 42.54 s, below the combined Phase 3/4 allowance of about 90 s. A separate Phase 3 timing
+  baseline is not recorded in this checkout; the comparison uses the available earlier baseline.
+- Step 4.6: no SPEC/PLAN conflicts. Reused `/reports/grants` and `/reports/blocked`; no new
+  API prefix, backend, scheduler or test-script changes. Grants API is current-only, explicitly labeled
+  independent of selected period; blocked caps are also labeled current. PMO gets a distinct
+  `/report/pmo/:id/grants` route so its scope remains distinct from a representative of the same department.
+  Grants tabs are department/global; Blocked tabs follow member visibility (own, head, rep, admin).
+  Focused/full E2E uses env overrides 4130–4132; default ports/env handling unchanged.
+- Step 4.5: no SPEC/PLAN conflicts. Reused Step 4.2 `/reports/usage` and existing offline Recharts.
+  The report API returns the current cap, including for a historical range; the UI explicitly labels it.
+  Member toggles use scoped roles and the group summary's existing server permission; APIs enforce scope.
+  PMO-only overviews omit charts because the report API limits PMO to grants. No new API prefix,
+  backend/scheduler changes or test script changes. Focused/full E2E uses env overrides 4130–4132.
+  The new browser test polls the snapshot API before mounting the chart, matching the existing report test.
+- Step 4.4: no SPEC/PLAN conflicts. Reused existing APIs only: global Allocation renders visible department
+  reports because `/reports/allocation` supports department/group/employee levels. Findings are current-only
+  because the existing `/reports/overallocation` has no period parameter. The UI labels this explicitly.
+  D11 keeps group viewers out of member reports; department/global viewers see department aggregates.
+  PMO scopes get their grant reports in Step 4.6; this step does not offer an unauthorized Allocation link.
+  No new API prefix (`reports` is already proxied), Python changes, scheduler work or test script changes.
+  Focused E2E uses env overrides 4130–4132; defaults remain unchanged. No new owner questions or blockers.
+- Step 4.3 failure investigation (2026-10-21): the reported
+  `tests/api/test_lifecycle_permissions.py::test_matrix[head_on_self-move]` failure was a 60 s
+  pytest-timeout during `provisioned` fixture setup, before the test body:
+  `drain` → `build` → `_employee` → `session.get(Grp)` → SQLAlchemy
+  `coerce_to_immutabledict`. Step 4.3 changes neither this provisioning path nor these fixtures;
+  the fixture does not start the scheduler or worker loops. Classified as an unrelated intermittent
+  fixture timeout, consistent with earlier recorded failures. Focused verification passed unchanged:
+  66 tests (all lifecycle permissions, report-alert jobs and notifications) in 37.06 s.
+  No application code, tests or timeout settings changed; no retry loop.
+  One full `./scripts/test.sh` verification then exited 0: pytest 512 passed / 5 existing skips
+  (184.49 s), Vitest 43 passed, Playwright 34 passed (2.3 min); ruff lint/format and frontend
+  lint/typecheck passed. The timeout did not recur; stopped after this run as requested.
+- Step 4.3: no SPEC/PLAN conflicts. Breach dedupe dates and yesterday's alert window use APP_TIMEZONE;
+  peak timestamps stay UTC. Concurrency alerts use the effective key limit (override or policy default; review fix).
+  `wm_blocked_employees` defaults to yesterday's distinct FR-R5 employees (see owner question); zero-activity runs reset gauges.
+  Gauges remain process-local, matching existing scheduler/worker metrics; no new metrics server or persistence added.
+  Notification inserts reuse the existing transaction/dedupe/mute conventions; there are no allocation/outbox writes.
+- Step 4.3 verification: pytest completed with 512 passed / 5 skipped, but emitted an intermittent
+  `PytestUnraisableExceptionWarning` for `tests/api/test_reports_allocation.py::test_viewer_group_level_403_department_ok`:
+  the 60 s pytest-timeout signal arrived inside Python's `weakref.WeakKeyDictionary.remove` callback and was ignored there.
+  The test passed; no assertions, timeout settings or existing test behavior changed. Recorded and continued as requested.
+- Step 4.2 failure investigation: `e2e/pending.spec.ts:38`, "U12 rep places a pending user of the department",
+  timed out after 30 s while setting up Playwright's `context` fixture, before page setup or application actions.
+  The saved error context contains only that fixture timeout. Step 4.2 leaves browser context setup unchanged;
+  this matches the earlier unrelated browser-context timeout recorded for `member-actions.spec.ts` U9 below.
+  The single full `./scripts/test.sh` verification passed (502 pytest, 5 skipped; 43 Vitest; 34 Playwright),
+  including this test unchanged in 4.8 s. Classified as an intermittent timeout unrelated to Step 4.2;
+  stopped after that run as requested. No test assertions, timeouts or application behavior changed.
+- Step 4.2 SPEC/PLAN difference: FR-R5 explicitly names base-cap or model-cap exhaustion; PLAN says base cap plus active
+  shares for the base row. Followed FR-R5: blocked-report base rows compare against current base_cap, even with active shares.
+  Wallet/usage-chart totals still include active shares. `/reports/blocked` is PLAN's endpoint for FR-R5 (not listed in §11.1).
+  Date ranges are inclusive, weeks start Monday, sparse usage/peaks omit missing days; blocked rows include zero-spend days
+  after exhaustion, reset at each local month, and stop at the injected clock's local today. Caps are current values.
+  Old already-frozen historical day snapshots retain the earlier UTC-day limitation; newly refreshed periods use local dates.
+  No new prefix (reports already proxied), scheduler job, alerts, UI, test-script or E2E port/env changes.
+- Step 4.1: no new SPEC/PLAN conflicts. The existing department-summary permission helper permits PMO;
+  reports apply the narrower §12.2 reports permission (PMO grants only) without changing summary access.
+  `departments` and `groups` in project report rows/totals are distinct counts; `grants` is a count.
+  Uncapped models with spend return null allocation/pct (as in existing wallets); percentages are fractions.
+  Historical reports inherit the existing builders: audit-backed budget/base/cap values and period spend snapshots;
+  model allowances/pots, memberships and active grant/share rows retain the existing history limitations noted below.
+  Shared period validation now accepts the injected clock and enforces exact YYYY-MM; the reused PMO pool
+  reader uses that clock too. No scheduler, test script, default E2E port/env or frontend changes.
 - Review 2.8: all 12 findings fixed (see commit "Step 2.8: review fixes"); Review 2.8 open: none.
 - Flaky (unrelated, backend): full ./scripts/test.sh intermittently hits the 60s pytest-timeout on an asyncpg call (test_rs256_via_jwks, test_restart_catches_up_on_overdue); both pass alone. Vitest also times out at 5s on cold first renders when the machine is loaded.
 - Step 2.9: `MemberSidePanel` gained `withBaseCap` (one-row `PUT /groups/{gid}/members/caps`); `ShareDialog` members type loosened.
@@ -657,6 +813,9 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   department pending list (no role on the department), so the tab is absent.
 
 ## Questions for owner
+- Step 4.3 metric window (non-blocking): PLAN names `wm_blocked_employees` without a time window.
+  Defaulted to yesterday's distinct employees at a base/model cap, matching the concurrency gauge's day and reusing FR-R5.
+  Confirm if a current-day/current-month snapshot count is preferred. Implementation continues with this safe default.
 **Owner approved all 21 defaults below on 20/10/2026, including 10 (keep placeholder concurrency/rpm until pilot), 11 (client id claim order appid, client_id, azp) and 12 (no static key, ADFS JWT mapped by upn).**
 1. **`SCOPE_FORBIDDEN` vs U7.** No role on the URL scope returns 403 `FORBIDDEN` (U7, NFR9). An out-of-scope target in the payload returns 422 `SCOPE_FORBIDDEN` (§11.2).
 2. **Default model caps for new members (FR-G2).** §8.2 has no column, so they are stored in `policy` key `member_defaults.group.<id>`.

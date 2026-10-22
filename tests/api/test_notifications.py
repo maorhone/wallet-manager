@@ -80,3 +80,15 @@ async def test_unknown_kind_422(login):
     # nothing was applied when one entry is bad
     r = await put_prefs(await login("dani"), {"grant_received": True, "nope": True})
     assert r.status_code == 422
+
+
+async def test_mute_overallocation_critical_422(login, seeded):
+    dani = await login("dani")
+    r = await put_prefs(dani, {"overallocation": True})
+    assert r.status_code == 422 and r.json()["code"] == "INVALID_REQUEST"
+    assert await add(seeded, DANI, "overallocation", "breach") == 1
+    body = (await dani.get("/me/notifications")).json()
+    assert body["items"][0]["critical"] is True
+    prefs = {p["kind"]: p for p in body["prefs"]}
+    assert prefs["overallocation"] == {"kind": "overallocation", "critical": True, "muted": False}
+    assert prefs["concurrency_at_limit"]["critical"] is False

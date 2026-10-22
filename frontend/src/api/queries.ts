@@ -7,6 +7,11 @@ import {
 } from '@tanstack/react-query';
 import { apiFetch, apiPatch, apiPost, apiPut, type WriteOptions } from './client';
 import type {
+  ConcurrencyPeaks,
+  AllocationLevel,
+  GrantsReport,
+  BlockedReport,
+  AllocationReport,
   AuditEntry,
   AuditFilters,
   DepartmentSummary,
@@ -31,6 +36,7 @@ import type {
   NotificationPref,
   NotificationsList,
   OutboxEntry,
+  OverallocationFinding,
   PendingPlacement,
   PmoPool,
   Policies,
@@ -41,8 +47,35 @@ import type {
   Status,
   SyncStatus,
   UsagePoint,
+  UsageReport,
+  UsageScope,
+  UsageGranularity,
+  UsageBy,
   WriteResponse,
 } from './types';
+
+export const useAllocationReport = (level: AllocationLevel, id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'allocation', level, id, period],
+    queryFn: () =>
+      apiFetch<AllocationReport>(
+        `/reports/allocation?${new URLSearchParams({ level, id, period })}`,
+      ),
+    enabled: period !== '' && id !== '',
+    refetchInterval: 15000,
+  });
+
+/** The server authorizes visible departments; this filter narrows the selected department. */
+export const useOverallocationReport = (department?: string) =>
+  useQuery({
+    queryKey: ['reports', 'overallocation'],
+    queryFn: () => apiFetch<{ findings: OverallocationFinding[] }>('/reports/overallocation'),
+    select: (data) =>
+      department === undefined
+        ? data.findings
+        : data.findings.filter((f) => f.department_id === Number(department)),
+    refetchInterval: 15000,
+  });
 
 export const keys = {
   me: ['me'] as const,
@@ -542,3 +575,80 @@ export const useServiceKeyWrite = () => {
     },
   });
 };
+
+export const useUsageReport = (
+  scope: UsageScope,
+  id: string,
+  period: string,
+  granularity: UsageGranularity = 'day',
+  by: UsageBy = 'model',
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: ['reports', 'usage', scope, id, period, granularity, by],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<UsageReport>(
+        `/reports/usage?${new URLSearchParams({
+          scope,
+          ...(scope === 'global' ? {} : { id }),
+          from: `${period}-01`,
+          to,
+          granularity,
+          by,
+        })}`,
+      );
+    },
+    enabled: enabled && period !== '' && id !== '',
+    refetchInterval: 15000,
+  });
+
+export const useGrantsReport = (department?: string) =>
+  useQuery({
+    queryKey: ['reports', 'grants', department],
+    queryFn: () =>
+      apiFetch<GrantsReport>(
+        `/reports/grants${department ? `?${new URLSearchParams({ department })}` : ''}`,
+      ),
+    refetchInterval: 15000,
+  });
+
+/** A calendar month stays within the live report's 31-local-date limit. */
+export const useConcurrencyPeaks = (scope: UsageScope, id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'concurrency-peaks', scope, id, period],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<ConcurrencyPeaks>(
+        `/reports/concurrency-peaks?${new URLSearchParams({
+          scope,
+          ...(scope === 'global' ? {} : { id }),
+          from: `${period}-01`,
+          to,
+        })}`,
+      );
+    },
+    enabled: period !== '' && id !== '',
+    refetchInterval: 15000,
+  });
+
+export const useBlockedReport = (scope: UsageScope, id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'blocked', scope, id, period],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<BlockedReport>(
+        `/reports/blocked?${new URLSearchParams({
+          scope,
+          ...(scope === 'global' ? {} : { id }),
+          from: `${period}-01`,
+          to,
+        })}`,
+      );
+    },
+    enabled: period !== '' && id !== '',
+    refetchInterval: 15000,
+  });

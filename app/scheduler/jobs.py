@@ -8,18 +8,25 @@ replicas never close the same row twice even without the job lock.
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
+from app import metrics
 from app.clock import Clock
 from app.config import Settings
 from app.db import LockKind
 from app.directory import Directory
-from app.models import AuditLog, Grant, GrantShare
+from app.models import AuditLog, Employee, Grant, GrantShare
+from app.outbox.desired import _policy
+from app.permissions import ADMIN, Binding, Principal
 from app.services import grants as grants_service
-from app.services import notify_scan
+from app.services import notify_scan, reports
 from app.services import shares as shares_service
+from app.services.notifications import notify, upns_of
+from app.services.overallocation import scheduled_check
+from app.services.owners import holders
 from app.services.reconcile import run_reconcile  # noqa: F401
 from app.writes import WriteContext
 
@@ -167,3 +174,55 @@ async def run_notifications(
         created = await notify_scan.scan(db, directory, settings, clock.now())
         await db.commit()
     return NotifyResult(dict(created))
+
+
+async def run_report_alerts(
+    sf, client, clock: Clock, *, reader, settings: Settings, directory: Directory
+) -> NotifyResult:
+    """Daily pilot input for D6, plus FR-V2 alerts; all windows use the injected clock."""
+    await scheduled_check(sf, reader, clock=clock, settings=settings, directory=directory)
+    day = clock.now().astimezone(ZoneInfo(settings.app_timezone)).date() - timedelta(days=1)
+    lo, hi = reports.report_window(day, day, settings.app_timezone, 31)
+    peaks = await reader.concurrency_peaks(lo, hi, timezone=settings.app_timezone)
+    global_peak = max((r.peak for r in peaks if r.user is None), default=0)
+    by_user = {r.user: r for r in peaks if r.user is not None}
+    async with sf() as db:
+        concurrency = await _policy(db, "concurrency", {})
+        members = []
+        for member in await db.scalars(
+            select(Employee).where(Employee.status != "left", Employee.group_id.is_not(None))
+        ):
+            peak = by_user.get(member.upn)
+            max_parallel = member.max_parallel or concurrency.get("default")
+            if peak is not None and max_parallel is not None and peak.peak >= max_parallel:
+                members.append(
+                    dict(
+                        upn=member.upn,
+                        display_name=member.display_name,
+                        peak=peak.peak,
+                        at=peak.at.isoformat(),
+                        max_parallel=max_parallel,
+                    )
+                )
+        members.sort(key=lambda m: (-m["peak"], m["upn"]))
+        # Reuse FR-R5's base/model exhaustion and local-month snapshot calculation.
+        principal = Principal(ACTOR, ROLE, [Binding(ADMIN, "global", None)])
+        blocked = await reports.blocked(db, principal, settings, clock, "global", None, day, day)
+        blocked_count = len({r["upn"] for r in blocked["rows"]})
+        created = 0
+        if members:
+            admins = upns_of(await holders(db, directory, ADMIN, "global", None))
+            created = await notify(
+                db,
+                admins,
+                "concurrency_at_limit",
+                None,
+                None,
+                {"day": day.isoformat(), "count": len(members), "members": members[:100]},
+                f"concurrency_at_limit:{day}",
+                settings=settings,
+            )
+        await db.commit()
+    metrics.CONCURRENCY_PEAK.labels("global").set(global_peak)
+    metrics.BLOCKED_EMPLOYEES.set(blocked_count)
+    return NotifyResult({"concurrency_at_limit": created})

@@ -27,6 +27,7 @@ KINDS: dict[str, bool] = {
     "grant_expiring": False, "grant_underused": False, "pending_placement": False,
     "member_moved_in": False, "outbox_failed": True, "grant_received": False,
     "drift_repeated": True, "reconcile_missing": True,
+    "overallocation": True, "concurrency_at_limit": False,
 }  # fmt: skip
 
 

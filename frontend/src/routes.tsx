@@ -6,6 +6,7 @@ import GroupPage from './pages/group/GroupPage';
 import MyWallet from './pages/MyWallet';
 import PlatformPage from './pages/platform/PlatformPage';
 import PmoPage from './pages/pmo/PmoPage';
+import ReportsPage from './pages/reports/ReportsPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
@@ -22,6 +23,7 @@ export const router = createBrowserRouter([
       { path: 'pmo/:id/:tab', element: <PmoPage /> },
       { path: 'platform', element: <Navigate to="pending" replace /> },
       { path: 'platform/:tab', element: <PlatformPage /> },
+      { path: 'report/:kind/:id/:tab', element: <ReportsPage /> },
     ],
   },
 ]);

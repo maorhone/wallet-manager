@@ -48,13 +48,15 @@ ZERO = Decimal(0)
 CARD = ("total", "allocated", "unallocated", "used", "remaining", "percent", "state")
 
 
-def period_ctx(settings: Settings, raw: str | None) -> dict:
+def period_ctx(settings: Settings, raw: str | None, now: datetime | None = None) -> dict:
     """Validate ``YYYY-MM`` (default: the current month in APP_TIMEZONE) and describe it."""
     tz = ZoneInfo(settings.app_timezone)
-    current = datetime.now(tz).strftime("%Y-%m")
+    current = (now.astimezone(tz) if now else datetime.now(tz)).strftime("%Y-%m")
     period = raw or current
     try:
-        datetime.strptime(period, "%Y-%m")
+        parsed = datetime.strptime(period, "%Y-%m")
+        if parsed.strftime("%Y-%m") != period:
+            raise ValueError
     except ValueError:
         raise invalid_request("period must be YYYY-MM") from None
     if period > current:
@@ -332,6 +334,23 @@ async def members_list(
     return {**_envelope(pc, spend), "members": rows}
 
 
+async def group_model_pots(db, group_id: int, timezone: str, period: str) -> dict[str, Decimal]:
+    """Effective model pots shared by the summary and allocation report."""
+    pots = {
+        p.model: p.amount
+        for p in await db.scalars(select(GroupModelPot).where(GroupModelPot.group_id == group_id))
+    }
+    contributions = list(
+        await db.scalars(
+            select(Grant).where(Grant.group_id == group_id, contributing_grants(timezone, period))
+        )
+    )
+    for grant in contributions:
+        if grant.model:
+            pots[grant.model] = pots.get(grant.model, ZERO) + grant.amount - grant.returned
+    return pots
+
+
 async def group_summary(
     db: AsyncSession, principal: Principal, settings: Settings, group_id: int, raw: str | None
 ) -> dict:
@@ -345,21 +364,7 @@ async def group_summary(
     pc, th = period_ctx(settings, raw), await _thresholds(db)
     spend = await Spend.load(db, pc["period"])
     g = await _Group.load(db, group, spend, pc["at"], th, settings.app_timezone)
-
-    pots = {
-        p.model: p.amount
-        for p in await db.scalars(select(GroupModelPot).where(GroupModelPot.group_id == group_id))
-    }
-    contributions = list(
-        await db.scalars(
-            select(Grant).where(
-                Grant.group_id == group_id, contributing_grants(settings.app_timezone, spend.period)
-            )
-        )
-    )
-    for grant in contributions:
-        if grant.model:
-            pots[grant.model] = pots.get(grant.model, ZERO) + grant.amount - grant.returned
+    pots = await group_model_pots(db, group_id, settings.app_timezone, spend.period)
     caps_sum: dict[str, Decimal] = defaultdict(lambda: ZERO)
     caps = await db.execute(
         select(EmployeeModelCap.model, EmployeeModelCap.amount)
@@ -391,6 +396,7 @@ async def group_summary(
         **_envelope(pc, spend),
         "group": {
             "id": group.id,
+            "department_id": group.department_id,
             "name": group.name,
             "default_member_cap": group.default_member_cap,
         },  # fmt: skip

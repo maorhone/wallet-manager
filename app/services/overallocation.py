@@ -3,11 +3,15 @@
 import logging
 from collections import defaultdict
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import metrics
+from app.clock import Clock, SystemClock
+from app.config import Settings
+from app.directory import FixtureDirectory
 from app.models import (
     Department,
     DepartmentModelAllowance,
@@ -16,7 +20,9 @@ from app.models import (
     GroupModelPot,
     Grp,
 )
-from app.permissions import REP, VIEWER, Principal
+from app.permissions import ADMIN, REP, VIEWER, Principal
+from app.services.notifications import notify, reps_or_admins, upns_of
+from app.services.owners import holders
 from app.writes import plain
 
 log = logging.getLogger(__name__)
@@ -124,10 +130,36 @@ async def findings(db: AsyncSession, reader) -> list[dict]:
     return await _live(db, reader, depts, groups) + await _wm(db, depts, groups)
 
 
-async def scheduled_check(sf, reader) -> int:
-    """FR-V2 run: one structured warning per finding and the gauge. Notifications are Phase 2."""
+async def scheduled_check(
+    sf, reader, *, clock: Clock | None = None, settings: Settings | None = None, directory=None
+) -> int:
+    """FR-V2 findings and critical alerts, deduplicated per finding and local day."""
+    settings = settings or Settings()
+    directory = directory or FixtureDirectory(settings.seed_file)
+    day = (clock or SystemClock()).now().astimezone(ZoneInfo(settings.app_timezone)).date()
     async with sf() as db:
         found = await findings(db, reader)
+        admins = upns_of(await holders(db, directory, ADMIN, "global", None))
+        reps = {}
+        for f in found:
+            did = f["department_id"]
+            if did not in reps:
+                reps[did] = await reps_or_admins(db, directory, did)
+            scope_kind, scope_id = None, None
+            if did is not None:
+                scope_kind = "group" if f["level"] in ("group", "member_model") else "department"
+                scope_id = f["entity_id"]
+            await notify(
+                db,
+                admins | reps[did],
+                "overallocation",
+                scope_kind,
+                scope_id,
+                {**f, "day": day.isoformat()},
+                f"overalloc:{f['level']}:{f['entity_id']}:{f['model']}:{day}",
+                settings=settings,
+            )
+        await db.commit()
     for f in found:
         log.warning("over-allocation finding", extra={"finding": plain(f)})
     metrics.OVERALLOCATION.set(len(found))

@@ -153,7 +153,7 @@ export interface MemberSlim {
 }
 
 export interface GroupSummary extends PeriodEnvelope {
-  group: { id: number; name: string; default_member_cap: number };
+  group: { id: number; department_id: number; name: string; default_member_cap: number };
   wallet: {
     total: number;
     allocated: number;
@@ -466,4 +466,110 @@ export interface RoleBindingIn extends RoleBindingScope {
 
 export interface RoleBinding extends RoleBindingIn {
   members: Person[];
+}
+
+export type AllocationLevel = 'department' | 'group' | 'employee';
+
+export interface ModelAllocation {
+  model: string;
+  allocation: number | null;
+  spend: number;
+  pct: number | null;
+}
+
+export interface AllocationValues {
+  total: number;
+  allocated: number;
+  spend: number;
+  remaining: number;
+  pct: number;
+  state: ApiState;
+}
+
+export interface AllocationRow extends AllocationValues {
+  id: number | string;
+  name: string;
+  kind: string;
+  base: number | null;
+  grants: number | null;
+  base_cap: number | null;
+  shares_total: number | null;
+  model_caps: Record<string, number> | null;
+  models: ModelAllocation[];
+}
+
+export interface AllocationReport extends AllocationValues {
+  level: AllocationLevel;
+  id: number | string;
+  name: string;
+  period: string;
+  rows: AllocationRow[];
+  models: ModelAllocation[];
+  spend_taken_at: string | null;
+}
+
+export interface OverallocationFinding {
+  source: 'wm' | 'litellm';
+  level: 'department' | 'group' | 'group_model' | 'member_model';
+  entity_id: number | string;
+  name: string | null;
+  allocated: number;
+  total: number;
+  department_id: number | null;
+  model: string | null;
+}
+
+export type UsageScope = AllocationLevel | 'global';
+export type UsageGranularity = 'day' | 'week' | 'month';
+export type UsageBy = 'model' | 'member';
+export interface UsageSeriesPoint {
+  bucket: string;
+  key: string;
+  spend: number;
+}
+export interface UsageReport {
+  series: UsageSeriesPoint[];
+  cap: number;
+  taken_at: string | null;
+}
+
+export interface ConcurrencyPeaks {
+  daily: { day: string; peak: number; at: string }[];
+  members: {
+    upn: string;
+    display_name: string | null;
+    peak: number;
+    at: string;
+    max_parallel: number | null;
+  }[];
+}
+
+export interface GrantTotals {
+  departments: number;
+  groups: number;
+  grants: number;
+  amount: number;
+  shared: number;
+  unshared: number;
+  used: number;
+  returned: number;
+}
+
+export interface GrantsReport {
+  rows: (GrantTotals & { project_ref: string | null })[];
+  totals: GrantTotals;
+}
+
+export interface BlockedReport {
+  rows: {
+    day: string;
+    upn: string;
+    display_name: string | null;
+    group_id: number;
+    kind: 'base' | 'model';
+    model: string | null;
+    cap: number;
+    period_spend_to_date: number;
+    day_spend: number;
+  }[];
 }

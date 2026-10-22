@@ -54,6 +54,68 @@ No one changes their own values (DR9, `SELF_ALLOCATION_FORBIDDEN`); the next lev
 - Group and department summaries, member tables, history timeline, usage charts from a spend snapshot.
 - Over-allocation report against live LiteLLM values; status, outbox and metrics endpoints.
 - Share rows in the wallet show project, model, amount, used (attributed), expiry and days left - Done (Step 2.2).
+- Allocation and grants reports backend - Done (Step 4.1). `GET /reports/allocation?level=department|group|employee&id=&period=YYYY-MM`
+  returns allocation, snapshot spend, remaining, fraction used, wallet state, per-model allocation/spend and snapshot time.
+  Department rows include groups, PMO pool and reserve; group rows include members' base caps, active shares and model caps;
+  employees have no child rows. Past periods use their snapshots and the existing audit-based allocation history.
+  Department reports allow admin, representative and scoped viewers; member rows require head, representative or admin access;
+  each employee can read their own report. PMO report access is limited to grants.
+  `GET /reports/grants?department=&project_ref=` groups visible grants by project with distinct department/group counts,
+  grant count, amount, shared, unshared, attributed used and returned, plus totals across visible grants. Visibility matches
+  the grant list, including heads' own groups and PMO's own department. Grants report UI is available (Step 4.6).
+- Usage, concurrency peaks and blocked spend backend - Done (Step 4.2).
+  `GET /reports/usage?scope=employee|group|department|global&id=&from=&to=&granularity=day|week|month&by=model|member`
+  returns snapshot series, the current cap and snapshot time for up to 400 inclusive local dates. Day snapshots now follow
+  `APP_TIMEZONE`, including month boundaries; weeks start Monday and month buckets start on the first day. Member series
+  require member visibility; employees can read their own series. Global aggregates require admin or a global viewer.
+  `GET /reports/concurrency-peaks` accepts the same scopes and up to 31 local dates. Its live read counts overlapping
+  SpendLogs intervals, with end events before starts at the same instant, carrying running requests across midnight and
+  clipping to the selected range. It returns daily aggregate peaks with UTC timestamps and the top 100 visible members
+  (peak, timestamp, configured concurrency limit); viewers receive daily aggregates only.
+  `GET /reports/blocked` returns a row per exhausted employee/base or model cap per day, with current cap, cumulative
+  calendar-month spend and that day's spend, including zero-spend days after exhaustion. Per FR-R5, base exhaustion uses
+  the base cap even when a share increases the wallet total. Member visibility applies; PMO is limited to grant reports.
+  The fake supports explicit request intervals and key hashes in `/_test/spend` and atomic `/_test/spend/bulk` setup.
+- Report alerts - Done (Step 4.3). Every over-allocation finding sends a critical notification to platform admins
+  and the affected department's representatives, once per finding/model/local day, including live LiteLLM breaches.
+  Unknown departments notify admins only. The daily scheduler examines yesterday's SpendLogs overlaps in APP_TIMEZONE;
+  when employees reach their effective key concurrency limit (personal override or `concurrency.default`), admins receive
+  one summary with the full count and the top 100 affected members (peak, UTC timestamp, effective limit).
+  Members with no effective limit are excluded. This pilot input for D6 can be muted.
+  The same job updates `wm_concurrency_peak{scope="global"}` and `wm_blocked_employees` for yesterday; the latter counts
+  distinct employees at a base or model cap using snapshots and FR-R5.
+- Reports shell, Allocation and Over-allocation UI - Done (Step 4.4).
+  The Hebrew “דוחות” link opens `/report/:kind/:id/:tab` for the selected own-wallet, group, department or global scope.
+  Allocation shows the shared wallet card with snapshot freshness, child allocation/spend/remaining/status rows and model
+  allocations/spend/remaining; model remaining stays negative when spend exceeds the cap, including child rows,
+  while uncapped models show no remaining value. Global scope lists department reports. The shared period selector loads that period's values,
+  and past periods remain read-only. Department and global scopes also have an Over-allocation tab showing source,
+  level, entity/model, allocated amount, ceiling and a warning badge. These findings are explicitly current-only,
+  independent of the selected period. Existing server permissions apply: member reports require member visibility,
+  scoped viewers get department aggregates, and PMO has a department grants report link.
+- Grants-by-project and Blocked tabs - Done (Step 4.6).
+  Department/global Grants tabs show project rows and totals for distinct departments/groups, grant count,
+  amount, shared, unshared, used and returned credits. PMO's Reports link opens only its department grants
+  at `/report/pmo/:id/grants`, retaining the PMO scope. Grants are labeled current and independent of the selected period.
+  The Blocked tab shows own/group/department/global daily base/model exhaustion where member visibility permits;
+  viewers and PMO do not receive member tabs. Rows show date, employee, cap kind/model, current cap,
+  month-to-date spend and daily spend, using the selected month's snapshot range. Caps are labeled current.
+  Loading, retry/error and empty states reuse shared components.
+- Concurrency peaks UI - Done (Step 4.7); Phase 4 reports and alerts complete.
+  The Concurrency peaks tab plots daily peaks for the selected own/group/department/global scope and calendar month,
+  using live SpendLogs overlaps rather than request counts or summed employee peaks.
+  Authorized member scopes show the top 100 employees with observed peak, current personal `max_parallel`
+  (a dash when unset) and peak timestamp in UTC. Viewers see aggregate peaks only; PMO remains grants-only.
+  The period selector reloads the live report for that month (at most 31 local dates); shared loading,
+  error/retry and empty states apply. These measurements support D6 pilot decisions without changing policy.
+- Usage charts at every level - Done (Step 4.5).
+  The Usage report tab shows snapshot spend stacked by model for own-wallet, group, department and global scopes,
+  with day/week/month buckets, cumulative spend and a cap line. Heads, representatives and admins can switch
+  authorized group/department/global reports to member stacks; viewers see model aggregates only.
+  Group and department overviews include daily model charts; My Wallet keeps its daily chart.
+  The selected period controls the date range; the report labels the API's cap as current and shows snapshot freshness.
+  Loading, empty, error and retry states reuse the shared chart. PMO remains limited to grants.
+  All Phase 4 report tabs are available (Steps 4.4–4.7).
 
 ### 4.3 Onboarding and member lifecycle (section 9) - Phase 1b: Done
 
@@ -114,6 +176,8 @@ Separate process (`python -m app.scheduler`) with an injectable clock; one repli
 restart catches up on everything overdue. Grants job (every 60 s): activation, share and grant expiry, then one recompute of the
 member's temporary budget (earliest remaining expiry) per affected person. Metrics: `wm_scheduler_job_runs_total`,
 `wm_scheduler_job_last_success_timestamp`. Notifications and reconciliation jobs run alongside grants.
+The report-alert job runs at startup and every 86400 seconds (configurable with `SCHEDULER_REPORT_ALERTS_INTERVAL_S`),
+under its own advisory lock; reruns share the notification dedupe keys with the worker's over-allocation checks.
 
 ### 4.6 Reconciliation (FR-RC) - Phase 2: Done (Step 2.5)
 
@@ -141,6 +205,8 @@ Optional email copy (`NOTIFY_EMAIL_ENABLED`, off by default, needs an internal r
 header shows the unread count and opens a drawer with the list (mark read, link to the scope: a grant opens the group's Grants
 tab; employee 80%/100% alerts open My wallet; a pending placement opens the department's Pending tab, or the Platform page when the department is unknown; unread alerts older than the newest 100 stay reachable); "My wallet" has a preferences card with a checkbox per kind, critical kinds shown checked and disabled.
 The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
+Step 4.3 adds Hebrew labels and preferences for critical `overallocation` (cannot mute, 422) and non-critical
+`concurrency_at_limit` notifications, reusing the bell and preference controls.
 
 ### 4.8 UI screens - Phase 1/1b: Done; Phase 2: Planned
 

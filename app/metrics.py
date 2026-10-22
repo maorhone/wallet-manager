@@ -20,6 +20,12 @@ SNAPSHOT_AGE = Gauge(
 OVERALLOCATION = Gauge(
     "wm_overallocation_findings", "Findings of the last over-allocation check", registry=REGISTRY
 )
+CONCURRENCY_PEAK = Gauge(
+    "wm_concurrency_peak", "Yesterday's peak concurrent requests", ["scope"], registry=REGISTRY
+)
+BLOCKED_EMPLOYEES = Gauge(
+    "wm_blocked_employees", "Distinct employees at a base or model cap yesterday", registry=REGISTRY
+)
 LIFECYCLE_ACTIONS = Counter(
     "wm_lifecycle_actions", "Member lifecycle actions by kind", ["action"], registry=REGISTRY
 )

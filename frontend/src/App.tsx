@@ -1,5 +1,5 @@
 import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { apiPost } from './api/client';
 import { useMe } from './api/queries';
 import { ErrorState } from './components/ErrorState';
@@ -9,15 +9,17 @@ import { PeriodSelector } from './components/PeriodSelector';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { StatusBanner } from './components/StatusBanner';
 import { he } from './i18n/he';
-import { initialScope, scopePath } from './scopes';
+import { initialScope, reportPath, scopeFromPath, scopePath } from './scopes';
 
 /** Authenticated layout: banner, top bar (switcher, period, user), page outlet. */
 export function Shell() {
   const { data: me, error, isPending, refetch } = useMe();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   if (isPending) return <Loader m="xl" aria-label={he.loading} />;
   if (error || !me) return <ErrorState error={error} onRetry={refetch} />;
   if (pathname === '/') return <Navigate to={scopePath(initialScope(me))} replace />;
+  const scope = scopeFromPath(pathname, me.scopes);
+  const reports = scope ? reportPath(scope) : null;
   const logout = async () => {
     await apiPost('/auth/logout', undefined);
     location.assign('/login');
@@ -31,6 +33,11 @@ export function Shell() {
             <Title order={4}>{he.appName}</Title>
             <ScopeSwitcher />
             <PeriodSelector />
+            {reports && (
+              <Button component={Link} to={{ pathname: reports, search }} variant="subtle">
+                {he.reports.title}
+              </Button>
+            )}
           </Group>
           <Group>
             <NotificationsBell />

@@ -79,7 +79,7 @@ async def test_ro_db_down_keeps_last_snapshot(spend, ro_engine):
     before = await _snap(spend)
 
     class Down:
-        async def spend_rows(self, start, end):
+        async def spend_rows(self, start, end, *, timezone="UTC"):
             raise ConnectionError("litellm db unreachable")
 
     await take_snapshot(spend, Down(), NOW)

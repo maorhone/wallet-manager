@@ -26,7 +26,7 @@ from app.scheduler import jobs
 
 log = logging.getLogger("app.scheduler")
 
-GRANTS_LOCK, NOTIFY_LOCK, RECONCILE_LOCK = 1, 2, 3
+GRANTS_LOCK, NOTIFY_LOCK, RECONCILE_LOCK, REPORT_ALERTS_LOCK = 1, 2, 3, 4
 
 
 @dataclass(frozen=True)
@@ -101,6 +101,15 @@ def build_jobs(settings: Settings, session_factory, client, reader, directory, c
             "notifications", NOTIFY_LOCK, timedelta(seconds=settings.scheduler_notify_interval_s),
             lambda: jobs.run_notifications(
                 session_factory, client, clock, settings=settings, directory=directory
+            ),
+            True, timeout,
+        ),
+        Job(
+            "report_alerts", REPORT_ALERTS_LOCK,
+            timedelta(seconds=settings.scheduler_report_alerts_interval_s),
+            lambda: jobs.run_report_alerts(
+                session_factory, client, clock, reader=reader, settings=settings,
+                directory=directory,
             ),
             True, timeout,
         ),

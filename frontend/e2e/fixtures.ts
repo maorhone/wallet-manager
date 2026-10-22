@@ -65,5 +65,18 @@ export async function fake(path: string, body?: unknown) {
 export const fakeFail = (endpoint: string, times: number, status = 500) =>
   fake('/_test/fail', { endpoint, status, times });
 
+export type FakeSpendRow = {
+  team_id: string;
+  user_id?: string;
+  model: string;
+  amount: number;
+  at?: string;
+  start?: string;
+  end?: string;
+  api_key?: string;
+};
+
+export const fakeSpend = (rows: FakeSpendRow[]) => fake('/_test/spend/bulk', rows);
+
 export const test = base;
 export { expect };
