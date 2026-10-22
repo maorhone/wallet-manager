@@ -3,9 +3,10 @@
 ## Status
 Phase 5 on `phase-5`: Step 5.2 (hierarchy management API and inherited permissions) done; Next = Step 5.3.
 Step 5.2 focused hierarchy API checks: 23 passed (6.75s).
-Latest `./scripts/test.sh`: green; pytest 647 passed / 7 skipped / 1 xfailed (215.51s),
-Vitest 57 passed, Playwright 42 passed / 1 skipped (2.5m). Ruff format/check, frontend lint/typecheck
-and repository hygiene pass. E2E ports 4130–4132 were supplied via env; defaults are unchanged.
+Latest `./scripts/test.sh` (Step 5.2 failure triage): green; pytest 647 passed / 7 skipped /
+1 xfailed (214.95s), Vitest 57 passed, Playwright 42 passed / 1 skipped (2.3m).
+Ruff format/check, frontend lint/typecheck and repository hygiene pass. Default test-script
+E2E ports 4120–4122 were used; no configuration changes. See Notes for the intermittent timeout.
 Prior-phase history follows.
 
 Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done. Step 3.5 (group Service keys tab) done. Steps 3.7 (Platform shell and Departments UI), 3.8 (Operations tab) and 3.9 (Policies and Audit search) done on phase-3b and merged into main (22/10). Phase 4 (reports, Steps 4.1–4.7: allocation, usage, concurrency peaks, blocked and grants reports, alerts, Reports UI) done on phase-4 and merged into main (22/10). Next = Step 3.6 (Department Production tab, resume from wip/main-3.6).
@@ -372,6 +373,25 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - None. The known date-dependent share-expiry backend test stays marked `xfail(strict=False)` (owner-approved, one mark).
 
 ## Notes
+
+- Step 5.2 failure triage (2026-10-22): the supplied full run timed out in
+  `frontend/e2e/pending.spec.ts:38`, `U12 rep places a pending user of the department`,
+  at line 43 waiting for `pending-table` after navigation to the department's pending tab.
+  Playwright reported a 30 s test timeout but a 2.2 min duration; the saved error context
+  contained no page snapshot or API error, so the underlying stall is not established.
+  The isolated browser test passed unchanged in 4.6 s (10.8 s including stack startup).
+  All placement and hierarchy API tests passed together (38 tests, 13.39 s), including
+  representative placement, department-scoped pending lists and inherited permissions.
+  The representative has no head/organization-allocator binding, so the new inheritance
+  queries and department-lock branch do not run for this caller. Pending UI, list and
+  placement handlers are unchanged by Step 5.2. Evidence points to an intermittent
+  timeout unrelated to this step; no reproducible product root cause was found.
+  One full `./scripts/test.sh` verification exited 0: pytest 647 passed / 7 skipped /
+  1 xfailed (214.95 s), Vitest 57 passed, Playwright 42 passed / 1 existing skip (2.3 min).
+  The reported U12 test passed in sequence in 4.3 s. Ruff format/check, frontend lint/typecheck
+  and repository hygiene passed. Stopped after this single full verification; no looping.
+  Only this progress record changed; PRD behavior, tests, timeouts, ports and configuration
+  remain unchanged. Step 5.3 is next; no new blockers. No commit or push.
 
 - Step 5.2: no conflict with the cited v2 owner decisions or v1 §12.2 permissions pattern.
   Kept the legacy `/departments/{id}/groups` platform route admin-only and added scoped hierarchy
