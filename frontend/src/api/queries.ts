@@ -26,6 +26,9 @@ import type {
   PendingPlacement,
   PmoPool,
   Policies,
+  ServiceKeyIn,
+  ServiceKeysList,
+  ServiceKeyWriteResponse,
   Status,
   UsagePoint,
   WriteResponse,
@@ -403,3 +406,46 @@ export const useMyUsage = (from: string, to: string) =>
     queryFn: () => apiFetch<UsagePoint[]>(`/me/usage?from=${from}&to=${to}`),
     enabled: from !== '',
   });
+
+const hasPendingServiceKeys = (d: ServiceKeysList) =>
+  d.items.some((k) => k.sync_status === 'pending');
+
+export const useServiceKeys = (ownerKind: 'group' | 'system', ownerId: number) =>
+  useQuery({
+    queryKey: ['service-keys', ownerKind, ownerId],
+    queryFn: () =>
+      apiFetch<ServiceKeysList>(`/service-keys?owner_kind=${ownerKind}&owner_id=${ownerId}`),
+    refetchInterval: pollWhilePending(hasPendingServiceKeys),
+  });
+
+/** Create, rotate or revoke a service key; create/rotate responses carry the one-time secret. */
+export const useServiceKeyWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      v:
+        | { action: 'create'; body: ServiceKeyIn; reason: string; key: string }
+        | {
+            action: 'rotate' | 'revoke';
+            id: number;
+            ownerKind: 'group' | 'system';
+            ownerId: number;
+            reason: string;
+            key: string;
+          },
+    ) => {
+      const write = { reason: v.reason, idempotencyKey: v.key };
+      return v.action === 'create'
+        ? apiPost<ServiceKeyWriteResponse>('/service-keys', v.body, write)
+        : apiPost<ServiceKeyWriteResponse>(`/service-keys/${v.id}/${v.action}`, {}, write);
+    },
+    onSuccess: (_res, v) => {
+      const [ownerKind, ownerId] =
+        v.action === 'create' ? [v.body.owner_kind, v.body.owner_id] : [v.ownerKind, v.ownerId];
+      qc.invalidateQueries({ queryKey: ['service-keys', ownerKind, ownerId] });
+      qc.invalidateQueries({ queryKey: ['group'] });
+      qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};

@@ -1,11 +1,23 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done; next = Step 3.5.
-Latest `./scripts/test.sh` (Step 3.3 review fixes): green; pytest 540 passed (6 skipped real-target cases), vitest 43, Playwright 34; ruff, frontend lint/typecheck and formatting pass. Pytest ~3m18s, full run ~3.3 minutes. No scripts, E2E ports or env handling changed.
+Phase 1 and Phase 1b done (owner decision 20/10/2026: no automatic AD sync; onboarding portal API + manual member actions). Phase 2 backend through Step 2.5 done; Step 2.6 (PMO UI) and Step 2.7 (PMO grant actions, Projects tab) done. Step 2.8 (group Grants tab) and Step 2.9 (department Group heads tab) done. Step 2.10 (notifications bell and preferences) done: Phase 2 complete. Phase 3 Step 3.1 (ldap3 directory, offline contract test, OIDC role fallback) and Step 3.2 (platform policies, Redis status, department/group creation, role bindings) done. Step 3.3 (production organizations and systems) done. Step 3.4 review fixes done. Step 3.5 (group Service keys tab) done; next = Step 3.6.
+Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-target cases, unchanged), vitest 45, Playwright 36; ruff, frontend lint/typecheck and formatting pass. No scripts, E2E ports or env handling changed.
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 3.5: group "מפתחות שירות" (Service keys) tab. `pages/group/ServiceKeys.tsx` (route `/group/:id/service-keys`,
+  shown in `GroupPage` `TABS` when `actions.service_keys.view`), `components/ServiceKeyList.tsx` (reused by Step 3.6),
+  `components/ServiceKeyDialog.tsx` (create form through `ChangeSummaryDialog`), `components/SecretOnceModal.tsx`
+  (secret only in the page's own `useState`, never the query cache; closing clears it and it cannot be reopened),
+  `useServiceKeys`/`useServiceKeyWrite` (create/rotate/revoke; rotate's response also carries a one-time `secret`,
+  per the service's rotate behavior), `GroupSummary.actions.service_keys`, `he.serviceKeys`, `LITELLM_UNAVAILABLE`.
+  Rotate/revoke use a small local reason-confirm modal (same shape as `Grants.tsx`'s `CloseShare`), not
+  `ServiceKeyDialog` (create-only, per PLAN's Files list). No vite proxy change (`/service-keys` was already
+  there from Step 3.4). Tests: `SecretOnceModal.test.tsx` (2), `e2e/service-keys.spec.ts` (2: head creates/rotates/
+  revokes with the secret shown once each time; department viewer sees the tab and the key read-only, POST 403).
+  `./scripts/test.sh`: pytest 540 passed/6 skipped (unchanged), vitest 45, Playwright 36. One full run hit the
+  pre-existing intermittent `group.spec.ts` U3 outage-banner timeout (see Notes); passed alone and on rerun.
 - Step 3.4 review fixes: confirmed all three major findings; added failing endpoint and token-hash
   snapshot regressions before implementing scoped create/list/rotate/revoke, one-time no-store secrets,
   locked Decimal allocation checks (pending keys reserve budget), policy limits, transactional audit/outbox,
@@ -202,12 +214,18 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 3.5: UI Group Service keys tab (Step 3.4 backend complete).
+- Step 3.6: UI Department Production tab (Step 3.5 group Service keys tab complete).
 
 ## Blockers
 - None.
 
 ## Notes
+- Step 3.5 flake (2026-10-22, unrelated to this step: no file it touches changed): a full `./scripts/test.sh` run
+  hit `group.spec.ts` U3 ("save during LiteLLM outage shows pending + banner, then applied after recovery"),
+  the status banner still visible 20 s after recovery under sandbox load. This exact timing flake is already
+  recorded twice before (Step 2.6/2.9 notes below: "`/status` caches LiteLLM reachability for 10 s" leaves
+  little margin against the test's 20 s wait). Passed alone (21.9 s) and on the next full run. `e2e/service-keys.spec.ts`
+  (this step's new tests) passed in every run.
 - Step 3.4 cleanup-timeout triage (2026-10-22): the supplied run timed out in
   `tests/test_truncate_retry.py::test_leaked_session_is_dropped_so_the_clean_up_does_not_hang`
   after 60 s, with the event loop waiting in `selectors.EpollSelector.select` /

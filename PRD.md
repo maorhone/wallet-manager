@@ -147,9 +147,10 @@ The dev seed can add a sample grant (`SEED_GRANTS=1`; the live preview does).
 RTL Hebrew React app: my wallet, group (overview, members with actions, history), department (overview, split, pending),
 scope switcher, change-summary dialog, PMO page (pool and grants with the create wizard; Done in Step 2.6; a PMO scope opens
 `/pmo/<dept>/pool`; grant actions and Projects tab Done in Step 2.7). Group Grants tab with share dialogs Done in Step 2.8.
-Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10.
+Group heads tab Done in Step 2.9. Notifications bell and preferences Done in Step 2.10. Group Service keys tab Done in Step 3.5
+(see 4.9).
 
-### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.4)
+### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.5)
 
 A platform admin sets a department's production budget (DR4: a separate LiteLLM Organization from
 the department's own, so employee spending can never block production) and creates systems (Teams)
@@ -171,7 +172,13 @@ caps against the group base times its allocation factor, or against the system b
 apply, with the existing admin maximum override. Upstream failure returns 503 and failed creation
 reserves no budget; failed rotation preserves the old active key. Rotation/revocation delete the fixed
 old hash through the outbox. Per-key period, daily and model spend includes earlier rotated hashes.
-UI tabs remain Steps 3.5–3.6.
+
+Step 3.5 adds the group head's "מפתחות שירות" (Service keys) tab: a list of the group's keys (alias, budget,
+used, concurrency, rpm, allowed models, status), create through the usual change-summary-and-reason flow, and
+rotate/revoke with a reason. Creating or rotating shows the new secret exactly once, with a copy button and a
+warning that it cannot be shown again; the UI never stores it beyond that one dialog. A department viewer or
+representative sees the same list read-only; writes they attempt are rejected by the server as usual. The
+department's Production tab (system keys) is Step 3.6.
 
 ### 4.10 Directory (section 5.1, 9.1) - Phase 3: In progress (Step 3.1)
 

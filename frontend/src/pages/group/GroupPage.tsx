@@ -8,10 +8,11 @@ import Grants from './Grants';
 import History from './History';
 import Members from './Members';
 import Overview from './Overview';
+import ServiceKeys from './ServiceKeys';
 
-const TABS = ['overview', 'members', 'grants', 'history'];
+const TABS = ['overview', 'members', 'grants', 'service-keys', 'history'];
 
-/** "הקבוצה" (§12.5.2): Overview, Members, Grants and History; Models and Service keys come later. */
+/** "הקבוצה" (§12.5.2): Overview, Members, Grants, Service keys and History; Models come later. */
 export default function GroupPage() {
   const { id = '', tab = 'overview' } = useParams();
   const [search] = useSearchParams();
@@ -24,7 +25,11 @@ export default function GroupPage() {
     return <ErrorState error={summary.error} onRetry={summary.refetch} />;
   const s = summary.data;
   // D11: PMO and viewers do not see the Members tab (same roles as `edit_members`).
-  const tabs = s.actions.edit_members ? TABS : TABS.filter((k) => k !== 'members');
+  const tabs = TABS.filter(
+    (k) =>
+      (k !== 'members' || s.actions.edit_members) &&
+      (k !== 'service-keys' || s.actions.service_keys.view),
+  );
   if (!tabs.includes(tab)) return <Navigate to={`/group/${id}/overview`} replace />;
   return (
     <Stack>
@@ -46,6 +51,7 @@ export default function GroupPage() {
       {tab === 'overview' && <Overview summary={s} />}
       {tab === 'members' && <Members groupId={id} period={period} summary={s} />}
       {tab === 'grants' && <Grants groupId={id} period={period} summary={s} />}
+      {tab === 'service-keys' && <ServiceKeys groupId={id} summary={s} />}
       {tab === 'history' && <History groupId={id} />}
     </Stack>
   );

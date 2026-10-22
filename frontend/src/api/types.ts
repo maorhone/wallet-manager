@@ -155,7 +155,12 @@ export interface GroupSummary extends PeriodEnvelope {
   top_consumers: MemberSlim[];
   near_limit_members: MemberSlim[];
   pending_sync_count: number;
-  actions: { edit_members: boolean; edit_pots_limits: boolean; edit_defaults: boolean };
+  actions: {
+    edit_members: boolean;
+    edit_pots_limits: boolean;
+    edit_defaults: boolean;
+    service_keys: { view: boolean; manage: boolean };
+  };
 }
 
 /** One group head's personal values (DR9) with the actor's rights on them. */
@@ -351,3 +356,41 @@ export interface NotificationsList {
 }
 
 export type Policies = Record<string, { min?: number; default?: number; max?: number }>;
+
+export type ServiceKeyStatus = 'pending' | 'active' | 'revoked' | 'failed';
+
+export interface ServiceKey {
+  id: number;
+  owner_kind: 'group' | 'system';
+  owner_id: number;
+  alias: string;
+  max_budget: number;
+  max_parallel: number;
+  rpm_limit: number;
+  models: string[];
+  status: ServiceKeyStatus;
+  used: number;
+  sync_status: SyncStatus;
+  created_at: string;
+  actions: { rotate: boolean; revoke: boolean };
+}
+
+export interface ServiceKeysList {
+  items: ServiceKey[];
+  spend_taken_at: string | null;
+}
+
+export interface ServiceKeyIn {
+  owner_kind: 'group' | 'system';
+  owner_id: number;
+  alias: string;
+  max_budget: number;
+  max_parallel: number;
+  rpm_limit: number;
+  models: string[];
+}
+
+/** Create and rotate responses carry the one-time secret; it is never cached. */
+export interface ServiceKeyWriteResponse extends WriteResponse {
+  secret?: string;
+}
