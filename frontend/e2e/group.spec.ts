@@ -84,21 +84,21 @@ test('U2 direct API self-target returns 422 SELF_ALLOCATION_FORBIDDEN', async ({
   expect((await res.json()).code).toBe('SELF_ALLOCATION_FORBIDDEN');
 });
 
-// QUARANTINED 22/10 (merge of phase-3b + phase-4): intermittent status-banner timeout under load, pre-existing
-// (see PROGRESS.md Notes and OPEN-ITEMS). Passed in 2 of 3 full runs on the merged main. Fix the root cause, then restore test().
-test.fixme('U3 save during LiteLLM outage shows pending + banner, then applied after recovery', async ({
+// /status caches reachability for 10 s and the banner polls every 5 s, so the banner can take ~15 s plus load.
+test('U3 save during LiteLLM outage shows pending + banner, then applied after recovery', async ({
   page,
 }) => {
+  test.slow();
   await openMembers(page);
   await fake('/_test/outage', { on: true });
   await input(page, DANI).fill('16000');
   await saveWithReason(page, 'בזמן תקלה');
   const badge = page.locator(`[data-row="${DANI}"] [data-testid="sync-badge"]`);
   await expect(badge).toHaveAttribute('data-status', 'pending');
-  await expect(page.getByTestId('status-banner')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('status-banner')).toBeVisible({ timeout: 45_000 });
   await fake('/_test/outage', { on: false });
   await expect(badge).toHaveAttribute('data-status', 'applied', { timeout: 60_000 });
-  await expect(page.getByTestId('status-banner')).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByTestId('status-banner')).toHaveCount(0, { timeout: 45_000 });
 });
 
 test('history shows the change with reason', async ({ page }) => {

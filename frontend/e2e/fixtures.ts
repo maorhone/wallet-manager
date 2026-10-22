@@ -52,11 +52,14 @@ export function resetData() {
 
 /** Control call on the fake LiteLLM, e.g. fake('/_test/outage', { on: true }). */
 export async function fake(path: string, body?: unknown) {
-  const res = await fetch(state().fake + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const send = () =>
+    fetch(state().fake + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  // Node reuses idle keep-alive sockets that the fake may already have closed ("fetch failed"): retry once.
+  const res = await send().catch(send);
   if (!res.ok) throw new Error(`fake ${path}: ${res.status}`);
   return res.json();
 }

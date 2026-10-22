@@ -56,10 +56,10 @@ test('Group head creates a service key, sees the secret once, rotates and revoke
   await expect(page.getByTestId(`service-key-revoke-${id}`)).toHaveCount(0);
 });
 
-// flaky under load 2026-10-22 (passes alone); see PROGRESS.md Notes
-test.fixme('Viewer sees the service keys tab without actions and POST /service-keys returns 403', async ({
+test('Viewer sees the service keys tab without actions and POST /service-keys returns 403', async ({
   page,
 }) => {
+  test.slow();
   const head = await apiAs(DANA);
   const gid = (await (await head.get('/me')).json()).scopes.find(
     (s: { kind: string }) => s.kind === 'group',
