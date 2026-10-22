@@ -5,7 +5,6 @@ import hashlib
 import uuid
 
 import httpx
-import pytest
 from sqlalchemy import select, text
 
 from app.models import AuditLog, LitellmWrite, ServiceKey
@@ -156,7 +155,6 @@ async def test_revoke_deletes_key_twice_invalid(
     assert (await chat(fake_app, first.json()["secret"])).status_code == 401
 
 
-@pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-22; see OPEN-ITEMS")
 async def test_rep_viewer_list_no_actions_and_write_403(login_wm, provisioned):
     _, first = await create(login_wm)
     key_id = first.json()["entities"][0]["id"]

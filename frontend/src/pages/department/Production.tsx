@@ -156,7 +156,7 @@ export default function Production({ summary: s }: { summary: DepartmentSummary 
           <ServiceKeysPanel ownerKind="system" ownerId={keysOf.id} manage={actions.edit} />
         )}
       </Drawer>
-      {dialog === 'org' && (
+      {actions.edit && dialog === 'org' && (
         <Card withBorder data-testid="production-budget-dialog">
           <Stack>
             <NumberInput
@@ -197,7 +197,7 @@ export default function Production({ summary: s }: { summary: DepartmentSummary 
           />
         </Card>
       )}
-      {dialog === 'system' && (
+      {actions.edit && dialog === 'system' && (
         <Card withBorder data-testid="production-system-dialog">
           <Stack>
             <TextInput
