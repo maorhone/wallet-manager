@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, fake, loginAs, resetData, test } from './fixtures';
+import { apiAs, expect, fake, loginAs, resetData, test } from './fixtures';
 
 test.beforeEach(() => resetData());
 test.afterEach(async () => {
@@ -102,6 +102,13 @@ test('Admin creates the production organization and a system with a key; the rep
 }) => {
   await loginAs(page, 'admin@corp.example');
   const id = await departmentId(page);
+  const admin = await apiAs('admin@corp.example');
+  const freed = await admin.put(`/departments/${id}/budget`, {
+    budget: 1100000,
+    budget_period: '1mo',
+  });
+  expect(freed.ok()).toBeTruthy();
+  await admin.dispose();
   await page.goto(`/department/${id}/production`);
   await expect(page.getByTestId('production-empty')).toBeVisible();
 
@@ -147,7 +154,7 @@ test('Admin creates the production organization and a system with a key; the rep
 
   await loginAs(page, 'rep@corp.example');
   await page.goto(`/department/${id}/production`);
-  await expect(page.getByTestId('wallet-card')).toContainText('100,000');
+  await expect(page.getByTestId('wallet-card')).toContainText('40,000');
   await expect(page.locator('[data-system-name="Sys A"]')).toContainText('40,000');
   await expect(page.getByTestId('production-set-budget')).toHaveCount(0);
   await expect(page.getByTestId('production-create-system')).toHaveCount(0);

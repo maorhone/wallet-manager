@@ -75,7 +75,7 @@ counts top-level groups. Saving the split, moving a subtree or inserting a paren
 A department's production systems are Internal Systems: their budgets are deducted from the department's
 unallocated amount (department wallet `allocated` includes them) and the split save counts them. A system may
 name a managing section (`managing_group_id`); that section's head, or an admin, edits its budget
-(`PATCH /production/systems/{id}`) within the production budget. Legacy production endpoints are unchanged.
+(`PATCH /production/systems/{id}`) within the department envelope, without releasing consumed or committed key credit. The legacy production organization budget is derived from active internal systems; its budget input remains accepted for compatibility. Department usage includes internal-system usage once and excludes organization-funded systems.
 
 ### 4.1.3b Internal Usage initiatives - Phase 5 Step 5.6: Done
 
@@ -84,14 +84,15 @@ A section head (or an admin) creates an initiative in a section (`POST /groups/{
 (counts like member caps; `PARENT_OVERALLOCATED` otherwise). Service keys can belong to an initiative
 (`owner_kind=initiative`); their `max_budget` must fit in the initiative budget. `tech_status` is
 `not_connected` (no key), `pending` or `connected` (an active key). The owner can only read (`GET`).
+For safety, every credential generation retains its full reservation after revocation, rotation, failure or a move. Rotation needs enough uncommitted initiative budget for the replacement; unused retired credit is not reclaimed without a trustworthy final-spend contract.
 
 ### 4.1.3c Requests center (credits, new initiative) - Phase 5 Step 5.7: Done
 
 An active employee asks their section head for more Credits or a new initiative (`POST /requests`, short
-need text, optional amount). One record and one status per request (`submitted`, `applied`, `rejected`).
+need text, optional amount). One record and one status per request (`submitted`, `pending_apply`, `applied`, `failed`, `rejected`).
 `GET /requests?box=mine|to_handle&type=&status=` lists them; the section head (or admin) decides with
 `POST /requests/{id}/decide`. Approving credits raises the employee's base cap by the approved amount within
-the section's allocatable; approving an initiative creates it (5.6). The requester gets an in-app notification.
+the section's allocatable; protected managers' personal credits are routed to their authorized superior, and self-approval is forbidden. Approved credits stay pending until the linked LiteLLM write succeeds; permanent failures are visible. Approving an initiative creates it (5.6). The requester gets an in-app notification.
 Throughput requests come in Step 5.8.
 
 ### 4.1.4 Org Systems - Phase 5 Step 5.4: Done

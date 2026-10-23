@@ -21,6 +21,7 @@ from app.models import (
     GroupModelPot,
     Grp,
     Policy,
+    ProductionSystem,
 )
 from app.outbox.desired import contributing_grants
 from app.permissions import (
@@ -116,11 +117,20 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
         db, "group", {str(g.id): {"base_budget": g.base_budget} for g in groups}, at
     )
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
+    internal_ids = await db.scalars(
+        select(ProductionSystem.id).where(
+            ProductionSystem.department_id == dept.id,
+            ProductionSystem.funding == "department",
+        )
+    )
+    used = spend.used("department", dept.id) + sum(
+        (spend.used("system", system_id) for system_id in internal_ids), ZERO
+    )
     card = wallet.department_wallet(
         values["budget"], sum((bases[g.id] for g in groups if g.parent_group_id is None), ZERO),
         # D-076: internal systems are carved from the department envelope, like the reserve
         values["pmo_pool"], values["reserve"] + await internal_allocated(db, dept.id),
-        spend.used("department", dept.id),
+        used,
     )  # fmt: skip
     card["state"] = wallet.state(
         card["total"], card["used"], card["remaining"], [], card["allocated"], **th

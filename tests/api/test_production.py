@@ -28,20 +28,20 @@ async def test_create_production_org_then_update_budget(
     await drain(provisioned, litellm, prov_settings)
     info = await litellm.organization_info("D1-prod")
     assert info.organization_alias == "Department D1 production"
-    assert info.litellm_budget_table.max_budget == 100000
+    assert info.litellm_budget_table.max_budget == 0
     assert info.litellm_budget_table.budget_duration == "1mo"
 
     r = await put(admin, f"/production/departments/{D1}", {"budget": 150000}, "raise")
     assert r.status_code == 200, r.text
     await drain(provisioned, litellm, prov_settings)
     info = await litellm.organization_info("D1-prod")
-    assert info.litellm_budget_table.max_budget == 150000
+    assert info.litellm_budget_table.max_budget == 0
 
     get = await admin.get(f"/production/departments/{D1}")
     assert get.status_code == 200, get.text
     org = get.json()["org"]
     assert (org["litellm_org_id"], org["budget"], org["sync_status"]) == (
-        "D1-prod", 150000, "applied",
+        "D1-prod", 0, "applied",
     )  # fmt: skip
 
 
@@ -52,7 +52,7 @@ async def test_budget_update_without_period_keeps_existing_period(login_wm, prov
     r = await put(admin, f"/production/departments/{D1}", {"budget": 2000}, "raise")
     assert r.status_code == 200, r.text
     org = (await admin.get(f"/production/departments/{D1}")).json()["org"]
-    assert (org["budget"], org["budget_period"]) == (2000, "7d")
+    assert (org["budget"], org["budget_period"]) == (0, "7d")
 
 
 async def test_past_period_is_read_only(login_wm, provisioned, put):
@@ -69,6 +69,8 @@ async def test_system_team_in_production_org_not_department_org_dr4(
     login_wm, provisioned, litellm, prov_settings, put
 ):
     admin = await login_wm("admin")
+    freed = await put(admin, "/departments/1/budget", {"budget": 1050000, "budget_period": "1mo"})
+    assert freed.status_code == 200, freed.text
     await put(admin, f"/production/departments/{D1}", {"budget": 100000})
     r = await post(
         admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 40000}
@@ -103,6 +105,8 @@ async def test_group_cannot_reuse_an_existing_production_system_team_id(login_wm
     """DR4: a production system's generated "sys-{id}" team id must never collide with a real
     employee team, even when the production system was created first (reviewer finding)."""
     admin = await login_wm("admin")
+    freed = await put(admin, "/departments/1/budget", {"budget": 1050000, "budget_period": "1mo"})
+    assert freed.status_code == 200, freed.text
     await put(admin, f"/production/departments/{D1}", {"budget": 100000})
     r = await post(
         admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 1000}
@@ -116,8 +120,10 @@ async def test_group_cannot_reuse_an_existing_production_system_team_id(login_wm
     assert r.json()["details"]["field"] == "litellm_team_id"
 
 
-async def test_systems_over_production_budget_422_with_numbers(login_wm, provisioned, put):
+async def test_systems_over_department_budget_422_with_numbers(login_wm, provisioned, put):
     admin = await login_wm("admin")
+    freed = await put(admin, "/departments/1/budget", {"budget": 1050000, "budget_period": "1mo"})
+    assert freed.status_code == 200, freed.text
     await put(admin, f"/production/departments/{D1}", {"budget": 50000})
     r = await post(
         admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 30000}
@@ -130,16 +136,22 @@ async def test_systems_over_production_budget_422_with_numbers(login_wm, provisi
     assert r.status_code == 422, r.text
     body = r.json()
     assert body["code"] == "PARENT_OVERALLOCATED"
-    assert (body["requested"], body["available"], body["parent_total"]) == (60000, 50000, 50000)
+    assert (body["requested"], body["available"], body["parent_total"]) == (
+        1060000,
+        1050000,
+        1050000,
+    )
 
 
-async def test_production_budget_cannot_drop_below_systems_422(login_wm, provisioned, put):
+async def test_production_budget_is_derived_from_systems(login_wm, provisioned, put):
     admin = await login_wm("admin")
+    freed = await put(admin, "/departments/1/budget", {"budget": 1050000, "budget_period": "1mo"})
+    assert freed.status_code == 200, freed.text
     await put(admin, f"/production/departments/{D1}", {"budget": 50000})
     await post(admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 30000})
     r = await put(admin, f"/production/departments/{D1}", {"budget": 10000}, "cut")
-    assert r.status_code == 422, r.text
-    assert r.json()["code"] == "PARENT_OVERALLOCATED"
+    assert r.status_code == 200, r.text
+    assert r.json()["entities"][0]["values"]["budget"] == 30000
     r = await put(admin, f"/production/departments/{D1}", {"budget": 30000}, "cut")
     assert r.status_code == 200, r.text
 

@@ -28,29 +28,42 @@ from app.writes import WriteContext, sync_status
 ZERO = Decimal(0)
 
 
+async def _check_department_envelope(db, dept: Department, internal: Decimal) -> None:
+    top = await db.scalar(
+        select(func.coalesce(func.sum(Grp.base_budget), 0)).where(
+            Grp.department_id == dept.id,
+            Grp.parent_group_id.is_(None),
+            Grp.status != "archived",
+        )
+    )
+    if err := check_sum(top + dept.pmo_pool + dept.reserve + internal, dept.budget):
+        raise err
+
+
+async def _sync_production_budget(ctx, dept, total):
+    # Compatibility storage and the proxy organization follow the funded child teams.
+    dept.prod_budget = total
+    await ctx.enqueue("production_org", dept.id, "/organization/update")
+
+
 async def set_production_org(
     ctx: WriteContext, principal: Principal, department_id: int, body: ProductionOrgIn
 ) -> list[dict]:
-    """FR-K1: the first call creates the production org; later calls update its budget."""
+    """Legacy setup and period updates; the budget is derived from funded systems."""
     role = can_manage_platform(principal)
+    await ctx.lock(LockKind.DEPARTMENT, department_id)
     await ctx.lock(LockKind.PRODUCTION, department_id)
     dept = await ctx.db.get(Department, department_id)
     if dept is None:
         raise ApiError(404, "NOT_FOUND", "Department not found")
     await ctx.db.refresh(dept)
-    allocated = await ctx.db.scalar(
-        select(func.coalesce(func.sum(ProductionSystem.budget), 0)).where(
-            ProductionSystem.department_id == department_id, ProductionSystem.status == "active"
-        )
-    )
-    if err := check_sum(allocated, body.budget):
-        raise err
+    allocated = await internal_allocated(ctx.db, department_id)
     before = {"budget": dept.prod_budget, "budget_period": dept.prod_budget_period}
     first = dept.prod_litellm_org_id is None
     if first:
         dept.prod_litellm_org_id = f"{dept.litellm_org_id}-prod"
     # An omitted period keeps the current one ("1mo" on first set).
-    dept.prod_budget = body.budget
+    dept.prod_budget = allocated
     dept.prod_budget_period = body.budget_period or dept.prod_budget_period or "1mo"
     after = {
         "litellm_org_id": dept.prod_litellm_org_id, "budget": dept.prod_budget,
@@ -67,6 +80,7 @@ async def create_production_system(
 ) -> list[dict]:
     """FR-K2: a Team under the production org (DR4: never the department's own org)."""
     role = can_manage_platform(principal)
+    await ctx.lock(LockKind.DEPARTMENT, department_id)
     await ctx.lock(LockKind.PRODUCTION, department_id)
     dept = await ctx.db.get(Department, department_id)
     if dept is None:
@@ -76,14 +90,9 @@ async def create_production_system(
         raise invalid_request(
             "Department has no production organization", {"reason": "no_production_org"}
         )
-    existing = await ctx.db.scalar(
-        select(func.coalesce(func.sum(ProductionSystem.budget), 0)).where(
-            ProductionSystem.department_id == department_id, ProductionSystem.status == "active"
-        )
-    )
+    existing = await internal_allocated(ctx.db, department_id)
     total = existing + body.budget
-    if err := check_sum(total, dept.prod_budget or ZERO):
-        raise err
+    await _check_department_envelope(ctx.db, dept, total)
     if body.managing_group_id is not None:
         managing = await ctx.db.get(Grp, body.managing_group_id)
         if managing is None or managing.department_id != department_id:
@@ -103,18 +112,24 @@ async def create_production_system(
         "budget": system.budget,
     }
     ctx.audit("production_system", system.id, {}, after, role, department_id=department_id)
+    await _sync_production_budget(ctx, dept, total)
     await ctx.enqueue("production_system", system.id, "/team/new")
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
 
 async def update_system_budget(
-    ctx: WriteContext, principal: Principal, system_id: int, body: ProductionSystemPatch
+    ctx: WriteContext,
+    principal: Principal,
+    system_id: int,
+    body: ProductionSystemPatch,
+    clock: Clock | None = None,
 ) -> list[dict]:
     """Admin, or the head of the system's managing section (delegation), edits the budget."""
     system = await ctx.db.get(ProductionSystem, system_id)
     if system is None or system.funding != "department":
         raise ApiError(404, "NOT_FOUND", "System not found")
     department_id = system.department_id
+    await ctx.lock(LockKind.DEPARTMENT, department_id)
     await ctx.lock(LockKind.PRODUCTION, department_id)
     await ctx.db.refresh(system)
     if principal.is_admin:
@@ -128,11 +143,28 @@ async def update_system_budget(
     dept = await ctx.db.get(Department, department_id)
     await ctx.db.refresh(dept)
     others = await internal_allocated(ctx.db, department_id, exclude_id=system.id)
-    if err := check_sum(others + body.budget, dept.prod_budget or ZERO):
+    await _check_department_envelope(ctx.db, dept, others + body.budget)
+    pc = period_ctx(ctx.settings, None, clock.now() if clock else None)
+    spend = await Spend.load(ctx.db, pc["period"])
+    keys = await ctx.db.scalars(
+        select(ServiceKey).where(
+            ServiceKey.owner_kind == "system",
+            ServiceKey.owner_id == system.id,
+            ServiceKey.status.in_(("active", "pending")),
+        )
+    )
+    # Reserve each key's remaining allocation in addition to all system consumption,
+    # including revoked keys. Active-key consumption is already in system usage.
+    committed = spend.used("system", system.id) + sum(
+        (max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO) for key in keys),
+        ZERO,
+    )
+    if err := check_sum(committed, body.budget):
         raise err
     before, system.budget = {"budget": system.budget}, body.budget
     after = {"budget": system.budget}
     ctx.audit("production_system", system.id, before, after, role, department_id=department_id)
+    await _sync_production_budget(ctx, dept, others + body.budget)
     await ctx.enqueue("production_system", system.id, "/team/update")
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
@@ -156,6 +188,7 @@ async def get_production(
             .where(
                 ProductionSystem.department_id == department_id,
                 ProductionSystem.status == "active",
+                ProductionSystem.funding == "department",
             )
             .order_by(ProductionSystem.id)
         )
@@ -196,9 +229,9 @@ async def get_production(
             str(department_id)
         ]
         org = {
-            "litellm_org_id": dept.prod_litellm_org_id, "budget": dept.prod_budget,
+            "litellm_org_id": dept.prod_litellm_org_id, "budget": allocated,
             "budget_period": dept.prod_budget_period, "used": used,
-            "over_allocated": allocated > (dept.prod_budget or ZERO), "sync_status": org_sync,
+            "over_allocated": False, "sync_status": org_sync,
         }  # fmt: skip
     roles = principal.department_roles(department_id)
     return {

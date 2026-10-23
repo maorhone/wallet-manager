@@ -101,3 +101,100 @@ async def test_owner_read_only(login_wm, provisioned):
         "models": [],
     }
     assert (await send(owner, "POST", "/service-keys", key)).status_code == 403
+
+
+async def _initiative_key(head, *, budget=10, limit=10):
+    created = await send(head, "POST", f"/groups/{G1}/initiatives", initiative(budget=budget))
+    assert created.status_code == 200, created.text
+    iid = int(created.json()["entities"][0]["id"])
+    body = {
+        "owner_kind": "initiative",
+        "owner_id": iid,
+        "alias": "bot",
+        "max_budget": limit,
+        "max_parallel": 2,
+        "rpm_limit": 100,
+        "models": ["test-model"],
+    }
+    first = await send(head, "POST", "/service-keys", body)
+    assert first.status_code == 200, first.text
+    return body, first.json()
+
+
+async def test_spent_revoked_initiative_key_cannot_replenish_grant(
+    login_wm, provisioned, fake_app, litellm, prov_settings
+):
+    from app.outbox.worker import drain
+    from tests.api.test_service_keys import chat
+
+    head = await login_wm("dana")
+    body, first = await _initiative_key(head)
+    assert (await chat(fake_app, first["secret"])).status_code == 200
+    kid = first["entities"][0]["id"]
+    assert (await send(head, "POST", f"/service-keys/{kid}/revoke", {})).status_code == 200
+    await drain(provisioned, litellm, prov_settings)
+    rejected = await send(head, "POST", "/service-keys", body)
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "PARENT_OVERALLOCATED"
+
+
+async def test_spent_initiative_rotation_cannot_replenish_grant(login_wm, provisioned, fake_app):
+    from tests.api.test_service_keys import chat
+
+    head = await login_wm("dana")
+    _, first = await _initiative_key(head)
+    assert (await chat(fake_app, first["secret"])).status_code == 200
+    kid = first["entities"][0]["id"]
+    rejected = await send(head, "POST", f"/service-keys/{kid}/rotate", {})
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "PARENT_OVERALLOCATED"
+    # A rejected rotation leaves the existing credential usable.
+    assert (await chat(fake_app, first["secret"])).status_code == 200
+
+
+async def test_rotation_reserves_both_generations_within_initiative_grant(
+    login_wm, provisioned, fake_app, litellm, prov_settings
+):
+    from decimal import Decimal
+
+    from app.models import ServiceKey
+    from app.outbox.worker import drain
+    from tests.api.test_service_keys import chat
+
+    head = await login_wm("dana")
+    body, first = await _initiative_key(head, budget=20)
+    assert (await chat(fake_app, first["secret"])).status_code == 200
+    kid = first["entities"][0]["id"]
+    rotated = await send(head, "POST", f"/service-keys/{kid}/rotate", {})
+    assert rotated.status_code == 200, rotated.text
+    assert (await chat(fake_app, rotated.json()["secret"])).status_code == 200
+    await drain(provisioned, litellm, prov_settings)
+    async with provisioned() as db:
+        row = await db.get(ServiceKey, int(kid))
+        assert row.retired_budget == Decimal("10")
+    again = await send(head, "POST", f"/service-keys/{kid}/rotate", {})
+    assert again.status_code == 422, again.text
+    assert (await send(head, "POST", f"/service-keys/{kid}/revoke", {})).status_code == 200
+    await drain(provisioned, litellm, prov_settings)
+    assert (await send(head, "POST", "/service-keys", body)).status_code == 422
+
+
+async def test_failed_rotation_keeps_ambiguous_generation_reserved(login_wm, provisioned, fake_app):
+    from decimal import Decimal
+
+    from app.models import ServiceKey
+
+    head = await login_wm("dana")
+    body, first = await _initiative_key(head, budget=20)
+    kid = first["entities"][0]["id"]
+    fake_app.state.fake.outage = True
+    failed = await send(head, "POST", f"/service-keys/{kid}/rotate", {})
+    assert failed.status_code == 503, failed.text
+    fake_app.state.fake.outage = False
+    async with provisioned() as db:
+        key = await db.get(ServiceKey, int(kid))
+        assert key.status == "active"
+        assert key.retired_budget == Decimal("10")
+    # A timeout may hide upstream success; a fresh attempt must not replenish credit.
+    blocked = await send(head, "POST", "/service-keys", body)
+    assert blocked.status_code == 422, blocked.text

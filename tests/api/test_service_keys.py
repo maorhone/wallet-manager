@@ -177,6 +177,8 @@ async def test_system_key_admin_only_and_within_system_budget(
     login_wm, provisioned, put, litellm, prov_settings
 ):
     admin = await login_wm("admin")
+    freed = await put(admin, "/departments/1/budget", {"budget": 1000100, "budget_period": "1mo"})
+    assert freed.status_code == 200, freed.text
     await put(admin, "/production/departments/1", {"budget": 100})
     system = await post(
         admin, "/production/departments/1/systems", {"name": "system", "budget": 20}

@@ -16,6 +16,8 @@ async def post(client, path, body, reason="production", **headers):
 
 async def test_concurrent_systems_one_parent_overallocated(login_wm, provisioned, put, monkeypatch):
     admin = await login_wm("admin")
+    r = await put(admin, "/departments/1/budget", {"budget": 1050000, "budget_period": "1mo"})
+    assert r.status_code == 200, r.text
     await put(admin, f"/production/departments/{D1}", {"budget": 50000})
 
     real_sleep = asyncio.sleep
@@ -35,3 +37,31 @@ async def test_concurrent_systems_one_parent_overallocated(login_wm, provisioned
             select(func.sum(ProductionSystem.budget)).where(ProductionSystem.department_id == D1)
         )
         assert total == 30000
+
+
+async def test_system_creation_serializes_with_department_split(login_wm, provisioned, put):
+    admin = await login_wm("admin")
+    assert (
+        await put(admin, "/departments/1/budget", {"budget": 1050000, "budget_period": "1mo"})
+    ).status_code == 200
+    assert (await put(admin, "/production/departments/1", {"budget": 50000})).status_code == 200
+    created, split = await asyncio.gather(
+        post(admin, "/production/departments/1/systems", {"name": "S", "budget": 30000}),
+        put(admin, "/departments/1/split", {"groups": [], "pmo_pool": 180000, "reserve": 80000}),
+    )
+    assert sorted([created.status_code, split.status_code]) == [200, 422]
+    from app.models import Department, Grp
+
+    async with provisioned() as db:
+        dept = await db.get(Department, 1)
+        bases = await db.scalar(
+            select(func.sum(Grp.base_budget)).where(
+                Grp.department_id == 1, Grp.parent_group_id.is_(None)
+            )
+        )
+        systems = await db.scalar(
+            select(func.coalesce(func.sum(ProductionSystem.budget), 0)).where(
+                ProductionSystem.department_id == 1
+            )
+        )
+        assert bases + dept.pmo_pool + dept.reserve + systems <= dept.budget

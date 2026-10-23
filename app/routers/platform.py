@@ -1,13 +1,14 @@
 import time
 
 from fastapi import APIRouter, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app import metrics
 from app.auth.session import CurrentPrincipal, Db
 from app.errors import ApiError, invalid_request
 from app.litellm_client import HealthReadiness
 from app.models import Employee, LitellmWrite, SpendSnapshot
+from app.models import Request as DomainRequest
 from app.permissions import ADMIN
 from app.schemas.platform import OrganizationCreateIn
 from app.services import platform
@@ -105,11 +106,16 @@ async def list_outbox(principal: CurrentPrincipal, db: Db, status: str | None = 
 @router.post("/outbox/{write_id}/retry")
 async def retry_outbox(write_id: int, principal: CurrentPrincipal, ctx: Write):
     _admin_only(principal)
-    row = await ctx.db.get(LitellmWrite, write_id)
+    row = await ctx.db.get(LitellmWrite, write_id, with_for_update=True)
     if row is None:
         raise ApiError(404, "NOT_FOUND", "Not found")
     ctx.audit("outbox", write_id, {"status": row.status}, {"status": "pending"}, ADMIN)
     row.status = "pending"
+    await ctx.db.execute(
+        update(DomainRequest)
+        .where(DomainRequest.application_write_id == write_id)
+        .values(status="pending_apply")
+    )
     await ctx.db.commit()
     return {"id": write_id, "status": "pending", "request_id": ctx.request_id}
 

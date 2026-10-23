@@ -25,10 +25,10 @@ SPEC_8_2 = {
     "initiative": "id name owner_upn group_id department_id period_start period_end budget "
     "status created_at created_by",
     "request": "id type scope_kind scope_id requester_upn handler_role handler_scope status "
-    "amount payload created_at updated_at",
+    "amount application_write_id payload created_at updated_at",
     "request_event": "id request_id actor_upn action comment created_at",
     "service_key": "id owner_kind owner_id litellm_token_hash alias max_budget max_parallel "
-    "rpm_limit models status created_at created_by",
+    "rpm_limit models status created_at created_by retired_budget",
     "policy": "key value",
     "role_binding": "ad_group_dn role scope_kind scope_id",
     "litellm_write": "id entity entity_id endpoint payload status attempts last_error "

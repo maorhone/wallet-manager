@@ -27,9 +27,15 @@ async def post_production_system(
 
 @router.patch("/production/systems/{system_id}")
 async def patch_production_system(
-    system_id: int, body: ProductionSystemPatch, ctx: Write, principal: CurrentPrincipal
+    system_id: int,
+    body: ProductionSystemPatch,
+    request: Request,
+    ctx: Write,
+    principal: CurrentPrincipal,
 ):
-    entities = await production.update_system_budget(ctx, principal, system_id, body)
+    entities = await production.update_system_budget(
+        ctx, principal, system_id, body, request.app.state.clock
+    )
     return await write_response(ctx, entities)
 
 

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -15,7 +15,7 @@ from app.litellm_client import (
     TeamMemberDelete,
     UserDelete,
 )
-from app.models import Employee, LitellmWrite
+from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
 
 _METHODS = {
@@ -144,5 +144,10 @@ async def drain(
             except (LiteLLMPermanentError, DesiredUnavailable) as exc:
                 row.status, row.last_error = "failed", str(exc)
                 result.failed += 1
+            await s.execute(
+                update(Request)
+                .where(Request.application_write_id == row.id)
+                .values(status=row.status)
+            )
             await s.commit()
     return result

@@ -4,7 +4,8 @@ import uuid
 
 from sqlalchemy import select
 
-from app.models import Employee, Initiative
+from app.models import Employee, Initiative, Request
+from app.outbox.worker import drain
 
 A1 = 1  # dana heads it; dani and yael are members
 
@@ -25,7 +26,9 @@ async def submit(client, type="credits", **changes):
     return int(r.json()["entities"][0]["id"])
 
 
-async def test_employee_requests_credits_section_head_approves_cap_raised(login_wm, provisioned):
+async def test_employee_requests_credits_section_head_approves_cap_raised(
+    login_wm, provisioned, litellm, prov_settings
+):
     dani, dana = await login_wm("dani"), await login_wm("dana")
     rid = await submit(dani, amount=500)
     assert [i["id"] for i in (await dani.get("/requests?box=mine")).json()["items"]] == [rid]
@@ -35,6 +38,9 @@ async def test_employee_requests_credits_section_head_approves_cap_raised(login_
     assert denied.status_code == 403, denied.text
     r = await send(dana, "POST", f"/requests/{rid}/decide", {"decision": "approve", "amount": 700})
     assert r.status_code == 200, r.text
+    assert r.json()["status"] == "pending"
+    assert (await dani.get(f"/requests/{rid}")).json()["status"] == "pending_apply"
+    await drain(provisioned, litellm, prov_settings)
     got = (await dani.get(f"/requests/{rid}")).json()
     assert (got["status"], got["amount"]) == ("applied", 700)
     async with provisioned() as s:
@@ -105,3 +111,63 @@ async def test_request_requires_short_need(login_wm):
     for payload in ({}, {"need": "  "}, {"need": 42}, {"need": "x" * 1001}):
         r = await send(dani, "POST", "/requests", {"type": "credits", "payload": payload})
         assert r.status_code == 422, r.text
+
+
+async def test_head_request_routes_to_rep_and_cannot_self_approve(login_wm, provisioned):
+    dana, rep = await login_wm("dana"), await login_wm("rep")
+    rid = await submit(dana, amount=100)
+    assert (await dana.get(f"/requests/{rid}")).json()["handler_role"] == "department_rep"
+    assert [r["id"] for r in (await rep.get("/requests?box=to_handle")).json()["items"]] == [rid]
+    denied = await send(dana, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    assert denied.status_code == 403, denied.text
+    async with provisioned() as s:
+        assert (await s.get(Employee, "dana@corp.example")).base_cap == 15000
+    approved = await send(rep, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    assert approved.status_code == 200, approved.text
+
+
+async def test_head_cannot_approve_newly_promoted_cohead(login_wm, provisioned):
+    yael, dana = await login_wm("yael"), await login_wm("dana")
+    rid = await submit(yael, amount=100)
+    directory = dana._transport.app.state.directory
+    directory.users["yael@corp.example"]["groups"].append(
+        "CN=wm-head-a1,OU=Groups,DC=corp,DC=example"
+    )
+    denied = await send(dana, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    assert denied.status_code == 422 and denied.json()["code"] == "SCOPE_FORBIDDEN", denied.text
+    async with provisioned() as s:
+        assert (await s.get(Employee, "yael@corp.example")).base_cap == 15000
+
+
+async def test_credit_application_pending_during_outage_then_applied(
+    login_wm, provisioned, litellm, prov_settings, fake_app
+):
+    dani, dana = await login_wm("dani"), await login_wm("dana")
+    rid = await submit(dani, amount=100)
+    await send(dana, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    fake_app.state.fake.outage = True
+    assert (await drain(provisioned, litellm, prov_settings)).stopped
+    assert (await dani.get(f"/requests/{rid}")).json()["status"] == "pending_apply"
+    fake_app.state.fake.outage = False
+    await drain(provisioned, litellm, prov_settings)
+    assert (await dani.get(f"/requests/{rid}")).json()["status"] == "applied"
+
+
+async def test_credit_application_permanent_failure_is_visible(
+    login_wm, provisioned, litellm, prov_settings, fake_app
+):
+    dani, dana = await login_wm("dani"), await login_wm("dana")
+    rid = await submit(dani, amount=100)
+    await send(dana, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    fake_app.state.fake.failures["/team/member_update"] = [400, 1]
+    assert (await drain(provisioned, litellm, prov_settings)).failed == 1
+    assert (await dani.get(f"/requests/{rid}")).json()["status"] == "failed"
+    assert [i["id"] for i in (await dani.get("/requests?status=failed")).json()["items"]] == [rid]
+    async with provisioned() as s:
+        write_id = (await s.get(Request, rid)).application_write_id
+    admin = await login_wm("admin")
+    retried = await send(admin, "POST", f"/outbox/{write_id}/retry")
+    assert retried.status_code == 200, retried.text
+    assert (await dani.get(f"/requests/{rid}")).json()["status"] == "pending_apply"
+    await drain(provisioned, litellm, prov_settings)
+    assert (await dani.get(f"/requests/{rid}")).json()["status"] == "applied"

@@ -27,6 +27,7 @@ def upgrade() -> None:
         sa.Column("handler_scope", sa.BigInteger()),
         sa.Column("status", sa.Text(), server_default="submitted", nullable=False),
         sa.Column("amount", sa.Numeric(18, 2)),
+        sa.Column("application_write_id", sa.BigInteger(), sa.ForeignKey("litellm_write.id")),
         sa.Column("payload", JSONB(), server_default="{}", nullable=False),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False

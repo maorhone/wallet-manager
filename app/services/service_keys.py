@@ -1,6 +1,7 @@
 """Service keys: synchronous secret delivery, transactional audit and fixed deletion targets."""
 
 import json
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
@@ -23,7 +24,7 @@ from app.services.validation import check_limit, check_sum, group_allocated, key
 from app.writes import sync_status, write_response
 
 GEN = "/key/service-account/generate"
-FIELDS = ("alias", "max_budget", "max_parallel", "rpm_limit", "models", "status")
+FIELDS = ("alias", "max_budget", "max_parallel", "rpm_limit", "models", "status", "retired_budget")
 
 
 def values(key):
@@ -123,6 +124,33 @@ async def generate(ctx, client, owner, key, role, before, *, rotating=False):
     return response
 
 
+async def initiative_committed(db, initiative_id):
+    """Retired credentials reserve their full cap, including pending deletion/in-flight use.
+
+    LiteLLM has no atomic block, drain and final-spend read contract. A snapshot cannot
+    prove unused credit is safe to release, so each credential generation retains its
+    commitment permanently. Failed upstream generation also retains its reservation:
+    a timeout can hide successful upstream creation.
+    """
+    keys = await db.scalars(
+        select(ServiceKey).where(
+            ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
+        )
+    )
+    return sum(
+        (
+            k.retired_budget
+            + (
+                k.max_budget
+                if k.status in ("active", "pending", "revoked", "failed")
+                else Decimal(0)
+            )
+            for k in keys
+        ),
+        Decimal(0),
+    )
+
+
 async def create(ctx, principal, client, body):
     role = await can_manage_service_keys(ctx.db, principal, body.owner_kind, body.owner_id)
     owner = await owner_lock(ctx, body.owner_kind, body.owner_id)
@@ -131,7 +159,7 @@ async def create(ctx, principal, client, body):
         await ctx.db.refresh(initiative)
         if initiative.status != "active":
             raise invalid_request("Initiative is closed", {"status": initiative.status})
-        allocated = await key_allocated(ctx.db, "initiative", initiative.id)
+        allocated = await initiative_committed(ctx.db, initiative.id)
         err = check_sum(allocated + body.max_budget, initiative.budget)
         entity = "group"
     elif body.owner_kind == "group":
@@ -171,6 +199,15 @@ async def change(ctx, principal, client, key_id, action):
         raise invalid_request("Service key is not active", {"status": key.status})
     before = values(key)
     if action == "rotate":
+        if key.owner_kind == "initiative":
+            initiative = await ctx.db.get(Initiative, key.owner_id)
+            allocated = await initiative_committed(ctx.db, initiative.id)
+            err = check_sum(allocated + key.max_budget, initiative.budget)
+            if err:
+                raise err
+            # Both credentials can spend until deletion has applied. Never refund the
+            # old cap based on a stale spend snapshot, even after revocation/deletion.
+            key.retired_budget += key.max_budget
         return await generate(ctx, client, owner, key, role, before, rotating=True)
     key.status = "revoked"
     ctx.audit(

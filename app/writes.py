@@ -16,6 +16,7 @@ from app.config import Settings
 from app.db import LockKind, employee_lock_id, lock_parent
 from app.errors import invalid_request
 from app.models import AuditLog, LitellmWrite
+from app.models import Request as DomainRequest
 from app.outbox.enqueue import enqueue
 
 _NS = uuid.UUID("6f1c1b0e-6a54-4f5e-9d0c-3c9d2f6a7b10")
@@ -112,6 +113,14 @@ async def sync_status(db: AsyncSession, entity: str, ids: list[str]) -> dict[str
     for (eid, _), status in latest.items():
         if _RANK[status] > _RANK[out[eid]]:
             out[eid] = status
+    if entity == "request":
+        applications = await db.execute(
+            select(DomainRequest.id, LitellmWrite.status)
+            .join(LitellmWrite, DomainRequest.application_write_id == LitellmWrite.id)
+            .where(DomainRequest.id.in_([int(i) for i in ids]))
+        )
+        for request_id, status in applications:
+            out[str(request_id)] = status
     return out
 
 

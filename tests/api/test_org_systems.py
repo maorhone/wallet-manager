@@ -3,9 +3,10 @@
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
-from app.models import AuditLog, LitellmWrite, Organization, ServiceKey
+from app.models import AuditLog, Department, Grp, Initiative, LitellmWrite, Organization, ServiceKey
 from app.outbox.worker import drain
 from fake_litellm import db as fake_db
 
@@ -187,3 +188,152 @@ async def test_org_allocator_lists_manage_actions(login_wm, provisioned):
     allocator = await login_wm(upn.split("@")[0])
     listed = await allocator.get(f"/service-keys?owner_kind=system&owner_id={sys_id}")
     assert listed.status_code == 200, listed.text
+
+
+@pytest.mark.parametrize("cross_org", [False, True])
+@pytest.mark.parametrize("colliding_id", [False, True])
+async def test_move_initiative_key_uses_its_group_organization(
+    login_wm, provisioned, litellm, prov_settings, cross_org, colliding_id
+):
+    await envelope(provisioned)
+    admin = await login_wm("admin")
+    created = await post(admin, "/organizations/1/systems", system())
+    target = int(created.json()["entities"][0]["id"])
+    await drain(provisioned, litellm, prov_settings)
+    async with provisioned() as s:
+        group_id = 1
+        if cross_org:
+            org = Organization(name="Other organization")
+            s.add(org)
+            await s.flush()
+            dept = Department(
+                name="Other department", organization_id=org.id, litellm_org_id="other-department"
+            )
+            s.add(dept)
+            await s.flush()
+            group = Grp(
+                name="Other section", department_id=dept.id, litellm_team_id="other-section"
+            )
+            s.add(group)
+            await s.flush()
+            group_id = group.id
+        group = await s.get(Grp, group_id)
+        initiative = Initiative(
+            id=target if colliding_id else target + 10000,
+            name="Pilot",
+            owner_upn="dani@corp.example",
+            group_id=group.id,
+            department_id=group.department_id,
+            budget=Decimal(100),
+        )
+        s.add(initiative)
+        await s.flush()
+        key = ServiceKey(
+            owner_kind="initiative",
+            owner_id=initiative.id,
+            max_budget=Decimal(10),
+            status="active",
+            litellm_token_hash="dummy-initiative-move",
+        )
+        s.add(key)
+        await s.flush()
+        key_id, initiative_id = key.id, initiative.id
+        await s.commit()
+
+    r = await post(admin, f"/service-keys/{key_id}/move", {"target_system_id": target})
+    assert r.status_code == (422 if cross_org else 200), r.text
+    async with provisioned() as s:
+        key = await s.get(ServiceKey, key_id)
+        assert (key.owner_kind, key.owner_id) == (
+            ("initiative", initiative_id) if cross_org else ("system", target)
+        )
+        audits = list(
+            await s.scalars(
+                select(AuditLog).where(
+                    AuditLog.entity == "service_key", AuditLog.entity_id == str(key_id)
+                )
+            )
+        )
+        updates = list(
+            await s.scalars(
+                select(LitellmWrite).where(
+                    LitellmWrite.entity == "service_key", LitellmWrite.entity_id == str(key_id)
+                )
+            )
+        )
+        assert len(audits) == len(updates) == (0 if cross_org else 1)
+
+
+async def test_move_preserves_initiative_commitment_for_all_generations(
+    login_wm, provisioned, litellm, prov_settings
+):
+    from app.services.service_keys import initiative_committed
+
+    await envelope(provisioned)
+    admin = await login_wm("admin")
+    created = await post(admin, "/organizations/1/systems", system())
+    target = int(created.json()["entities"][0]["id"])
+    await drain(provisioned, litellm, prov_settings)
+    async with provisioned() as s:
+        group = await s.get(Grp, 1)
+        initiative = Initiative(
+            name="Rotated Pilot",
+            owner_upn="dani@corp.example",
+            group_id=group.id,
+            department_id=group.department_id,
+            budget=Decimal(30),
+        )
+        s.add(initiative)
+        await s.flush()
+        key = ServiceKey(
+            owner_kind="initiative",
+            owner_id=initiative.id,
+            max_budget=Decimal(10),
+            retired_budget=Decimal(20),
+            status="active",
+            litellm_token_hash="dummy-moved-key",
+        )
+        s.add(key)
+        await s.flush()
+        kid, iid = key.id, initiative.id
+        assert await initiative_committed(s, iid) == Decimal(30)
+        await s.commit()
+
+    moved = await post(admin, f"/service-keys/{kid}/move", {"target_system_id": target})
+    assert moved.status_code == 200, moved.text
+    async with provisioned() as s:
+        assert await initiative_committed(s, iid) == Decimal(30)
+        key = await s.get(ServiceKey, kid)
+        assert (key.owner_kind, key.owner_id, key.retired_budget) == ("system", target, 0)
+        tombstone = (
+            await s.scalars(
+                select(ServiceKey).where(
+                    ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == iid
+                )
+            )
+        ).one()
+        assert tombstone.status == "revoked"
+        assert tombstone.litellm_token_hash is None
+        assert (tombstone.max_budget, tombstone.retired_budget) == (Decimal(10), Decimal(20))
+        audits = list(
+            await s.scalars(
+                select(AuditLog).where(AuditLog.request_id == moved.json()["request_id"])
+            )
+        )
+        assert len(audits) == 1
+
+    replacement = await post(
+        admin,
+        "/service-keys",
+        {
+            "owner_kind": "initiative",
+            "owner_id": iid,
+            "alias": "replacement",
+            "max_budget": 1,
+            "max_parallel": 1,
+            "rpm_limit": 10,
+            "models": [],
+        },
+    )
+    assert replacement.status_code == 422, replacement.text
+    assert replacement.json()["code"] == "PARENT_OVERALLOCATED"

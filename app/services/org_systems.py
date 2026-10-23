@@ -9,6 +9,7 @@ from app.errors import ApiError, invalid_request
 from app.models import (
     Department,
     Grp,
+    Initiative,
     LitellmWrite,
     Organization,
     ProductionSystem,
@@ -97,14 +98,33 @@ async def move_key(
         raise invalid_request("Service key is not active", {"status": key.status})
     if (key.owner_kind, key.owner_id) == ("system", target.id) or target.status != "active":
         raise invalid_request("Key cannot move to this system", {"field": "target_system_id"})
-    if key.owner_kind == "group":
-        group = await ctx.db.get(Grp, key.owner_id)
-        source_org = (await ctx.db.get(Department, group.department_id)).organization_id
-    else:
+    if key.owner_kind in {"group", "initiative"}:
+        # Initiatives and systems have independent IDs. Resolve the initiative's
+        # actual section under the source owner lock; an equal system ID grants
+        # no authority over its key.
+        group_id = key.owner_id
+        if key.owner_kind == "initiative":
+            initiative = await ctx.db.get(Initiative, key.owner_id)
+            if initiative is None:
+                raise ApiError(404, "NOT_FOUND", "Owner not found")
+            group_id = initiative.group_id
+        group = await ctx.db.get(Grp, group_id)
+        department = await ctx.db.get(Department, group.department_id) if group else None
+        if department is None:
+            raise ApiError(404, "NOT_FOUND", "Owner not found")
+        source_org = department.organization_id
+    elif key.owner_kind == "system":
         source = await ctx.db.get(ProductionSystem, key.owner_id)
+        if source is None:
+            raise ApiError(404, "NOT_FOUND", "Owner not found")
         source_org = source.organization_id
         if source.funding == "department":
-            source_org = (await ctx.db.get(Department, source.department_id)).organization_id
+            department = await ctx.db.get(Department, source.department_id)
+            if department is None:
+                raise ApiError(404, "NOT_FOUND", "Owner not found")
+            source_org = department.organization_id
+    else:
+        raise invalid_request("Unknown key owner", {"field": "owner_kind"})
     if source_org != target.organization_id:
         raise invalid_request("Key belongs to another organization", {"field": "target_system_id"})
     await require_team_applied(ctx.db, "production_system", target.id)
@@ -112,8 +132,28 @@ async def move_key(
     if err := check_sum(allocated + (key.max_budget or Decimal(0)), target.budget):
         raise err
     before = {**values(key), "owner_kind": key.owner_kind, "owner_id": key.owner_id}
+    source_commitment = None
+    if key.owner_kind == "initiative":
+        # Moving the credential cannot release its source grant: its current and
+        # retired generations may already have spent (or still be in flight).
+        # Keep their reservation under the same section lock, in this transaction.
+        tombstone = ServiceKey(
+            owner_kind="initiative", owner_id=key.owner_id,
+            max_budget=key.max_budget, retired_budget=key.retired_budget,
+            status="revoked", created_by=principal.upn,
+        )  # fmt: skip
+        ctx.db.add(tombstone)
+        await ctx.db.flush()
+        source_commitment = {
+            "id": tombstone.id,
+            "initiative_id": tombstone.owner_id,
+            "max_budget": tombstone.max_budget,
+            "retired_budget": tombstone.retired_budget,
+        }
+        key.retired_budget = Decimal(0)
     key.owner_kind, key.owner_id = "system", target.id
     after = {**{f: getattr(key, f) for f in FIELDS}, "owner_kind": "system", "owner_id": target.id}
-    ctx.audit("service_key", key.id, before, after, role, department_id=None)
+    audit_after = {**after, "source_commitment": source_commitment} if source_commitment else after
+    ctx.audit("service_key", key.id, before, audit_after, role, department_id=None)
     await ctx.enqueue("service_key", key.id, "/key/update")
     return [{"entity": "service_key", "id": key.id, "values": after}]

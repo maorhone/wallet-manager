@@ -9,9 +9,10 @@ from app.db import LockKind
 from app.directory import Directory
 from app.errors import ApiError, invalid_request
 from app.models import Employee, Grp, Request, RequestEvent
-from app.permissions import ADMIN, HEAD, Principal, group_roles_of
+from app.permissions import ADMIN, HEAD, REP, Principal, group_roles_of, target_tier
 from app.schemas.initiatives import InitiativeIn
 from app.services import initiatives, notifications
+from app.services.personal_values import OWNER_ROLE, authorize
 from app.services.validation import check_sum, group_allocated
 from app.writes import WriteContext
 
@@ -28,10 +29,20 @@ def _not_found() -> ApiError:
 
 
 async def _handler_role(db, principal: Principal, req: Request) -> str | None:
+    if req.type == "credits" and req.requester_upn == principal.upn:
+        return None
     if principal.is_admin:
         return ADMIN
     if req.handler_role == HEAD and HEAD in await group_roles_of(db, principal, req.scope_id):
         return HEAD
+    if req.handler_role == REP:
+        group = await db.get(Grp, req.scope_id)
+        if (
+            group is not None
+            and group.department_id == req.handler_scope
+            and REP in principal.department_roles(group.department_id)
+        ):
+            return REP
     return None
 
 
@@ -59,21 +70,36 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
         raise invalid_request("A short need description is required", {"field": "payload.need"})
     if body.type == "initiative" and not str(body.payload.get("name", "")).strip():
         raise invalid_request("An initiative request needs a name", {"field": "payload.name"})
+    group = await ctx.db.get(Grp, employee.group_id)
+    handler_role = (
+        OWNER_ROLE[await target_tier(ctx.db, directory, employee.upn)]
+        if body.type == "credits"
+        else HEAD
+    )
+    handler_scope = (
+        group.id if handler_role == HEAD else (group.department_id if handler_role == REP else None)
+    )
     req = Request(
         type=body.type, scope_kind="group", scope_id=employee.group_id,
-        requester_upn=principal.upn, handler_role=HEAD, handler_scope=employee.group_id,
+        requester_upn=principal.upn, handler_role=handler_role, handler_scope=handler_scope,
         amount=body.amount, payload=body.payload,
     )  # fmt: skip
     ctx.db.add(req)
     await ctx.db.flush()
     ctx.db.add(RequestEvent(request_id=req.id, actor_upn=principal.upn, action="submitted"))
-    group = await ctx.db.get(Grp, employee.group_id)
     ctx.audit(
         "request", req.id, {}, {"type": req.type, "amount": req.amount}, "employee",
         group_id=group.id, department_id=group.department_id,
     )  # fmt: skip
+    recipients = (
+        await notifications.heads_of(ctx.db, directory, group.id)
+        if handler_role == HEAD
+        else await notifications.reps_or_admins(
+            ctx.db, directory, group.department_id if handler_role == REP else None
+        )
+    )
     await notifications.notify(
-        ctx.db, await notifications.heads_of(ctx.db, directory, group.id), "request_submitted",
+        ctx.db, recipients - {principal.upn}, "request_submitted",
         "request", req.id, {"request_id": req.id, "type": req.type, "requester": principal.upn},
         f"request:{req.id}:submitted", settings=ctx.settings,
     )  # fmt: skip
@@ -145,10 +171,12 @@ async def decide(
         if amount is None or amount <= 0:
             raise invalid_request("An approved amount is required", {"field": "amount"})
         if req.type == "credits":
-            await _apply_credits(ctx, req, group, role, Decimal(amount))
+            await _apply_credits(ctx, principal, directory, req, group, Decimal(amount))
+            req.status = "pending_apply"
         else:
             await _apply_initiative(ctx, principal, req, group, Decimal(amount))
-        req.amount, req.status = amount, "applied"
+            req.status = "applied"
+        req.amount = amount
     else:
         req.status = "rejected"
     ctx.db.add(
@@ -161,7 +189,7 @@ async def decide(
         "request", req.id, before, {"status": req.status, "amount": req.amount}, role,
         group_id=group.id, department_id=group.department_id,
     )  # fmt: skip
-    kind = "request_approved" if req.status == "applied" else "request_rejected"
+    kind = "request_approved" if body.decision == "approve" else "request_rejected"
     await notifications.notify(
         ctx.db, {req.requester_upn}, kind, "request", req.id,
         {"request_id": req.id, "type": req.type, "amount": req.amount},
@@ -170,11 +198,14 @@ async def decide(
     return [{"entity": "request", "id": req.id, "values": {"status": req.status}}]
 
 
-async def _apply_credits(ctx, req: Request, group: Grp, role: str, amount: Decimal) -> None:
+async def _apply_credits(
+    ctx, principal, directory, req: Request, group: Grp, amount: Decimal
+) -> None:
     """Raise the requester's base cap by ``amount``, within the section's allocatable."""
     employee = await ctx.db.get(Employee, req.requester_upn)
     if employee is None or employee.status != "active" or employee.group_id != group.id:
         raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
+    role = authorize(principal, employee, group, await target_tier(ctx.db, directory, employee.upn))
     allocated = await group_allocated(ctx.db, group)
     if err := check_sum(allocated + amount, group.base_budget, group.overalloc_factor):
         raise err
@@ -184,7 +215,7 @@ async def _apply_credits(ctx, req: Request, group: Grp, role: str, amount: Decim
         "employee", employee.upn, before, {"base_cap": employee.base_cap}, role,
         group_id=group.id, department_id=group.department_id,
     )  # fmt: skip
-    await ctx.enqueue("employee", employee.upn, "/team/member_update")
+    req.application_write_id = await ctx.enqueue("employee", employee.upn, "/team/member_update")
 
 
 async def _apply_initiative(ctx, principal, req: Request, group: Grp, amount: Decimal) -> None:
