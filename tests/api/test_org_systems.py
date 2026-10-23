@@ -143,3 +143,47 @@ async def test_owner_view_only_403_on_writes(login_wm, provisioned):
         },
     )  # fmt: skip
     assert key.status_code == 403
+
+
+async def test_every_team_waits_for_the_systems_org_row(login_wm, provisioned):
+    await envelope(provisioned)
+    admin = await login_wm("admin")
+    for name in ("A", "B"):
+        assert (
+            await post(admin, "/organizations/1/systems", system(name, 1000))
+        ).status_code == 200
+    async with provisioned() as s:
+        org_row = await s.scalar(
+            select(LitellmWrite.id).where(LitellmWrite.entity == "systems_org")
+        )
+        teams = (
+            await s.scalars(select(LitellmWrite).where(LitellmWrite.entity == "production_system"))
+        ).all()
+        assert [t.depends_on for t in teams] == [org_row, org_row]
+
+
+async def test_org_allocator_lists_manage_actions(login_wm, provisioned):
+    from app.directory import FixtureDirectory
+    from app.models import Grp
+
+    await envelope(provisioned)
+    admin = await login_wm("admin")
+    sys_id = (await post(admin, "/organizations/1/systems", system())).json()["entities"][0]["id"]
+    async with provisioned() as s:
+        dn = (await s.scalar(select(Grp).where(Grp.litellm_team_id == "B1"))).ad_group_dn
+    bind = {
+        "scope_kind": "organization",
+        "scope_id": 1,
+        "role": "org_allocator",
+        "ad_group_dns": [dn],
+    }
+    r = await admin.put(
+        "/role-bindings",
+        json=bind,
+        headers={"X-CSRF-Token": admin.cookies["wm_csrf"], "X-Change-Reason": "bind"},
+    )
+    assert r.status_code == 200, r.text
+    upn = FixtureDirectory("seed/dev.yaml").members_of(dn)[0]
+    allocator = await login_wm(upn.split("@")[0])
+    listed = await allocator.get(f"/service-keys?owner_kind=system&owner_id={sys_id}")
+    assert listed.status_code == 200, listed.text

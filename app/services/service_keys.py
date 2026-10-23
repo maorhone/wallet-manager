@@ -141,8 +141,11 @@ async def change(ctx, principal, client, key_id, action):
     if key is None:
         raise ApiError(404, "NOT_FOUND", "Service key not found")
     role = await can_manage_service_keys(ctx.db, principal, key.owner_kind, key.owner_id)
-    owner = await owner_lock(ctx, key.owner_kind, key.owner_id)
+    seen = (key.owner_kind, key.owner_id)
+    owner = await owner_lock(ctx, *seen)
     await ctx.db.refresh(key)
+    if (key.owner_kind, key.owner_id) != seen:  # moved to an Org System meanwhile (5.4)
+        raise invalid_request("Service key changed owner; retry", {"reason": "owner_changed"})
     if key.status != "active":
         raise invalid_request("Service key is not active", {"status": key.status})
     before = values(key)
@@ -167,9 +170,11 @@ async def change(ctx, principal, client, key_id, action):
 
 
 async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
-    await can_view_service_keys(db, principal, owner_kind, owner_id)
-    manage = principal.is_admin or (
-        owner_kind == "group" and principal.has("group_head", "group", owner_id)
+    viewed = await can_view_service_keys(db, principal, owner_kind, owner_id)
+    manage = (
+        principal.is_admin
+        or (owner_kind == "group" and principal.has("group_head", "group", owner_id))
+        or (owner_kind == "system" and viewed == "org_allocator")
     )
     keys = list(
         await db.scalars(

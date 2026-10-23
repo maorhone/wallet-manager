@@ -6,10 +6,17 @@ from sqlalchemy import func, select
 
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
-from app.models import Department, Grp, Organization, ProductionSystem, ServiceKey
-from app.permissions import Principal, can_manage_org_systems, can_manage_service_keys
+from app.models import (
+    Department,
+    Grp,
+    LitellmWrite,
+    Organization,
+    ProductionSystem,
+    ServiceKey,
+)
+from app.permissions import Principal, can_manage_org_systems
 from app.schemas.org_systems import KeyMoveIn, OrgSystemIn
-from app.services.service_keys import FIELDS, require_team_applied, values
+from app.services.service_keys import FIELDS, owner_lock, require_team_applied, values
 from app.services.validation import check_sum, key_allocated
 from app.writes import WriteContext
 
@@ -55,9 +62,16 @@ async def create_org_system(
         "responsible_department_id": system.responsible_department_id,
     }  # fmt: skip
     ctx.audit("production_system", system.id, {}, after, role)
-    if first:
-        await ctx.enqueue("systems_org", org.id, "/organization/new", chain=True)
-    await ctx.enqueue("production_system", system.id, "/team/new", chain=True)
+    # Every team waits for the systems org's creation row, also in later requests.
+    org_row = await ctx.enqueue("systems_org", org.id, "/organization/new") if first else None
+    org_row = org_row or await ctx.db.scalar(
+        select(func.max(LitellmWrite.id)).where(
+            LitellmWrite.entity == "systems_org",
+            LitellmWrite.entity_id == str(org.id),
+            LitellmWrite.endpoint == "/organization/new",
+        )
+    )
+    await ctx.enqueue("production_system", system.id, "/team/new", depends_on=org_row)
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
 
@@ -70,9 +84,14 @@ async def move_key(
     if key is None or target is None or target.funding != "organization":
         raise ApiError(404, "NOT_FOUND", "Service key or Org System not found")
     role = can_manage_org_systems(principal, target.organization_id)
-    await can_manage_service_keys(ctx.db, principal, key.owner_kind, key.owner_id)
+    # Authority comes from the target organization (checked against the source's below); take
+    # the source owner's lock too so a concurrent rotate/revoke cannot interleave.
+    seen = (key.owner_kind, key.owner_id)
+    await owner_lock(ctx, *seen)
     await ctx.lock(LockKind.PRODUCTION, -target.organization_id)
     await ctx.db.refresh(key)
+    if (key.owner_kind, key.owner_id) != seen:
+        raise invalid_request("Service key changed owner; retry", {"reason": "owner_changed"})
     await ctx.db.refresh(target)
     if key.status != "active" or not key.litellm_token_hash:
         raise invalid_request("Service key is not active", {"status": key.status})
