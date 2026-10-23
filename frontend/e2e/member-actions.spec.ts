@@ -51,8 +51,8 @@ test('U9 head kicks and restores a member', async ({ page }) => {
   );
 });
 
-test('U9 head sees no move or delete and no actions on own row', async ({ page }) => {
-  test.fixme(true, 'flaky under load 2026-10-23; see OPEN-ITEMS');
+// flaky under load 2026-10-23; see OPEN-ITEMS
+test.fixme('U9 head sees no move or delete and no actions on own row', async ({ page }) => {
   await openMembers(page, DANA);
   await openPanel(page, DANI);
   await expect(page.getByTestId('action-kick')).toBeVisible();
