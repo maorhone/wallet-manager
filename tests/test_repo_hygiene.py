@@ -18,6 +18,8 @@ ALLOWED_HOSTS = {
     "registry.npmjs.org", "pypi.org", "files.pythonhosted.org", "playwright.dev",
     "json-schema.org", "www.w3.org", "mantine.dev", "react.dev", "vite.dev", "vitejs.dev",
     "docs.litellm.ai", "docs.pydantic.dev", "fastapi.tiangolo.com",
+    "docs.aws.amazon.com", "learn.microsoft.com", "help.openai.com", "docs.cloud.google.com",
+    "framework.finops.org",
 }  # fmt: skip
 ALLOWED_SUFFIXES = (".example", ".test", ".invalid")
 ALLOWED_DC = {"corp", "example"}
