@@ -235,6 +235,18 @@ async def test_pending_generation_is_reserved_and_never_dispatched_by_worker(
     assert calls == 1
 
 
+async def test_retry_after_503_is_audited_and_not_a_replay(login_wm, provisioned, fake_app):
+    client = await login_wm("dana")
+    fake_app.state.fake.outage = True
+    assert (await post(client, key="retry")).status_code == 503
+    fake_app.state.fake.outage = False
+    r = await post(client, key="retry")
+    assert r.status_code == 200 and r.json()["secret"], r.text
+    async with provisioned() as db:
+        audits = list(await db.scalars(select(AuditLog).where(AuditLog.entity == "service_key")))
+        assert len(audits) == 2
+
+
 async def test_failed_rotation_preserves_old_key(login_wm, provisioned, fake_app):
     client, first = await create(login_wm)
     fake_app.state.fake.outage = True
