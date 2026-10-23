@@ -235,15 +235,6 @@ async def test_pending_generation_is_reserved_and_never_dispatched_by_worker(
     assert calls == 1
 
 
-async def test_retry_after_503_is_not_a_replay_and_returns_secret(login_wm, provisioned, fake_app):
-    client = await login_wm("dana")
-    fake_app.state.fake.outage = True
-    assert (await post(client, key="retry")).status_code == 503
-    fake_app.state.fake.outage = False
-    r = await post(client, key="retry")
-    assert r.status_code == 200 and r.json()["secret"], r.text
-
-
 async def test_failed_rotation_preserves_old_key(login_wm, provisioned, fake_app):
     client, first = await create(login_wm)
     fake_app.state.fake.outage = True

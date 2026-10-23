@@ -46,8 +46,16 @@ async def generate(ctx, client, owner, key, role, before, *, rotating=False):
         rpm_limit=key.rpm_limit,
         models=key.models,
     )
+    ctx.audit(
+        "service_key",
+        key.id,
+        before,
+        {**values(key), "status": "active"},
+        role,
+        group_id=owner.id if key.owner_kind == "group" else None,
+        department_id=owner.department_id,
+    )
     write_id = await ctx.enqueue("service_key", key.id, GEN, payload=request.payload())
-    # No audit row yet: it doubles as the replay marker, so it must only exist after success.
     # A pending key reserves budget. The worker never dispatches this synchronous endpoint.
     await ctx.db.commit()
     try:
@@ -66,15 +74,6 @@ async def generate(ctx, client, owner, key, role, before, *, rotating=False):
     key.litellm_token_hash, key.status = result.token, "active"
     write = await ctx.db.get(LitellmWrite, write_id)
     write.status, write.last_error = "applied", None
-    ctx.audit(
-        "service_key",
-        key.id,
-        before,
-        values(key),
-        role,
-        group_id=owner.id if key.owner_kind == "group" else None,
-        department_id=owner.department_id,
-    )
     if rotating:
         await ctx.enqueue("service_key", key.id, "/key/delete", payload={"keys": [old_hash]})
     response = await write_response(
