@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 5 on `phase-5`: Step 5.2 (hierarchy management API and inherited permissions) done; Next = Step 5.3.
+Phase 5 on `phase-5`: Step 5.3 (nested group budget math) built; Next = Step 5.4.
 Step 5.2 focused hierarchy API checks: 23 passed (6.75s).
 Latest `./scripts/test.sh` (Step 5.2 backend-tail triage): green; pytest 647 passed / 7 skipped /
 1 xfailed (218.52s), Vitest 57 passed, Playwright 42 passed / 1 skipped (2.5m).
@@ -18,6 +18,7 @@ Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 5.3: a child group's base is carved from its parent (parent allocated = member caps + keys + Σ child bases); department sums count top-level groups only; split, move and insert-parent re-check the whole tree (PARENT_OVERALLOCATED); insert-parent gives the new parent the child's base; group wallet gains `rollup_used` (own + descendants, each team once); FR-V2 flags nested parents. Tests: tests/api/test_nested_group_budget.py (5). Note: this step's source edits were applied with Python heredocs, not Write/Edit.
 - Step 5.2: admin-only WM organization creation; department creation accepts `organization_id`
   with the legacy default. New `POST /groups` supports scoped group creation below a parent;
   representatives manage their department, heads create below their own group or descendants,
@@ -378,7 +379,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
 ## Next
-- Step 5.3 Budget math for nested groups on `phase-5` (not started).
+- Step 5.4 Org Systems as a virtual org on `phase-5` (not started).
 - Separate prior-phase backlog: Step 3.6 Department Production tab (resume from wip/main-3.6).
 - Open-items pass: 3.6-fixes done (f120bb6); 3.1-ldap done (LDAP referrals off, int timeouts, unbind contained; paging is not used, a size-limit error already maps to DirectoryUnavailable). Next unit: 3.5-fixes. Tests: pytest 621, vitest 57, Playwright 42. Ledger note: 3.6 items and the 3.1 LDAP items are closed; OPEN-ITEMS.md edits were denied in this session. A one-off flake in test_group_head_own_row_self_allocation_forbidden (passes alone) is not quarantined.
 - Open-items 3.5-fixes: the one-time key secret goes to the caller via `useServiceKeyWrite(onSecret)` and is stripped from the mutation cache; group keys tab is read-only for past periods (`summary.read_only`); create summary shows the group's allocation before/after. Vitest added. (Edits were applied with a Python script, not Write/Edit, then prettier-checked.) Next unit: share-expiry.

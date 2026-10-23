@@ -117,13 +117,23 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     )
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
     card = wallet.department_wallet(
-        values["budget"], sum(bases.values(), ZERO), values["pmo_pool"], values["reserve"],
+        values["budget"], sum((bases[g.id] for g in groups if g.parent_group_id is None), ZERO),
+        values["pmo_pool"], values["reserve"],
         spend.used("department", dept.id),
     )  # fmt: skip
     card["state"] = wallet.state(
         card["total"], card["used"], card["remaining"], [], card["allocated"], **th
     )
     return {"card": card, "groups": groups, "bases": bases, "values": values}
+
+
+async def _descendants(db, group_id: int) -> list[int]:
+    """Ids below ``group_id`` in the same department tree (each node once)."""
+    out, level = [], [group_id]
+    while level:
+        level = list(await db.scalars(select(Grp.id).where(Grp.parent_group_id.in_(level))))
+        out += level
+    return out
 
 
 class _Group:
@@ -168,11 +178,20 @@ class _Group:
         )
         active = [m.upn for m in members if m.status != "left"]
         keys_budget = await key_allocated(db, "group", group.id)
+        children = list(
+            await db.scalars(
+                select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
+            )
+        )
+        carved = sum((c.base_budget for c in children), ZERO)  # D-055: counted once, here
         card = wallet.group_wallet(
-            base, grants, sum((values[u]["base_cap"] for u in active), ZERO) + keys_budget,
+            base, grants, sum((values[u]["base_cap"] for u in active), ZERO) + keys_budget + carved,
             sum((shares.get(u, ZERO) for u in active), ZERO), spend.used("group", group.id),
         )  # fmt: skip
         card["base"], card["grants"] = base, grants
+        card["rollup_used"] = card["used"] + sum(
+            (spend.used("group", d) for d in await _descendants(db, group.id)), ZERO
+        )
         card["state"] = wallet.state(
             card["total"], card["used"], card["remaining"],
             [("department", dept_card["remaining"])], card["allocated"], **th,
@@ -400,7 +419,7 @@ async def group_summary(
             "name": group.name,
             "default_member_cap": group.default_member_cap,
         },  # fmt: skip
-        "wallet": {k: g.card[k] for k in (*CARD, "base", "grants")},
+        "wallet": {k: g.card[k] for k in (*CARD, "base", "grants", "rollup_used")},
         "pots": [
             {
                 "model": model,

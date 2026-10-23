@@ -26,6 +26,7 @@ from app.schemas.platform import (
     RoleBindingIn,
 )
 from app.services.owners import holders
+from app.services.validation import check_group_tree
 from app.writes import WriteContext
 
 # §11.1: the policy keys ``GET /policies`` returns today, plus ``overalloc_factors``
@@ -309,6 +310,16 @@ async def _locked_group(ctx: WriteContext, principal: Principal, group_id: int):
     return group, role
 
 
+async def _check_budgets(ctx: WriteContext, department_id: int) -> None:
+    await ctx.db.flush()
+    dept = await ctx.db.get(Department, department_id)
+    await ctx.db.refresh(dept)
+    groups = list(await ctx.db.scalars(select(Grp).where(Grp.department_id == department_id)))
+    bases = {g.id: g.base_budget for g in groups}
+    if err := await check_group_tree(ctx.db, dept, groups, bases, dept.pmo_pool, dept.reserve):
+        raise err
+
+
 async def move_group(
     ctx: WriteContext, principal: Principal, group_id: int, parent_group_id: int | None
 ) -> list[dict]:
@@ -318,6 +329,7 @@ async def move_group(
     _check_tree({**parents, group_id: parent_group_id})
     before = {"parent_group_id": group.parent_group_id}
     group.parent_group_id = parent_group_id
+    await _check_budgets(ctx, group.department_id)
     after = {
         "parent_group_id": parent_group_id,
         "department_id": group.department_id,
@@ -352,6 +364,9 @@ async def insert_group_parent(
     )
     new_id = entities[0]["id"]
     group.parent_group_id = new_id
+    parent = await ctx.db.get(Grp, new_id)
+    parent.base_budget = group.base_budget  # the child's carve moves under the new parent
+    entities[0]["values"]["base_budget"] = parent.base_budget
     after = {**entities[0]["values"], "child_id": group_id, "child_parent_group_id": new_id}
     ctx.audit("group", new_id, before, after, role, department_id=group.department_id)
     entities[0]["values"] = after

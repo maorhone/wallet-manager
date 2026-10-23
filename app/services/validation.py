@@ -52,7 +52,8 @@ async def key_allocated(db, owner_kind: str, owner_id: int) -> Decimal:
     )
 
 
-async def group_allocated(db, group) -> Decimal:
+async def group_own_allocated(db, group) -> Decimal:
+    """Member caps plus service-key budgets (what a group carves for itself)."""
     from sqlalchemy import func, select
 
     from app.models import Employee
@@ -64,3 +65,39 @@ async def group_allocated(db, group) -> Decimal:
         )
     )
     return members + await key_allocated(db, "group", group.id)
+
+
+async def group_allocated(db, group) -> Decimal:
+    """D-055: a child group's base is carved from its parent, so it counts here once."""
+    from sqlalchemy import func, select
+
+    from app.models import Grp
+
+    children = await db.scalar(
+        select(func.coalesce(func.sum(Grp.base_budget), 0)).where(
+            Grp.parent_group_id == group.id, Grp.status != "archived"
+        )
+    )
+    return children + await group_own_allocated(db, group)
+
+
+async def check_group_tree(
+    db, dept, groups, bases: dict, pmo: Decimal, reserve: Decimal, rows=None
+) -> ApiError | None:
+    """Top-level bases + pools fit the department; each parent covers children + own caps."""
+    live = [g for g in groups if g.status != "archived"]
+    top = sum((bases[g.id] for g in live if g.parent_group_id is None), Decimal(0))
+    if err := check_sum(top + pmo + reserve, dept.budget, rows=rows):
+        return err
+    for parent in live:
+        kids = sum((bases[g.id] for g in live if g.parent_group_id == parent.id), Decimal(0))
+        if kids and (
+            err := check_sum(
+                kids + await group_own_allocated(db, parent),
+                bases[parent.id],
+                parent.overalloc_factor,
+                rows,
+            )
+        ):
+            return err
+    return None

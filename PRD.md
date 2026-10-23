@@ -62,6 +62,14 @@ and trees deeper than four group levels (a root group is level one), including s
 multi-row changes. Organization-scoped `org_allocator` bindings can be stored and seeded using
 scope `default`.
 
+### 4.1.3 Nested group budgets - Phase 5 Step 5.3: Done
+
+A subgroup's base budget is carved from its parent group, not the department: the parent's allocated
+amount is member caps plus service keys plus the bases of its subgroups, and the department only
+counts top-level groups. Saving the split, moving a subtree or inserting a parent is rejected with
+`PARENT_OVERALLOCATED` when a parent cannot cover its children. Group summaries add `rollup_used`
+(own plus descendants' spend, each team counted once). Over-allocation factors still apply per group.
+
 ### 4.1.2 Hierarchy management API - Phase 5 Step 5.2: Done
 
 Admins create Wallet Manager roots with `POST /organizations` and attach new departments with

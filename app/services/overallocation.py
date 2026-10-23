@@ -69,7 +69,12 @@ async def _wm(db: AsyncSession, depts, groups) -> list[dict]:
     live_groups = [g for g in groups if g.status != "archived"]
     bases: dict[int, Decimal] = defaultdict(Decimal)
     for g in live_groups:
-        bases[g.department_id] += g.base_budget
+        if g.parent_group_id is None:  # child bases are carved from their parent (D-055)
+            bases[g.department_id] += g.base_budget
+    carved: dict[int, Decimal] = defaultdict(Decimal)
+    for g in live_groups:
+        if g.parent_group_id is not None:
+            carved[g.parent_group_id] += g.base_budget
     out = []
     for d in depts:
         allocated = bases[d.id] + d.pmo_pool + d.reserve
@@ -87,8 +92,9 @@ async def _wm(db: AsyncSession, depts, groups) -> list[dict]:
     )
     for g in live_groups:
         total = g.base_budget * g.overalloc_factor
-        if caps.get(g.id, ZERO) > total:
-            out.append(_finding("wm", "group", g.id, g.name, caps[g.id], total, g.department_id))
+        allocated = caps.get(g.id, ZERO) + carved[g.id]
+        if allocated > total:
+            out.append(_finding("wm", "group", g.id, g.name, allocated, total, g.department_id))
 
     allowance = {
         (a.department_id, a.model): a.amount

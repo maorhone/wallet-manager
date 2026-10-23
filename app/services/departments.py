@@ -8,7 +8,7 @@ from app.errors import ApiError, invalid_request, scope_forbidden
 from app.models import Department, DepartmentModelAllowance, Grp
 from app.permissions import Principal, can_edit_dept_budget, can_edit_split
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services.validation import check_sum
+from app.services.validation import check_group_tree
 from app.writes import WriteContext
 
 
@@ -48,16 +48,11 @@ async def set_split(
             [{"group_id": i, "code": "SCOPE_FORBIDDEN"} for i in foreign],
         )
     changed = [g for g in groups.values() if g.id in new and new[g.id] != g.base_budget]
-    total = (
-        body.pmo_pool
-        + body.reserve
-        + sum(
-            (new.get(g.id, g.base_budget) for g in groups.values() if g.status != "archived"),
-            Decimal(0),
-        )
-    )
+    bases = {g.id: new.get(g.id, g.base_budget) for g in groups.values()}
     rows = [{"group_id": g.id, "code": "PARENT_OVERALLOCATED"} for g in changed]
-    if err := check_sum(total, dept.budget, rows=rows):
+    if err := await check_group_tree(
+        ctx.db, dept, groups.values(), bases, body.pmo_pool, body.reserve, rows
+    ):
         raise err
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
