@@ -118,7 +118,8 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
     card = wallet.department_wallet(
         values["budget"], sum((bases[g.id] for g in groups if g.parent_group_id is None), ZERO),
-        values["pmo_pool"], values["reserve"] + await internal_allocated(db, dept.id),  # D-076 internal systems
+        # D-076: internal systems are carved from the department envelope, like the reserve
+        values["pmo_pool"], values["reserve"] + await internal_allocated(db, dept.id),
         spend.used("department", dept.id),
     )  # fmt: skip
     card["state"] = wallet.state(
