@@ -21,7 +21,9 @@ SPEC_8_2 = {
     "status created_by closed_at used returned",
     "grant_share": "id grant_id upn amount expires_at status used returned closed_reason",
     "production_system": "id department_id litellm_team_id name budget status created_at funding "
-    "organization_id owner_upn responsible_department_id",
+    "organization_id owner_upn responsible_department_id managing_group_id",
+    "initiative": "id name owner_upn group_id department_id period_start period_end budget "
+    "status created_at created_by",
     "service_key": "id owner_kind owner_id litellm_token_hash alias max_budget max_parallel "
     "rpm_limit models status created_at created_by",
     "policy": "key value",
@@ -49,4 +51,4 @@ async def test_tables_match_spec_8_2(engine):
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
     assert actual == {t: set(c.split()) for t, c in SPEC_8_2.items()}
-    assert len(SPEC_8_2) == 18  # v1's 16 + production_system + v2 organization
+    assert len(SPEC_8_2) == 19  # v1's 16 + production_system + v2 organization + initiative

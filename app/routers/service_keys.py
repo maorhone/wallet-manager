@@ -33,7 +33,7 @@ async def move(key_id: int, body: KeyMoveIn, ctx: Write, principal: CurrentPrinc
 
 @router.get("/service-keys")
 async def list_keys(
-    owner_kind: Literal["group", "system"],
+    owner_kind: Literal["group", "system", "initiative"],
     owner_id: int,
     request: Request,
     principal: CurrentPrincipal,

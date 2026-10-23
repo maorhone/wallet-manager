@@ -1,6 +1,6 @@
 """ORM for SPEC §8.2. Table and column names are verbatim from the spec."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -246,7 +246,9 @@ class ProductionSystem(Base):
 class ServiceKey(Base):
     __tablename__ = "service_key"
     __table_args__ = (
-        CheckConstraint(_in("owner_kind", "group", "system"), name="ck_service_key_owner_kind"),
+        CheckConstraint(
+            _in("owner_kind", "group", "system", "initiative"), name="ck_service_key_owner_kind"
+        ),
         CheckConstraint(
             _in("status", "pending", "active", "failed", "revoked"), name="ck_service_key_status"
         ),
@@ -267,6 +269,25 @@ class ServiceKey(Base):
     max_parallel: Mapped[int | None] = mapped_column(Integer)
     rpm_limit: Mapped[int | None] = mapped_column(Integer)
     models: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    status: Mapped[str] = mapped_column(Text, server_default="active")
+    created_at: Mapped[datetime] = _created()
+    created_by: Mapped[str | None] = mapped_column(Text)
+
+
+class Initiative(Base):
+    __tablename__ = "initiative"
+    __table_args__ = (
+        UniqueConstraint("department_id", "name", name="uq_initiative_department_name"),
+        CheckConstraint(_in("status", "active", "closed"), name="ck_initiative_status"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, **ID)
+    name: Mapped[str] = mapped_column(Text)
+    owner_upn: Mapped[str] = mapped_column(Text)
+    group_id: Mapped[int] = mapped_column(ForeignKey("grp.id"))
+    department_id: Mapped[int] = mapped_column(ForeignKey("department.id"))
+    period_start: Mapped[date | None]
+    period_end: Mapped[date | None]
+    budget: Mapped[Decimal] = mapped_column(ALLOC)
     status: Mapped[str] = mapped_column(Text, server_default="active")
     created_at: Mapped[datetime] = _created()
     created_by: Mapped[str | None] = mapped_column(Text)

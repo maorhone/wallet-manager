@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import LockKind, lock_parent
 from app.directory import Directory
 from app.errors import ApiError
-from app.models import Department, Grp, RoleBinding
+from app.models import Department, Grp, Initiative, RoleBinding
 
 ADMIN, REP, PMO, HEAD, VIEWER = "platform_admin", "department_rep", "pmo", "group_head", "viewer"
 ORG_ALLOCATOR = "org_allocator"
@@ -313,6 +313,13 @@ async def target_tier(session: AsyncSession, directory: Directory, upn: str) -> 
 
 
 async def can_view_service_keys(session, p: Principal, owner_kind: str, owner_id: int) -> str:
+    if owner_kind == "initiative":
+        initiative = await session.get(Initiative, owner_id)
+        if initiative is None:
+            raise _not_found("Initiative")
+        if initiative.owner_upn == p.upn:  # the owner reads, never writes (5.6)
+            return "owner"
+        return await can_view_service_keys(session, p, "group", initiative.group_id)
     if owner_kind == "group":
         roles = await _group_roles(session, p, owner_id)
         return _pick(roles, (ADMIN, REP, HEAD, VIEWER), _GROUP_VIEW)
@@ -334,6 +341,8 @@ async def can_view_service_keys(session, p: Principal, owner_kind: str, owner_id
 
 async def can_manage_service_keys(session, p: Principal, owner_kind: str, owner_id: int) -> str:
     viewed = await can_view_service_keys(session, p, owner_kind, owner_id)
+    if owner_kind == "initiative":  # managed by the section's head or an admin
+        owner_kind, owner_id = "group", (await session.get(Initiative, owner_id)).group_id
     if p.is_admin:
         return ADMIN
     if owner_kind == "system" and viewed == ORG_ALLOCATOR:

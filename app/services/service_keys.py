@@ -8,7 +8,15 @@ from sqlalchemy import select, update
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
 from app.litellm_client import LiteLLMError, ServiceAccountKeyGenerate
-from app.models import AuditLog, Grp, LitellmWrite, Policy, ProductionSystem, ServiceKey
+from app.models import (
+    AuditLog,
+    Grp,
+    Initiative,
+    LitellmWrite,
+    Policy,
+    ProductionSystem,
+    ServiceKey,
+)
 from app.permissions import can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
 from app.services.validation import check_limit, check_sum, group_allocated, key_allocated
@@ -23,6 +31,11 @@ def values(key):
 
 
 async def owner_lock(ctx, kind, owner_id):
+    if kind == "initiative":  # an initiative's keys use its section's team (5.6)
+        initiative = await ctx.db.get(Initiative, owner_id)
+        if initiative is None:
+            raise ApiError(404, "NOT_FOUND", "Owner not found")
+        return await owner_lock(ctx, "group", initiative.group_id)
     model = Grp if kind == "group" else ProductionSystem
     owner = await ctx.db.get(model, owner_id)
     if owner is None:
@@ -71,7 +84,7 @@ async def generate(ctx, client, owner, key, role, before, *, rotating=False):
         before,
         {**values(key), "status": "active"},
         role,
-        group_id=owner.id if key.owner_kind == "group" else None,
+        group_id=owner.id if key.owner_kind != "system" else None,
         department_id=owner.department_id,
     )
     write_id = await ctx.enqueue("service_key", key.id, GEN, payload=request.payload())
@@ -113,7 +126,15 @@ async def generate(ctx, client, owner, key, role, before, *, rotating=False):
 async def create(ctx, principal, client, body):
     role = await can_manage_service_keys(ctx.db, principal, body.owner_kind, body.owner_id)
     owner = await owner_lock(ctx, body.owner_kind, body.owner_id)
-    if body.owner_kind == "group":
+    if body.owner_kind == "initiative":
+        initiative = await ctx.db.get(Initiative, body.owner_id)
+        await ctx.db.refresh(initiative)
+        if initiative.status != "active":
+            raise invalid_request("Initiative is closed", {"status": initiative.status})
+        allocated = await key_allocated(ctx.db, "initiative", initiative.id)
+        err = check_sum(allocated + body.max_budget, initiative.budget)
+        entity = "group"
+    elif body.owner_kind == "group":
         allocated = await group_allocated(ctx.db, owner)
         err = check_sum(allocated + body.max_budget, owner.base_budget, owner.overalloc_factor)
         entity = "group"
@@ -158,7 +179,7 @@ async def change(ctx, principal, client, key_id, action):
         before,
         values(key),
         role,
-        group_id=owner.id if key.owner_kind == "group" else None,
+        group_id=owner.id if key.owner_kind != "system" else None,
         department_id=owner.department_id,
     )
     await ctx.enqueue(
@@ -174,6 +195,7 @@ async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
     manage = (
         principal.is_admin
         or (owner_kind == "group" and principal.has("group_head", "group", owner_id))
+        or (owner_kind == "initiative" and viewed == "group_head")
         or (owner_kind == "system" and viewed == "org_allocator")
     )
     keys = list(

@@ -20,6 +20,7 @@ from app.routers import (
     departments,
     grants,
     groups,
+    initiatives,
     me,
     members,
     notifications,
@@ -109,6 +110,7 @@ def create_app(
     app.include_router(departments.router)
     app.include_router(grants.router)
     app.include_router(groups.router)
+    app.include_router(initiatives.router)
     app.include_router(members.router)
     app.include_router(notifications.router)
     app.include_router(onboarding.router)

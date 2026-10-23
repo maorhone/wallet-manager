@@ -80,7 +80,23 @@ async def group_own_allocated(db, group) -> Decimal:
             Employee.status != "left",
         )
     )
-    return members + await key_allocated(db, "group", group.id)
+    initiatives = await initiative_allocated(db, group.id)
+    return members + initiatives + await key_allocated(db, "group", group.id)
+
+
+async def initiative_allocated(db, group_id: int, exclude_id: int | None = None) -> Decimal:
+    """5.6: an active initiative's budget is carved from its section's allocatable."""
+    from sqlalchemy import func, select
+
+    from app.models import Initiative
+
+    return await db.scalar(
+        select(func.coalesce(func.sum(Initiative.budget), 0)).where(
+            Initiative.group_id == group_id,
+            Initiative.status == "active",
+            Initiative.id != (exclude_id or 0),
+        )
+    )
 
 
 async def group_allocated(db, group) -> Decimal:

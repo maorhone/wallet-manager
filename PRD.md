@@ -77,6 +77,14 @@ unallocated amount (department wallet `allocated` includes them) and the split s
 name a managing section (`managing_group_id`); that section's head, or an admin, edits its budget
 (`PATCH /production/systems/{id}`) within the production budget. Legacy production endpoints are unchanged.
 
+### 4.1.3b Internal Usage initiatives - Phase 5 Step 5.6: Done
+
+A section head (or an admin) creates an initiative in a section (`POST /groups/{id}/initiatives`): name
+(unique per department), owner, optional period, budget. The budget is carved from the section's allocatable
+(counts like member caps; `PARENT_OVERALLOCATED` otherwise). Service keys can belong to an initiative
+(`owner_kind=initiative`); their `max_budget` must fit in the initiative budget. `tech_status` is
+`not_connected` (no key), `pending` or `connected` (an active key). The owner can only read (`GET`).
+
 ### 4.1.4 Org Systems - Phase 5 Step 5.4: Done
 
 An organization can fund systems directly from its systems envelope (`POST /organizations/{id}/systems`,

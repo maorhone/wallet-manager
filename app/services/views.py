@@ -41,7 +41,7 @@ from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
 from app.services.spend import Spend, month_bounds
-from app.services.validation import internal_allocated, key_allocated
+from app.services.validation import initiative_allocated, internal_allocated, key_allocated
 from app.writes import sync_status
 
 ZERO = Decimal(0)
@@ -178,7 +178,9 @@ class _Group:
             group.id, ZERO
         )
         active = [m.upn for m in members if m.status != "left"]
-        keys_budget = await key_allocated(db, "group", group.id)
+        keys_budget = await key_allocated(db, "group", group.id) + await initiative_allocated(
+            db, group.id
+        )
         children = list(
             await db.scalars(
                 select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
