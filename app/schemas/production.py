@@ -5,7 +5,7 @@ from app.schemas.common import Money
 
 class ProductionOrgIn(BaseModel):
     budget: Money
-    budget_period: str = Field(default="1mo", pattern=r"^\d+(s|m|h|d|mo)$")
+    budget_period: str | None = Field(default=None, pattern=r"^\d+(s|m|h|d|mo)$")
 
 
 class ProductionSystemIn(BaseModel):

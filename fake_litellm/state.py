@@ -14,6 +14,7 @@ class FakeState:
     in_flight: dict[str, int] = field(default_factory=dict)  # R7 per-token counter
     failures: dict[str, list[int]] = field(default_factory=dict)  # path -> [status, times left]
     clock_offset_s: float = 0  # test clock: added to the wall clock by ``now()``
+    timezone: str = "Asia/Jerusalem"  # budget periods follow APP_TIMEZONE
     redis: str = "none"  # none | ok | down (§5.4 Redis status, reported by /health/readiness)
 
     def now(self) -> datetime:

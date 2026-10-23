@@ -289,7 +289,7 @@ the shared history timeline with actor, reason, before/after values and LiteLLM 
 filters search everything. Both tabs are restricted to platform admins. The phase-3b acceptance
 mapping is recorded in PROGRESS.md; Steps 3.3–3.6 are verified at merge into main.
 
-### 4.9 Production and service keys (FR-K) - Phase 3: In progress (Step 3.5)
+### 4.9 Production and service keys (FR-K) - Phase 3: Done (Steps 3.3–3.6)
 
 A platform admin sets a department's production budget (DR4: a separate LiteLLM Organization from
 the department's own, so employee spending can never block production) and creates systems (Teams)
@@ -301,7 +301,10 @@ sync status (admin only edits); other roles have no access. Production is not re
 only re-derives the §8.1 fields). Production org/system LiteLLM ids are generated (`{org}-prod`,
 `sys-{id}`); DR4 reserves these patterns, so platform department/group creation rejects an id ending
 in `-prod` or starting with `sys-`, which would otherwise let a department's own org or an employee
-team collide with a production object.
+team collide with a production object. Setting the production budget without a period keeps the
+current budget period ("1mo" the first time). The Production tab follows the selected period: a past
+period shows that month's spend and is read-only (no edit actions); system key counts refresh after
+key creation or revocation.
 
 Step 3.4 service-key backend is complete: group heads and admins manage group keys; admins manage
 system keys. Scoped representatives/viewers can list group keys, and representatives can list
@@ -318,6 +321,13 @@ rotate/revoke with a reason. Creating or rotating shows the new secret exactly o
 warning that it cannot be shown again; the UI never stores it beyond that one dialog. A department viewer or
 representative sees the same list read-only; writes they attempt are rejected by the server as usual. The
 department's Production tab (system keys) is Step 3.6.
+
+Step 3.6 adds the department's "ייצור" (Production) tab, shown to the admin and the department's
+representative. It shows the production organization's wallet card (budget, used, remaining, allocated to
+systems, sync) and a table of systems (budget, used, key count, sync). The admin can set the production
+budget, add a system (both through change summary and a required reason) and open a per-system keys drawer
+(same list/create/rotate/revoke and one-time secret as the group tab). The representative sees everything
+read-only; until the organization is set, an empty state is shown.
 
 ### 4.10 Directory (section 5.1, 9.1) - Phase 3: In progress (Step 3.1)
 

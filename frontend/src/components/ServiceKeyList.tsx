@@ -19,8 +19,10 @@ export function ServiceKeyList({
   items,
   onRotate,
   onRevoke,
+  manage,
 }: {
   items: ServiceKey[];
+  manage: boolean;
   onRotate: (key: ServiceKey) => void;
   onRevoke: (key: ServiceKey) => void;
 }) {
@@ -73,7 +75,7 @@ export function ServiceKeyList({
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
-                    {k.actions.rotate && (
+                    {manage && k.actions.rotate && (
                       <Button
                         size="compact-xs"
                         variant="default"
@@ -83,7 +85,7 @@ export function ServiceKeyList({
                         {t.rotate}
                       </Button>
                     )}
-                    {k.actions.revoke && (
+                    {manage && k.actions.revoke && (
                       <Button
                         size="compact-xs"
                         color="red"

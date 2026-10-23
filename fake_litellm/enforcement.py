@@ -9,6 +9,7 @@ import os
 import time
 from datetime import datetime
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -103,7 +104,25 @@ def _cap(models: dict | None, model: str) -> float | None:
     return None if entry is None else float(entry["budget_limit"])
 
 
-async def _check_budgets(conn: AsyncConnection, key: dict, model: str, now: datetime) -> None:
+async def member_month_spend(
+    conn: AsyncConnection, team_id: str, user_id: str, counter: float, now: datetime, tz: str
+) -> float:
+    """Membership budgets reset monthly: only this month's logged spend counts."""
+    local = now.astimezone(ZoneInfo(tz))
+    start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    this_month = await conn.scalar(
+        select(func.coalesce(func.sum(spend_logs.c.spend), 0)).where(
+            spend_logs.c.team_id == team_id,
+            spend_logs.c.user == user_id,
+            spend_logs.c.startTime >= start,
+        )
+    )
+    return min(counter or 0, this_month)  # the counter also restarts when a member rejoins
+
+
+async def _check_budgets(
+    conn: AsyncConnection, key: dict, model: str, now: datetime, tz: str
+) -> None:
     """Order: key, team member, team, organization, then model budgets (R1, R5, R6)."""
     if key["models"] and model not in key["models"]:  # FR-K2/K3: the key's allowed-models list
         raise _Reject(
@@ -135,7 +154,7 @@ async def _check_budgets(conn: AsyncConnection, key: dict, model: str, now: date
         expiry = mem["temp_budget_expiry"]
         if expiry is not None and expiry > now:  # R2
             limit += mem["temp_budget_increase"] or 0
-        if (mem["spend"] or 0) >= limit:
+        if await member_month_spend(conn, team_id, user_id, mem["spend"], now, tz) >= limit:
             raise _blocked("team_member", "team member")
     if t["max_budget"] is not None and t["spend"] >= t["max_budget"]:
         raise _blocked("team", "team")
@@ -244,7 +263,7 @@ async def chat_completions(request: Request):
                 return _error(429, "max_parallel_requests", "Max parallel request limit reached")
             state.in_flight[tok] = state.in_flight.get(tok, 0) + 1
             try:
-                await _check_budgets(conn, key, model, state.now())
+                await _check_budgets(conn, key, model, state.now(), state.timezone)
                 start = state.now()
                 await asyncio.sleep(state.latency_ms / 1000)
                 end = state.now()

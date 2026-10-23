@@ -1,6 +1,6 @@
 import { Button, Modal, NumberInput, Stack, TextInput } from '@mantine/core';
 import { useState } from 'react';
-import type { ServiceKeyIn, ServiceKeyWriteResponse } from '../api/types';
+import type { ServiceKeyIn } from '../api/types';
 import { he } from '../i18n/he';
 import { ChangeSummaryDialog } from './ChangeSummaryDialog';
 import { Credits } from './Credits';
@@ -11,12 +11,12 @@ interface Props {
   ownerKind: 'group' | 'system';
   ownerId: number;
   onClose: () => void;
-  onConfirm: (body: ServiceKeyIn, reason: string, key: string) => Promise<ServiceKeyWriteResponse>;
-  onCreated: (secret: string) => void;
+  onConfirm: (body: ServiceKeyIn, reason: string, key: string) => Promise<unknown>;
+  parent?: { allocated: number; base: number };
 }
 
 /** FR-K3/FR-K4 create form: alias, budget and limits, then the usual change summary and reason. */
-export function ServiceKeyDialog({ ownerKind, ownerId, onClose, onConfirm, onCreated }: Props) {
+export function ServiceKeyDialog({ ownerKind, ownerId, onClose, onConfirm, parent }: Props) {
   const [alias, setAlias] = useState('');
   const [maxBudget, setMaxBudget] = useState<number>(0);
   const [maxParallel, setMaxParallel] = useState<number>(4);
@@ -89,6 +89,16 @@ export function ServiceKeyDialog({ ownerKind, ownerId, onClose, onConfirm, onCre
           { key: 'budget', label: t.budget, before: '', after: <Credits value={maxBudget} /> },
           { key: 'concurrency', label: t.concurrency, before: '', after: maxParallel },
           { key: 'rpm', label: t.rpm, before: '', after: rpmLimit },
+          ...(parent
+            ? [
+                {
+                  key: 'parent',
+                  label: t.parentAllocated,
+                  before: <Credits value={parent.allocated} />,
+                  after: <Credits value={parent.allocated + maxBudget} />,
+                },
+              ]
+            : []),
           {
             key: 'models',
             label: t.models,
@@ -98,8 +108,7 @@ export function ServiceKeyDialog({ ownerKind, ownerId, onClose, onConfirm, onCre
         ]}
         onClose={() => setReview(false)}
         onConfirm={async (reason, key) => {
-          const res = await onConfirm(body, reason, key);
-          if (res.secret) onCreated(res.secret);
+          await onConfirm(body, reason, key);
           onClose();
         }}
       />

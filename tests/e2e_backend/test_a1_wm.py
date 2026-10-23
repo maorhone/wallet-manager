@@ -1,11 +1,15 @@
 """A1 through WM: a share's temporary increase ends on its own; the scheduler then closes it."""
 
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
 import httpx
-import pytest
 from helpers.grants import DANI, membership, new_grant, new_share
 
 from app.models import Grant, GrantShare
 from app.outbox.worker import drain
+
+TZ = ZoneInfo("Asia/Jerusalem")
 
 
 async def _http(fake_app, method, path, **kw):
@@ -17,7 +21,6 @@ async def _http(fake_app, method, path, **kw):
         return r
 
 
-@pytest.mark.xfail(strict=False, reason="time-dependent month-boundary double count")
 async def test_a1_share_expiry_blocks_then_scheduler_closes_and_returns(
     login_wm, provisioned, litellm, prov_settings, fake_app, employee, run_job, fake_clock
 ):
@@ -31,7 +34,15 @@ async def test_a1_share_expiry_blocks_then_scheduler_closes_and_returns(
 
     await _http(fake_app, "POST", "/_test/clock", json={"offset_s": 11 * 86400})
     blocked = await dani.chat()  # R2: LiteLLM ends the increase by itself
-    assert blocked.status_code == 400 and blocked.json()["error"]["scope"] == "team_member"
+    # Budgets reset monthly: if the 11 days crossed a month, nothing is over the cap any more.
+    same_month = (
+        fake_clock.now().astimezone(TZ).month
+        == (fake_clock.now() + timedelta(days=11)).astimezone(TZ).month
+    )
+    if same_month:
+        assert blocked.status_code == 400 and blocked.json()["error"]["scope"] == "team_member"
+    else:
+        assert blocked.status_code == 200
 
     fake_clock.advance(days=11)
     res = await run_job()
@@ -48,5 +59,5 @@ async def test_a1_share_expiry_blocks_then_scheduler_closes_and_returns(
     await drain(provisioned, litellm, prov_settings)
     budget = await membership(litellm)
     assert not budget.temp_budget_increase and budget.temp_budget_expiry is None
-    assert (await dani.chat()).status_code == 400  # still over the base cap
+    assert (await dani.chat()).status_code == (400 if same_month else 200)
     await _http(fake_app, "POST", "/_test/clock", json={"offset_s": 0})

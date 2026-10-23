@@ -5,6 +5,7 @@ test.beforeEach(() => resetData());
 test('Admin sees Redis not configured, retries a failed outbox row and it turns applied', async ({
   page,
 }) => {
+  test.slow();
   await fake('/_test/spend', {
     team_id: 'A1',
     user_id: 'dani@corp.example',

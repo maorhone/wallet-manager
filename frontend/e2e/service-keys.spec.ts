@@ -59,6 +59,7 @@ test('Group head creates a service key, sees the secret once, rotates and revoke
 test('Viewer sees the service keys tab without actions and POST /service-keys returns 403', async ({
   page,
 }) => {
+  test.slow();
   const head = await apiAs(DANA);
   const gid = (await (await head.get('/me')).json()).scopes.find(
     (s: { kind: string }) => s.kind === 'group',

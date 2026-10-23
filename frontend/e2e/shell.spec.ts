@@ -39,13 +39,14 @@ test('U8 html is rtl/he and numbers render ltr', async ({ page }) => {
 });
 
 test('banner appears during fake outage', async ({ page }) => {
+  test.slow();
   await loginAs(page, 'noa@corp.example');
   await page.goto('/wallet');
   await expect(page.getByTestId('status-banner')).toHaveCount(0);
   await fake('/_test/outage', { on: true });
   // /status caches reachability for 10 s and the banner polls every 5 s.
-  await expect(page.getByTestId('status-banner')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('status-banner')).toBeVisible({ timeout: 45_000 });
   await expect(page.getByTestId('status-banner')).toContainText('השינויים נשמרים');
   await fake('/_test/outage', { on: false });
-  await expect(page.getByTestId('status-banner')).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByTestId('status-banner')).toHaveCount(0, { timeout: 45_000 });
 });

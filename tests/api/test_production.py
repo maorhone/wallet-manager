@@ -45,6 +45,26 @@ async def test_create_production_org_then_update_budget(
     )  # fmt: skip
 
 
+async def test_budget_update_without_period_keeps_existing_period(login_wm, provisioned, put):
+    admin = await login_wm("admin")
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 1000, "budget_period": "7d"})
+    assert r.status_code == 200, r.text
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 2000}, "raise")
+    assert r.status_code == 200, r.text
+    org = (await admin.get(f"/production/departments/{D1}")).json()["org"]
+    assert (org["budget"], org["budget_period"]) == (2000, "7d")
+
+
+async def test_past_period_is_read_only(login_wm, provisioned, put):
+    admin = await login_wm("admin")
+    await put(admin, f"/production/departments/{D1}", {"budget": 1000})
+    now = (await admin.get(f"/production/departments/{D1}")).json()
+    assert now["actions"]["edit"] is True and now["read_only"] is False
+    past = (await admin.get(f"/production/departments/{D1}?period=2020-01")).json()
+    assert past["actions"]["edit"] is False and past["read_only"] is True
+    assert (await admin.get(f"/production/departments/{D1}?period=bogus")).status_code == 422
+
+
 async def test_system_team_in_production_org_not_department_org_dr4(
     login_wm, provisioned, litellm, prov_settings, put
 ):
@@ -111,6 +131,17 @@ async def test_systems_over_production_budget_422_with_numbers(login_wm, provisi
     body = r.json()
     assert body["code"] == "PARENT_OVERALLOCATED"
     assert (body["requested"], body["available"], body["parent_total"]) == (60000, 50000, 50000)
+
+
+async def test_production_budget_cannot_drop_below_systems_422(login_wm, provisioned, put):
+    admin = await login_wm("admin")
+    await put(admin, f"/production/departments/{D1}", {"budget": 50000})
+    await post(admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 30000})
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 10000}, "cut")
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "PARENT_OVERALLOCATED"
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 30000}, "cut")
+    assert r.status_code == 200, r.text
 
 
 async def test_system_without_production_org_invalid(login_wm, provisioned):

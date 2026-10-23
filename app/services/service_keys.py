@@ -3,12 +3,12 @@
 import json
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
 from app.litellm_client import LiteLLMError, ServiceAccountKeyGenerate
-from app.models import Grp, LitellmWrite, Policy, ProductionSystem, ServiceKey
+from app.models import AuditLog, Grp, LitellmWrite, Policy, ProductionSystem, ServiceKey
 from app.permissions import can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
 from app.services.validation import check_limit, check_sum, group_allocated, key_allocated
@@ -67,6 +67,12 @@ async def generate(ctx, client, owner, key, role, before, *, rotating=False):
         write = await ctx.db.get(LitellmWrite, write_id)
         # Never persist an upstream error body, which could echo a secret.
         write.status, write.last_error = "failed", "Service key generation failed"
+        # Keep the audit trail, but free the Idempotency-Key so a retry is not a "replay".
+        failed = f"{ctx.request_id}:failed:{write_id}"
+        write.idempotency_key = f"{failed}:1"
+        await ctx.db.execute(
+            update(AuditLog).where(AuditLog.request_id == ctx.request_id).values(request_id=failed)
+        )
         await ctx.db.commit()
         raise ApiError(503, "LITELLM_UNAVAILABLE", "Service key generation failed") from None
     await owner_lock(ctx, key.owner_kind, key.owner_id)

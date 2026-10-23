@@ -1,3 +1,4 @@
+import math
 import ssl
 import time
 from collections.abc import Callable
@@ -73,17 +74,21 @@ class LdapDirectory:
     def _default_connect(self) -> Connection:
         # LDAPS only (enforced in make_directory); CERT_REQUIRED stops an impersonated server
         # from capturing the bind password or supplying forged, privileged role memberships.
+        # ldap3 rejects float timeouts on Linux; round up to whole seconds.
+        timeout = max(1, math.ceil(self._settings.ldap_timeout_s))
         server = Server(
             self._settings.ldap_url,
             get_info=ALL,
-            connect_timeout=self._settings.ldap_timeout_s,
+            connect_timeout=timeout,
             tls=Tls(validate=ssl.CERT_REQUIRED),
         )
+        # auto_referrals off: a followed ldap:// referral would send the bind password in clear.
         return Connection(
             server,
             user=self._settings.ldap_bind_dn,
             password=self._settings.ldap_bind_password,
-            receive_timeout=self._settings.ldap_timeout_s,
+            receive_timeout=timeout,
+            auto_referrals=False,
         )
 
     def _search(self, filter_: str, attributes: list[str]) -> list:
@@ -101,7 +106,10 @@ class LdapDirectory:
         except (LDAPException, OSError) as exc:
             raise DirectoryUnavailable("directory search failed") from exc
         finally:
-            conn.unbind()
+            try:
+                conn.unbind()
+            except (LDAPException, OSError):
+                pass  # cleanup only; must not turn a result (or the real error) into a 500
 
     def groups_of(self, upn: str) -> list[str]:
         """Direct ``memberOf`` only; not cached, since this is the one-time onboarding read."""

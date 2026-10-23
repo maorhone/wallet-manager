@@ -40,6 +40,9 @@ import type {
   PendingPlacement,
   PmoPool,
   Policies,
+  Production,
+  ProductionOrgIn,
+  ProductionSystemIn,
   ServiceKeyIn,
   ServiceKeysList,
   ServiceKeyWriteResponse,
@@ -545,10 +548,10 @@ export const useServiceKeys = (ownerKind: 'group' | 'system', ownerId: number) =
   });
 
 /** Create, rotate or revoke a service key; create/rotate responses carry the one-time secret. */
-export const useServiceKeyWrite = () => {
+export const useServiceKeyWrite = (onSecret?: (secret: string) => void) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (
+    mutationFn: async (
       v:
         | { action: 'create'; body: ServiceKeyIn; reason: string; key: string }
         | {
@@ -561,9 +564,13 @@ export const useServiceKeyWrite = () => {
           },
     ) => {
       const write = { reason: v.reason, idempotencyKey: v.key };
-      return v.action === 'create'
-        ? apiPost<ServiceKeyWriteResponse>('/service-keys', v.body, write)
-        : apiPost<ServiceKeyWriteResponse>(`/service-keys/${v.id}/${v.action}`, {}, write);
+      const res =
+        v.action === 'create'
+          ? await apiPost<ServiceKeyWriteResponse>('/service-keys', v.body, write)
+          : await apiPost<ServiceKeyWriteResponse>(`/service-keys/${v.id}/${v.action}`, {}, write);
+      // The one-time secret goes to the caller only, never into the TanStack mutation cache.
+      if (res.secret) onSecret?.(res.secret);
+      return { ...res, secret: undefined };
     },
     onSuccess: (_res, v) => {
       const [ownerKind, ownerId] =
@@ -571,6 +578,39 @@ export const useServiceKeyWrite = () => {
       qc.invalidateQueries({ queryKey: ['service-keys', ownerKind, ownerId] });
       qc.invalidateQueries({ queryKey: ['group'] });
       qc.invalidateQueries({ queryKey: ['department'] });
+      qc.invalidateQueries({ queryKey: ['production'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+};
+
+const hasPendingProduction = (d: Production) =>
+  d.org?.sync_status === 'pending' || d.systems.some((s) => s.sync_status === 'pending');
+
+export const useProduction = (deptId: string, period: string) =>
+  useQuery({
+    queryKey: ['production', deptId, period],
+    queryFn: () => apiFetch<Production>(`/production/departments/${deptId}?period=${period}`),
+    enabled: period !== '',
+    refetchInterval: pollWhilePending(hasPendingProduction),
+  });
+
+/** Set the production organization (PUT) or add a system (POST); one write per confirm. */
+export const useProductionWrite = (deptId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      v:
+        | { kind: 'org'; body: ProductionOrgIn; reason: string; key: string }
+        | { kind: 'system'; body: ProductionSystemIn; reason: string; key: string },
+    ) => {
+      const write = { reason: v.reason, idempotencyKey: v.key };
+      return v.kind === 'org'
+        ? apiPut<WriteResponse>(`/production/departments/${deptId}`, v.body, write)
+        : apiPost<WriteResponse>(`/production/departments/${deptId}/systems`, v.body, write);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production', deptId] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });

@@ -227,7 +227,14 @@ export interface DepartmentSummary extends PeriodEnvelope {
   }[];
   allowances: { model: string; amount: number; pots_sum: number }[];
   group_heads: GroupHead[];
-  actions: { edit_split: boolean; edit_budget: boolean; edit_allowances: boolean; place: boolean };
+  actions: {
+    edit_split: boolean;
+    edit_budget: boolean;
+    edit_allowances: boolean;
+    place: boolean;
+    view_production: boolean;
+    edit_production: boolean;
+  };
 }
 
 export interface Member extends MemberSlim {
@@ -572,4 +579,42 @@ export interface BlockedReport {
     period_spend_to_date: number;
     day_spend: number;
   }[];
+}
+
+export interface ProductionOrg {
+  litellm_org_id: string;
+  budget: number;
+  budget_period: string;
+  used: number;
+  over_allocated: boolean;
+  sync_status: SyncStatus;
+}
+
+export interface ProductionSystemRow {
+  id: number;
+  name: string;
+  litellm_team_id: string;
+  budget: number;
+  used: number;
+  keys_count: number;
+  sync_status: SyncStatus;
+}
+
+export interface Production {
+  department_id: number;
+  org: ProductionOrg | null;
+  systems: ProductionSystemRow[];
+  spend_taken_at: string | null;
+  read_only: boolean;
+  actions: { edit: boolean };
+}
+
+export interface ProductionOrgIn {
+  budget: number;
+  budget_period?: string;
+}
+
+export interface ProductionSystemIn {
+  name: string;
+  budget: number;
 }

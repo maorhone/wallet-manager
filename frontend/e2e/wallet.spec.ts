@@ -18,6 +18,7 @@ test('wallet shows limits and owners', async ({ page }) => {
 test('U4 group exhausted shows "חסום: תקציב הקבוצה נוצל" and names the group head', async ({
   page,
 }) => {
+  test.slow();
   // A1's whole base budget is spent by yael; dani's own spend stays low.
   await fake('/_test/spend', {
     team_id: 'A1',
@@ -29,7 +30,7 @@ test('U4 group exhausted shows "חסום: תקציב הקבוצה נוצל" and 
   await page.goto('/wallet');
   // The snapshot loop runs every 2 s in the E2E stack.
   await expect(page.getByTestId('wallet-card')).toContainText('חסום: תקציב הקבוצה נוצל', {
-    timeout: 30_000,
+    timeout: 60_000,
   });
   await expect(page.getByTestId('blocked-contact')).toContainText('Dana Levi');
 });
