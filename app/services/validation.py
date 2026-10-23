@@ -37,6 +37,22 @@ def check_limit(field: str, value, policy: dict, is_admin: bool) -> ApiError | N
     return limit_out_of_policy(field, value, policy["min"], policy["max"])
 
 
+async def internal_allocated(db, department_id: int, exclude_id: int | None = None) -> Decimal:
+    """D-076: active internal systems are carved from the department envelope."""
+    from sqlalchemy import func, select
+
+    from app.models import ProductionSystem
+
+    return await db.scalar(
+        select(func.coalesce(func.sum(ProductionSystem.budget), 0)).where(
+            ProductionSystem.department_id == department_id,
+            ProductionSystem.funding == "department",
+            ProductionSystem.status == "active",
+            ProductionSystem.id != (exclude_id or 0),
+        )
+    )
+
+
 async def key_allocated(db, owner_kind: str, owner_id: int) -> Decimal:
     """Pending keys reserve budget while synchronous generation is in flight."""
     from sqlalchemy import func, select
@@ -87,7 +103,8 @@ async def check_group_tree(
     """Top-level bases + pools fit the department; each parent covers children + own caps."""
     live = [g for g in groups if g.status != "archived"]
     top = sum((bases[g.id] for g in live if g.parent_group_id is None), Decimal(0))
-    if err := check_sum(top + pmo + reserve, dept.budget, rows=rows):
+    internal = await internal_allocated(db, dept.id)
+    if err := check_sum(top + pmo + reserve + internal, dept.budget, rows=rows):
         return err
     for parent in live:
         kids = sum((bases[g.id] for g in live if g.parent_group_id == parent.id), Decimal(0))

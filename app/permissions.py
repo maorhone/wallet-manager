@@ -204,6 +204,10 @@ async def can_view_grants(
     return _pick(roles, _GROUP_VIEW, _GROUP_VIEW)
 
 
+async def group_roles_of(session, p: Principal, group_id: int) -> set[str]:
+    return await _group_roles(session, p, group_id)
+
+
 async def can_view_group(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), _GROUP_VIEW, _GROUP_VIEW)
 

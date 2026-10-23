@@ -70,6 +70,13 @@ counts top-level groups. Saving the split, moving a subtree or inserting a paren
 `PARENT_OVERALLOCATED` when a parent cannot cover its children. Group summaries add `rollup_used`
 (own plus descendants' spend, each team counted once). Over-allocation factors still apply per group.
 
+### 4.1.3a Internal Systems - Phase 5 Step 5.5: Done
+
+A department's production systems are Internal Systems: their budgets are deducted from the department's
+unallocated amount (department wallet `allocated` includes them) and the split save counts them. A system may
+name a managing section (`managing_group_id`); that section's head, or an admin, edits its budget
+(`PATCH /production/systems/{id}`) within the production budget. Legacy production endpoints are unchanged.
+
 ### 4.1.4 Org Systems - Phase 5 Step 5.4: Done
 
 An organization can fund systems directly from its systems envelope (`POST /organizations/{id}/systems`,

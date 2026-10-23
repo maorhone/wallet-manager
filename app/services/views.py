@@ -41,7 +41,7 @@ from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
 from app.services.spend import Spend, month_bounds
-from app.services.validation import key_allocated
+from app.services.validation import internal_allocated, key_allocated
 from app.writes import sync_status
 
 ZERO = Decimal(0)
@@ -118,7 +118,7 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
     card = wallet.department_wallet(
         values["budget"], sum((bases[g.id] for g in groups if g.parent_group_id is None), ZERO),
-        values["pmo_pool"], values["reserve"],
+        values["pmo_pool"], values["reserve"] + await internal_allocated(db, dept.id),  # D-076 internal systems
         spend.used("department", dept.id),
     )  # fmt: skip
     card["state"] = wallet.state(

@@ -11,3 +11,8 @@ class ProductionOrgIn(BaseModel):
 class ProductionSystemIn(BaseModel):
     name: str
     budget: Money
+    managing_group_id: int | None = None
+
+
+class ProductionSystemPatch(BaseModel):
+    budget: Money

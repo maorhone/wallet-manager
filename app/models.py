@@ -231,6 +231,8 @@ class ProductionSystem(Base):
     funding: Mapped[str] = mapped_column(Text, server_default="department")
     organization_id: Mapped[int | None] = mapped_column(ForeignKey("organization.id"))
     owner_upn: Mapped[str | None] = mapped_column(Text)  # view-only owner of an Org System
+    # Internal System: the section that may edit its budget within the delegation (5.5)
+    managing_group_id: Mapped[int | None] = mapped_column(ForeignKey("grp.id"))
     # a label only: an Org System never counts in this department's spend
     responsible_department_id: Mapped[int | None] = mapped_column(ForeignKey("department.id"))
     # set right after insert, once the row's own id is known (f"sys-{id}")

@@ -10,11 +10,18 @@ from app.clock import Clock
 from app.config import Settings
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
-from app.models import Department, ProductionSystem, ServiceKey
-from app.permissions import ADMIN, Principal, can_manage_platform, can_view_production
-from app.schemas.production import ProductionOrgIn, ProductionSystemIn
+from app.models import Department, Grp, ProductionSystem, ServiceKey
+from app.permissions import (
+    ADMIN,
+    HEAD,
+    Principal,
+    can_manage_platform,
+    can_view_production,
+    group_roles_of,
+)
+from app.schemas.production import ProductionOrgIn, ProductionSystemIn, ProductionSystemPatch
 from app.services.spend import Spend
-from app.services.validation import check_sum
+from app.services.validation import check_sum, internal_allocated
 from app.services.views import period_ctx
 from app.writes import WriteContext, sync_status
 
@@ -77,11 +84,16 @@ async def create_production_system(
     total = existing + body.budget
     if err := check_sum(total, dept.prod_budget or ZERO):
         raise err
+    if body.managing_group_id is not None:
+        managing = await ctx.db.get(Grp, body.managing_group_id)
+        if managing is None or managing.department_id != department_id:
+            raise invalid_request("Managing group is not in this department")
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
     system = ProductionSystem(
-        department_id=department_id, name=body.name, budget=body.budget, status="active"
-    )
+        department_id=department_id, name=body.name, budget=body.budget, status="active",
+        managing_group_id=body.managing_group_id,
+    )  # fmt: skip
     ctx.db.add(system)
     await ctx.db.flush()
     system.litellm_team_id = f"sys-{system.id}"
@@ -92,6 +104,36 @@ async def create_production_system(
     }
     ctx.audit("production_system", system.id, {}, after, role, department_id=department_id)
     await ctx.enqueue("production_system", system.id, "/team/new")
+    return [{"entity": "production_system", "id": system.id, "values": after}]
+
+
+async def update_system_budget(
+    ctx: WriteContext, principal: Principal, system_id: int, body: ProductionSystemPatch
+) -> list[dict]:
+    """Admin, or the head of the system's managing section (delegation), edits the budget."""
+    system = await ctx.db.get(ProductionSystem, system_id)
+    if system is None or system.funding != "department":
+        raise ApiError(404, "NOT_FOUND", "System not found")
+    department_id = system.department_id
+    await ctx.lock(LockKind.PRODUCTION, department_id)
+    await ctx.db.refresh(system)
+    if principal.is_admin:
+        role = ADMIN
+    elif system.managing_group_id is not None and HEAD in await group_roles_of(
+        ctx.db, principal, system.managing_group_id
+    ):
+        role = HEAD
+    else:
+        raise ApiError(403, "FORBIDDEN", "Your role does not permit this action")
+    dept = await ctx.db.get(Department, department_id)
+    await ctx.db.refresh(dept)
+    others = await internal_allocated(ctx.db, department_id, exclude_id=system.id)
+    if err := check_sum(others + body.budget, dept.prod_budget or ZERO):
+        raise err
+    before, system.budget = {"budget": system.budget}, body.budget
+    after = {"budget": system.budget}
+    ctx.audit("production_system", system.id, before, after, role, department_id=department_id)
+    await ctx.enqueue("production_system", system.id, "/team/update")
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
 
