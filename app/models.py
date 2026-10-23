@@ -293,6 +293,48 @@ class Initiative(Base):
     created_by: Mapped[str | None] = mapped_column(Text)
 
 
+class Request(Base):
+    __tablename__ = "request"
+    __table_args__ = (
+        CheckConstraint(_in("type", "credits", "initiative", "throughput"), name="ck_request_type"),
+        CheckConstraint(
+            _in(
+                "status",
+                "submitted",
+                "forwarded",
+                "approved",
+                "rejected",
+                "applied",
+                "pending_apply",
+                "failed",
+            ),
+            name="ck_request_status",
+        ),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, **ID)
+    type: Mapped[str] = mapped_column(Text)
+    scope_kind: Mapped[str] = mapped_column(Text)
+    scope_id: Mapped[int] = mapped_column(BigInteger)
+    requester_upn: Mapped[str] = mapped_column(Text)
+    handler_role: Mapped[str] = mapped_column(Text)
+    handler_scope: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(Text, server_default="submitted")
+    amount: Mapped[Decimal | None] = mapped_column(ALLOC)
+    payload: Mapped[dict] = mapped_column(JSONB, server_default="{}")
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _created()
+
+
+class RequestEvent(Base):
+    __tablename__ = "request_event"
+    id: Mapped[int] = mapped_column(BigInteger, **ID)
+    request_id: Mapped[int] = mapped_column(ForeignKey("request.id"))
+    actor_upn: Mapped[str] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+
+
 class Policy(Base):
     __tablename__ = "policy"
     key: Mapped[str] = mapped_column(Text, primary_key=True)

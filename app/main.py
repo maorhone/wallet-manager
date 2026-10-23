@@ -30,6 +30,7 @@ from app.routers import (
     policies,
     production,
     reports,
+    requests,
     role_bindings,
     service_keys,
 )
@@ -117,6 +118,7 @@ def create_app(
     app.include_router(placements.router)
     app.include_router(policies.router)
     app.include_router(reports.router)
+    app.include_router(requests.router)
     app.include_router(platform.router)
     app.include_router(production.router)
     app.include_router(service_keys.router)

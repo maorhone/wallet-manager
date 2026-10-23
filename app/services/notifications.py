@@ -28,6 +28,7 @@ KINDS: dict[str, bool] = {
     "member_moved_in": False, "outbox_failed": True, "grant_received": False,
     "drift_repeated": True, "reconcile_missing": True,
     "overallocation": True, "concurrency_at_limit": False,
+    "request_submitted": False, "request_approved": False, "request_rejected": False,
 }  # fmt: skip
 
 

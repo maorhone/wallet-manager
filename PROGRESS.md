@@ -1,7 +1,9 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 5 on `phase-5`: Steps 5.5-5.6 built locally (batch B5 = 5.5-5.7, push at 5.7); Next = Step 5.7 (batch end: full test.sh + review + push; merge-ui before 5.16).
+Phase 5 on `phase-5`: Steps 5.5-5.7 built locally (batch B5 = 5.5-5.7, push at 5.7 after full test + review). Next = Step 5.8 (B6 = 5.8-5.10); merge-ui before 5.16.
+Step 5.7: `request`/`request_event` tables (migration 0011), `/requests` API (credits, initiative; throughput type is added in 5.8), kinds `request_*`. Decide by a non-handler is 403 (GET is 404). Approved credits add the amount to base_cap. Retry restored saved implementation and preserved completed B5 predecessors. BASE=5d63f7dc4b5ec4c5d6bc1f966087821fb3edc89b. Schema test initially failed for missing request/event expectations; corrected to 21 tables. Added need-description regression (red first) and validation. Both previously isolated load flakes (member move, overallocation) quarantined with strict=False; root causes remain open.
+Step 5.7 retry targeted gate: 32 passed / 2 xpassed (19.13s); lint, formatting and typecheck green. Full B5 gate and review follow.
 Step 5.2 focused hierarchy API checks: 23 passed (6.75s).
 Latest `./scripts/test.sh` (Step 5.2 backend-tail triage): green; pytest 647 passed / 7 skipped /
 1 xfailed (218.52s), Vitest 57 passed, Playwright 42 passed / 1 skipped (2.5m).

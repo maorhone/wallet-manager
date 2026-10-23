@@ -85,6 +85,15 @@ A section head (or an admin) creates an initiative in a section (`POST /groups/{
 (`owner_kind=initiative`); their `max_budget` must fit in the initiative budget. `tech_status` is
 `not_connected` (no key), `pending` or `connected` (an active key). The owner can only read (`GET`).
 
+### 4.1.3c Requests center (credits, new initiative) - Phase 5 Step 5.7: Done
+
+An active employee asks their section head for more Credits or a new initiative (`POST /requests`, short
+need text, optional amount). One record and one status per request (`submitted`, `applied`, `rejected`).
+`GET /requests?box=mine|to_handle&type=&status=` lists them; the section head (or admin) decides with
+`POST /requests/{id}/decide`. Approving credits raises the employee's base cap by the approved amount within
+the section's allocatable; approving an initiative creates it (5.6). The requester gets an in-app notification.
+Throughput requests come in Step 5.8.
+
 ### 4.1.4 Org Systems - Phase 5 Step 5.4: Done
 
 An organization can fund systems directly from its systems envelope (`POST /organizations/{id}/systems`,

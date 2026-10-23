@@ -24,6 +24,9 @@ SPEC_8_2 = {
     "organization_id owner_upn responsible_department_id managing_group_id",
     "initiative": "id name owner_upn group_id department_id period_start period_end budget "
     "status created_at created_by",
+    "request": "id type scope_kind scope_id requester_upn handler_role handler_scope status "
+    "amount payload created_at updated_at",
+    "request_event": "id request_id actor_upn action comment created_at",
     "service_key": "id owner_kind owner_id litellm_token_hash alias max_budget max_parallel "
     "rpm_limit models status created_at created_by",
     "policy": "key value",
@@ -51,4 +54,4 @@ async def test_tables_match_spec_8_2(engine):
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
     assert actual == {t: set(c.split()) for t, c in SPEC_8_2.items()}
-    assert len(SPEC_8_2) == 19  # v1's 16 + production_system + v2 organization + initiative
+    assert len(SPEC_8_2) == 21  # v1 + production, organization, initiatives and requests/events
