@@ -315,6 +315,8 @@ async def _check_budgets(ctx: WriteContext, department_id: int) -> None:
     dept = await ctx.db.get(Department, department_id)
     await ctx.db.refresh(dept)
     groups = list(await ctx.db.scalars(select(Grp).where(Grp.department_id == department_id)))
+    for parent_id in sorted({g.parent_group_id for g in groups if g.parent_group_id}):
+        await ctx.lock(LockKind.GROUP, parent_id)  # serialize with member-cap and key writes
     bases = {g.id: g.base_budget for g in groups}
     if err := await check_group_tree(ctx.db, dept, groups, bases, dept.pmo_pool, dept.reserve):
         raise err

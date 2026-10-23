@@ -951,6 +951,7 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   department pending list (no role on the department), so the tab is absent.
 
 ## Questions for owner
+- 5.3: with over-allocation factor > 1, a parent group plus its carved child can together spend more than the parent's base (LiteLLM teams are flat; child spend does not draw on the parent team). Kept as overbooking per the earlier decision; safest option chosen. Should a subtree get a hard ceiling?
 - Step 4.3 metric window (non-blocking): PLAN names `wm_blocked_employees` without a time window.
   Defaulted to yesterday's distinct employees at a base/model cap, matching the concurrency gauge's day and reusing FR-R5.
   Confirm if a current-day/current-month snapshot count is preferred. Implementation continues with this safe default.

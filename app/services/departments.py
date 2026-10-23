@@ -47,6 +47,8 @@ async def set_split(
             [{"group_id": i, "code": "SCOPE_FORBIDDEN"} for i in foreign],
         )
     changed = [g for g in groups.values() if g.id in new and new[g.id] != g.base_budget]
+    for parent_id in sorted({g.parent_group_id for g in groups.values() if g.parent_group_id}):
+        await ctx.lock(LockKind.GROUP, parent_id)  # serialize with member-cap and key writes
     bases = {g.id: new.get(g.id, g.base_budget) for g in groups.values()}
     rows = [{"group_id": g.id, "code": "PARENT_OVERALLOCATED"} for g in changed]
     if err := await check_group_tree(

@@ -183,7 +183,10 @@ class _Group:
                 select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
             )
         )
-        carved = sum((c.base_budget for c in children), ZERO)  # D-055: counted once, here
+        child_bases = await values_as_of(
+            db, "group", {str(c.id): {"base_budget": c.base_budget} for c in children}, at
+        )
+        carved = sum((v["base_budget"] for v in child_bases.values()), ZERO)  # D-055: once, here
         card = wallet.group_wallet(
             base, grants, sum((values[u]["base_cap"] for u in active), ZERO) + keys_budget + carved,
             sum((shares.get(u, ZERO) for u in active), ZERO), spend.used("group", group.id),

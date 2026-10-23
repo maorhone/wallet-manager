@@ -46,14 +46,20 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
         return []
     by_org = {d.litellm_org_id: d for d in depts}
     by_team = {g.litellm_team_id: g for g in groups}
+    carved: dict[int, Decimal] = defaultdict(Decimal)
+    parents = {g.id for g in groups}
+    for g in groups:
+        if g.parent_group_id in parents and g.status != "archived":
+            carved[g.department_id] += g.base_budget  # D-055: child teams are carved from a parent
     out = []
     for o in orgs:
         d = by_org.get(o.organization_id)
+        allocated = o.allocated - (carved[d.id] if d else ZERO)
         total = o.dept_budget - (d.reserve if d else ZERO)
-        if o.allocated > total:
+        if allocated > total:
             out.append(
                 _finding("litellm", "department", d.id if d else o.organization_id,
-                         d.name if d else o.organization_alias, o.allocated, total,
+                         d.name if d else o.organization_alias, allocated, total,
                          d.id if d else None)
             )  # fmt: skip
     for t in teams:
