@@ -7,9 +7,11 @@ import MyWallet from './pages/MyWallet';
 import PlatformPage from './pages/platform/PlatformPage';
 import PmoPage from './pages/pmo/PmoPage';
 import ReportsPage from './pages/reports/ReportsPage';
+import { Shell as V2Shell } from './v2/Shell';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
+  { path: '/v2/*', element: <V2Shell /> },
   {
     path: '/',
     element: <Shell />,

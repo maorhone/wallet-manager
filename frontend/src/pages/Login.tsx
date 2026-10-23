@@ -21,7 +21,7 @@ export default function Login() {
     try {
       await apiPost('/auth/dev/login', { upn });
       await qc.invalidateQueries({ queryKey: keys.me });
-      navigate('/');
+      navigate('/v2');
     } catch (e) {
       setError(e);
     }
@@ -32,7 +32,18 @@ export default function Login() {
       <Title order={2}>{he.appName}</Title>
       <Card withBorder>
         <Stack>
-          <Button component="a" href="/auth/login">
+          <Button
+            component="a"
+            href="/auth/login"
+            onClick={() => {
+              // The OIDC callback returns to /; mark this tab's post-login destination.
+              try {
+                sessionStorage.setItem('wm.v2.login', '1');
+              } catch {
+                /* Optional storage. */
+              }
+            }}
+          >
             {he.loginAdfs}
           </Button>
           {devAuth && (

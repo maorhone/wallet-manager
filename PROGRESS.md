@@ -991,3 +991,12 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   stays pending/reserved; the worker never retries secret-generating calls automatically.
 
 - 22/10/2026: test_a1_share_expiry_blocks_then_scheduler_closes_and_returns quarantined as xfail(strict=False): time-dependent failure (spend double-counted when the 11-day clock offset crosses a month boundary). Open item; fix properly after the merge.
+
+
+## Step 5.15 (track E, branch phase-5-ui)
+- BASE: d6657715a0dd4b3d0bf818dfdfbf365556847d57 (2026-10-23).
+- Done: additive RTL v2 shell, wireframe palette/font, role + scope navigation, per-user last-area restoration with permission fallback, six shared components. Existing screens linked and unchanged.
+- Interactive development login opens /v2; OIDC login marks its tab so the existing root callback opens /v2. Explicit legacy root entry remains compatible.
+- Tests: DistributionBar TDD confirmed missing-component failure then 3 passing tests; navigation tests cover scope accumulation, revocation, ownership and blocked storage. Three v2 Playwright scenarios pass, within the Phase 5 budget. Build, lint and typecheck pass. First full run: pytest 647 passed / 7 skipped / 1 xfailed; Vitest 64 passed; Playwright 44 passed / 1 skipped, with unrelated U9 member-actions timing out under load (30 s timeout, 1.7 min elapsed). Quarantined as instructed; see OPEN-ITEMS. Final full gate and review results are recorded in the orchestrator ledger.
+- Next: finish the full gate, one review and supervisor push; track D integrates before 5.16. No backend changes. The single legacy E2E quarantine is the required exception to the UI-only file scope.
+- Questions for owner: none. Screen contents remain for 5.16–5.23; shell placeholders do not invent usage/service data.

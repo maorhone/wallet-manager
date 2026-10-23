@@ -332,3 +332,8 @@ and a login with no groups claim falls back to an employee-only session instead 
 
 Explicit LiteLLM client boundary (NFR3), outbox with idempotent retries, audit of every change, CSRF + CSP,
 RTL accessibility, `./scripts/test.sh` (pytest, vitest, Playwright) green before each commit.
+
+
+## Phase 5 — v2 shell (Step 5.15)
+Done: an additive Hebrew RTL workspace at `/v2` uses the v2 palette and a right-side task navigation. Areas accumulate from current `/me` roles and scopes, including personal AI, scoped budgets, organizational allocation, requests, responsible systems, service status and policy guidance. Returning users reopen their last authorized area; missing permissions, invalid paths or unavailable storage fall back to personal AI. Ownership alone grants no allocation access.
+Interactive login lands in v2; legacy routes (including explicit root navigation) remain available. New screen bodies are staged for subsequent Phase 5 steps and link to existing functionality where available. Shared KPI, disjoint distribution (with separate over-allocation warning), funding, status, attention and accessible side-panel components support those screens. No fabricated budget or service-health values are displayed.
