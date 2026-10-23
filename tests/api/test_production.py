@@ -133,6 +133,17 @@ async def test_systems_over_production_budget_422_with_numbers(login_wm, provisi
     assert (body["requested"], body["available"], body["parent_total"]) == (60000, 50000, 50000)
 
 
+async def test_production_budget_cannot_drop_below_systems_422(login_wm, provisioned, put):
+    admin = await login_wm("admin")
+    await put(admin, f"/production/departments/{D1}", {"budget": 50000})
+    await post(admin, f"/production/departments/{D1}/systems", {"name": "Sys A", "budget": 30000})
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 10000}, "cut")
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "PARENT_OVERALLOCATED"
+    r = await put(admin, f"/production/departments/{D1}", {"budget": 30000}, "cut")
+    assert r.status_code == 200, r.text
+
+
 async def test_system_without_production_org_invalid(login_wm, provisioned):
     admin = await login_wm("admin")
     r = await post(

@@ -896,3 +896,4 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 
 - flaky-e2e (22/10): restored 4 quarantined e2e tests (U3 stays fixme: ~1/8 recovery failure, see OPEN-ITEMS); fake() retries once on stale socket. Full run: 44 e2e passed. Open: F1 cold goto (not reproduced).
 - flaky quarantine: test_unknown_key_invalid (setup timeout under load).
+- claude-reviews (23/10): Claude read-only review of 3.2/3.3/3.4/3.7/4.4/4.5. Fixed: production budget can't drop below its systems (PARENT_OVERALLOCATED); service-key limits reject negatives; Departments tab shows department sync badge and keeps the selected period in drill-down links. Quarantined test_kicked_returns_blocked (setup timeout under load). Open items are in OPEN-ITEMS.

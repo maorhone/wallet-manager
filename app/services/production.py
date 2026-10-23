@@ -31,6 +31,13 @@ async def set_production_org(
     if dept is None:
         raise ApiError(404, "NOT_FOUND", "Department not found")
     await ctx.db.refresh(dept)
+    allocated = await ctx.db.scalar(
+        select(func.coalesce(func.sum(ProductionSystem.budget), 0)).where(
+            ProductionSystem.department_id == department_id, ProductionSystem.status == "active"
+        )
+    )
+    if err := check_sum(allocated, body.budget):
+        raise err
     before = {"budget": dept.prod_budget, "budget_period": dept.prod_budget_period}
     first = dept.prod_litellm_org_id is None
     if first:

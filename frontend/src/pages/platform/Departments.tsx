@@ -77,16 +77,24 @@ export default function Departments() {
 }
 
 function DepartmentRow({ department: d }: { department: DepartmentRecord }) {
-  const { current, readOnly } = usePeriod();
+  const { current, period, readOnly } = usePeriod();
+  const search = period === current ? '' : `?period=${period}`;
   const summary = useDepartmentSummary(String(d.id), current);
   const [dialog, setDialog] = useState<'budget' | 'group' | 'bindings' | null>(null);
   const staff = summary.data?.groups.find((g) => g.kind === 'department_staff');
   return (
     <Table.Tr data-testid="platform-department">
       <Table.Td>
-        <Anchor component={Link} to={`/department/${d.id}/overview`}>
-          {d.name}
-        </Anchor>
+        <Group gap="xs">
+          <Anchor component={Link} to={`/department/${d.id}/overview${search}`}>
+            {d.name}
+          </Anchor>
+          {summary.data && (
+            <span data-testid="department-sync">
+              <SyncBadge status={summary.data.split.pmo_reserve_sync_status} />
+            </span>
+          )}
+        </Group>
       </Table.Td>
       <Table.Td>
         <Credits value={d.budget} />
@@ -100,7 +108,7 @@ function DepartmentRow({ department: d }: { department: DepartmentRecord }) {
         <Stack gap="xs">
           {summary.data?.groups.map((g) => (
             <Group key={g.id} gap="xs" data-testid="platform-group">
-              <Anchor component={Link} to={`/group/${g.id}/overview`}>
+              <Anchor component={Link} to={`/group/${g.id}/overview${search}`}>
                 {g.name}
               </Anchor>
               <span data-testid="group-base">
@@ -110,7 +118,7 @@ function DepartmentRow({ department: d }: { department: DepartmentRecord }) {
             </Group>
           ))}
           {staff && (
-            <Anchor component={Link} to={`/group/${staff.id}/members`}>
+            <Anchor component={Link} to={`/group/${staff.id}/members${search}`}>
               {t.personalValues}
             </Anchor>
           )}
