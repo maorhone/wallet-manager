@@ -70,6 +70,16 @@ counts top-level groups. Saving the split, moving a subtree or inserting a paren
 `PARENT_OVERALLOCATED` when a parent cannot cover its children. Group summaries add `rollup_used`
 (own plus descendants' spend, each team counted once). Over-allocation factors still apply per group.
 
+### 4.1.4 Org Systems - Phase 5 Step 5.4: Done
+
+An organization can fund systems directly from its systems envelope (`POST /organizations/{id}/systems`,
+admin or the organization's allocator). The first one creates a virtual LiteLLM organization
+`orgsys-<org_id>`; each Org System is a team in it, and their budgets may not exceed the envelope. An
+Org System has a view-only owner and a responsible department that is only a label: its spend never
+counts in that department. `POST /service-keys/{id}/move {target_system_id}` moves an active key
+(group or system) of the same organization into an Org System, with audit; later spend counts to the
+Org System only.
+
 ### 4.1.2 Hierarchy management API - Phase 5 Step 5.2: Done
 
 Admins create Wallet Manager roots with `POST /organizations` and attach new departments with

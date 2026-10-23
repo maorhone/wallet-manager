@@ -27,12 +27,31 @@ async def owner_lock(ctx, kind, owner_id):
     owner = await ctx.db.get(model, owner_id)
     if owner is None:
         raise ApiError(404, "NOT_FOUND", "Owner not found")
+    # Org Systems have no department; they lock under the negated organization id (5.4).
     await ctx.lock(
         LockKind.GROUP if kind == "group" else LockKind.PRODUCTION,
-        owner_id if kind == "group" else owner.department_id,
+        owner_id if kind == "group" else owner.department_id or -owner.organization_id,
     )
     await ctx.db.refresh(owner)
     return owner
+
+
+async def require_team_applied(db, entity, owner_id):
+    # Missing team/new is not proof the owner is provisioned.
+    team_status = await db.scalar(
+        select(LitellmWrite.status)
+        .where(
+            LitellmWrite.entity == entity,
+            LitellmWrite.entity_id == str(owner_id),
+            LitellmWrite.endpoint == "/team/new",
+        )
+        .order_by(LitellmWrite.id.desc())
+        .limit(1)
+    )
+    if team_status != "applied":
+        raise invalid_request(
+            "Owner team is not provisioned", {"sync_status": team_status or "pending"}
+        )
 
 
 async def generate(ctx, client, owner, key, role, before, *, rotating=False):
@@ -110,21 +129,7 @@ async def create(ctx, principal, client, body):
             err := check_limit(field, getattr(body, field), policy.value, principal.is_admin)
         ):
             raise err
-    # Missing team/new is not proof the owner is provisioned.
-    team_status = await ctx.db.scalar(
-        select(LitellmWrite.status)
-        .where(
-            LitellmWrite.entity == entity,
-            LitellmWrite.entity_id == str(owner.id),
-            LitellmWrite.endpoint == "/team/new",
-        )
-        .order_by(LitellmWrite.id.desc())
-        .limit(1)
-    )
-    if team_status != "applied":
-        raise invalid_request(
-            "Owner team is not provisioned", {"sync_status": team_status or "pending"}
-        )
+    await require_team_applied(ctx.db, entity, owner.id)
     key = ServiceKey(**body.model_dump(), status="pending", created_by=principal.upn)
     ctx.db.add(key)
     await ctx.db.flush()

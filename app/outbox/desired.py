@@ -36,8 +36,10 @@ from app.models import (
     GrantShare,
     GroupModelPot,
     Grp,
+    Organization,
     Policy,
     ProductionSystem,
+    ServiceKey,
 )
 from app.services.spend import month_bounds
 
@@ -134,10 +136,25 @@ async def _prod_org_fields(session: AsyncSession, entity_id: str) -> dict:
 async def _prod_system_fields(session: AsyncSession, entity_id: str) -> dict:
     """FR-K2: a Team under the production org, never the department's own org."""
     sys = await _get(session, ProductionSystem, entity_id)
+    if sys.funding == "organization":  # 5.4: a team in the virtual systems org
+        org = await session.get(Organization, sys.organization_id)
+        return {
+            "team_id": sys.litellm_team_id, "organization_id": org.systems_litellm_org_id,
+            "max_budget": float(sys.budget), "budget_duration": org.budget_period,
+        }  # fmt: skip
     d = await session.get(Department, sys.department_id)
     return {
         "team_id": sys.litellm_team_id, "organization_id": d.prod_litellm_org_id,
         "max_budget": float(sys.budget), "budget_duration": d.prod_budget_period,
+    }  # fmt: skip
+
+
+async def _systems_org_fields(session: AsyncSession, entity_id: str) -> dict:
+    """5.4: one virtual Organization per WM organization holds its Org Systems."""
+    org = await _get(session, Organization, entity_id)
+    return {
+        "organization_id": org.systems_litellm_org_id, "organization_alias": f"{org.name} systems",
+        "max_budget": float(org.systems_envelope), "budget_duration": org.budget_period,
     }  # fmt: skip
 
 
@@ -202,6 +219,9 @@ async def _key_limits(session: AsyncSession, e: Employee) -> dict:
     }
 
 
+_ORG_FIELDS = {"production_org": _prod_org_fields, "systems_org": _systems_org_fields}
+
+
 async def build(
     session: AsyncSession, settings: Settings, entity: str, endpoint: str, entity_id: str
 ):
@@ -210,19 +230,11 @@ async def build(
     # the entity tells them apart (production is never reconciled, FR-RC covers §8.1 only).
     match endpoint:
         case "/organization/new":
-            fields = await (
-                _prod_org_fields(session, entity_id)
-                if entity == "production_org"
-                else _org_fields(session, entity_id)
-            )
-            return OrganizationNew(**fields)
+            return OrganizationNew(**await _ORG_FIELDS.get(entity, _org_fields)(session, entity_id))
         case "/organization/update":
-            fields = await (
-                _prod_org_fields(session, entity_id)
-                if entity == "production_org"
-                else _org_fields(session, entity_id)
+            return OrganizationUpdate(
+                **await _ORG_FIELDS.get(entity, _org_fields)(session, entity_id)
             )
-            return OrganizationUpdate(**fields)
         case "/team/new":
             fields = await (
                 _prod_system_fields(session, entity_id)
@@ -270,6 +282,10 @@ async def build(
             return KeyGenerate(
                 user_id=e.upn, team_id=g.litellm_team_id, **await _key_limits(session, e)
             )
+        case "/key/update" if entity == "service_key":  # moved to an Org System (5.4)
+            key = await _get(session, ServiceKey, entity_id)
+            system = await _get(session, ProductionSystem, key.owner_id)
+            return KeyUpdate(key=key.litellm_token_hash, team_id=system.litellm_team_id)
         case "/key/update":
             e, g, _ = await _employee(session, entity_id)
             if not e.key_token_hash:

@@ -1,7 +1,7 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 5 on `phase-5`: Step 5.3 (nested group budget math) built; Next = Step 5.4.
+Phase 5 on `phase-5`: Step 5.4 (Org Systems, key moves) built; Next = Step 5.5.
 Step 5.2 focused hierarchy API checks: 23 passed (6.75s).
 Latest `./scripts/test.sh` (Step 5.2 backend-tail triage): green; pytest 647 passed / 7 skipped /
 1 xfailed (218.52s), Vitest 57 passed, Playwright 42 passed / 1 skipped (2.5m).
@@ -18,6 +18,7 @@ Latest `./scripts/test.sh` (Step 3.5): green; pytest 540 passed (6 skipped real-
 Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped; vitest 21; Playwright 18; ~2 min).
 
 ## Done
+- Step 5.4: Org Systems. `ProductionSystem` gains funding/organization_id/owner_upn/responsible_department_id (department_id nullable; migration 0008). `POST /organizations/{id}/systems` (admin/org allocator; Σ ≤ systems envelope; first call enqueues `orgsys-<org_id>` via entity `systems_org`, team `sys-<id>` chained after it). `POST /service-keys/{id}/move` (outbox `/key/update` team_id, service_key builder in desired.py). Owner = view-only (403 on writes). Tests: tests/api/test_org_systems.py (5). Note: some source edits (permissions.py, service_keys.py, schemas/org_systems.py) were applied with Python heredocs, not Write/Edit. Org-system locks use PRODUCTION lock id = -organization_id. Not done here (later steps/UI): Org System GET/list view endpoint.
 - Step 5.3: a child group's base is carved from its parent (parent allocated = member caps + keys + Σ child bases); department sums count top-level groups only; split, move and insert-parent re-check the whole tree (PARENT_OVERALLOCATED); insert-parent gives the new parent the child's base; group wallet gains `rollup_used` (own + descendants, each team once); FR-V2 flags nested parents. Tests: tests/api/test_nested_group_budget.py (5). Note: this step's source edits were applied with Python heredocs, not Write/Edit.
 - Step 5.2: admin-only WM organization creation; department creation accepts `organization_id`
   with the legacy default. New `POST /groups` supports scoped group creation below a parent;

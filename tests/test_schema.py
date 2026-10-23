@@ -20,7 +20,8 @@ SPEC_8_2 = {
     "grant": "id department_id group_id amount model project_ref purpose starts_at expires_at "
     "status created_by closed_at used returned",
     "grant_share": "id grant_id upn amount expires_at status used returned closed_reason",
-    "production_system": "id department_id litellm_team_id name budget status created_at",
+    "production_system": "id department_id litellm_team_id name budget status created_at funding "
+    "organization_id owner_upn responsible_department_id",
     "service_key": "id owner_kind owner_id litellm_token_hash alias max_budget max_parallel "
     "rpm_limit models status created_at created_by",
     "policy": "key value",

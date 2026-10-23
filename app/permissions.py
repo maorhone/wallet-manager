@@ -317,13 +317,32 @@ async def can_view_service_keys(session, p: Principal, owner_kind: str, owner_id
     system = await session.get(ProductionSystem, owner_id)
     if system is None:
         raise _not_found("System")
+    if system.funding == "organization":
+        if p.is_admin:
+            return ADMIN
+        if p.has(ORG_ALLOCATOR, "organization", system.organization_id):
+            return ORG_ALLOCATOR
+        if system.owner_upn == p.upn:  # the owner views, never writes (D-077)
+            return "owner"
+        raise _forbidden()
     return await can_view_production(session, p, system.department_id)
 
 
 async def can_manage_service_keys(session, p: Principal, owner_kind: str, owner_id: int) -> str:
-    await can_view_service_keys(session, p, owner_kind, owner_id)
+    viewed = await can_view_service_keys(session, p, owner_kind, owner_id)
     if p.is_admin:
         return ADMIN
+    if owner_kind == "system" and viewed == ORG_ALLOCATOR:
+        return ORG_ALLOCATOR
     if owner_kind == "group" and p.has(HEAD, "group", owner_id):
         return HEAD
+    raise _forbidden()
+
+
+def can_manage_org_systems(p: Principal, organization_id: int) -> str:
+    """Org Systems (5.4): the platform admin and the organization's allocator write."""
+    if p.is_admin:
+        return ADMIN
+    if p.has(ORG_ALLOCATOR, "organization", organization_id):
+        return ORG_ALLOCATOR
     raise _forbidden()

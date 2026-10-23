@@ -216,9 +216,23 @@ class ProductionSystem(Base):
     __tablename__ = "production_system"
     __table_args__ = (
         CheckConstraint(_in("status", "active", "archived"), name="ck_production_system_status"),
+        CheckConstraint(
+            _in("funding", "department", "organization"), name="ck_production_system_funding"
+        ),
+        CheckConstraint(
+            "(funding = 'department' AND department_id IS NOT NULL)"
+            " OR (funding = 'organization' AND organization_id IS NOT NULL)",
+            name="ck_production_system_funder",
+        ),
     )
     id: Mapped[int] = mapped_column(BigInteger, **ID)
-    department_id: Mapped[int] = mapped_column(ForeignKey("department.id"))
+    # NULL for an Org System, which is funded from the organization's systems envelope (5.4)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("department.id"))
+    funding: Mapped[str] = mapped_column(Text, server_default="department")
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organization.id"))
+    owner_upn: Mapped[str | None] = mapped_column(Text)  # view-only owner of an Org System
+    # a label only: an Org System never counts in this department's spend
+    responsible_department_id: Mapped[int | None] = mapped_column(ForeignKey("department.id"))
     # set right after insert, once the row's own id is known (f"sys-{id}")
     litellm_team_id: Mapped[str | None] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)

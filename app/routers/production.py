@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
+from app.schemas.org_systems import OrgSystemIn
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn
-from app.services import production
+from app.services import org_systems, production
 from app.writes import Write, write_response
 
 router = APIRouter()
@@ -21,6 +22,14 @@ async def post_production_system(
     department_id: int, body: ProductionSystemIn, ctx: Write, principal: CurrentPrincipal
 ):
     entities = await production.create_production_system(ctx, principal, department_id, body)
+    return await write_response(ctx, entities)
+
+
+@router.post("/organizations/{organization_id}/systems")
+async def post_org_system(
+    organization_id: int, body: OrgSystemIn, ctx: Write, principal: CurrentPrincipal
+):
+    entities = await org_systems.create_org_system(ctx, principal, organization_id, body)
     return await write_response(ctx, entities)
 
 

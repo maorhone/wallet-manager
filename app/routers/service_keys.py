@@ -3,9 +3,10 @@ from typing import Literal
 from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
+from app.schemas.org_systems import KeyMoveIn
 from app.schemas.service_keys import ServiceKeyIn
-from app.services import service_keys
-from app.writes import Write
+from app.services import org_systems, service_keys
+from app.writes import Write, write_response
 
 router = APIRouter()
 
@@ -23,6 +24,11 @@ async def rotate(key_id: int, request: Request, ctx: Write, principal: CurrentPr
 @router.post("/service-keys/{key_id}/revoke")
 async def revoke(key_id: int, request: Request, ctx: Write, principal: CurrentPrincipal):
     return await service_keys.change(ctx, principal, request.app.state.litellm, key_id, "revoke")
+
+
+@router.post("/service-keys/{key_id}/move")
+async def move(key_id: int, body: KeyMoveIn, ctx: Write, principal: CurrentPrincipal):
+    return await write_response(ctx, await org_systems.move_key(ctx, principal, key_id, body))
 
 
 @router.get("/service-keys")
