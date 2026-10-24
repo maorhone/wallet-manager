@@ -7,6 +7,7 @@ import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
 import Department from './pages/Department';
 import Personal from './pages/Personal';
+import Requests from './pages/Requests';
 import SectionBudget from './pages/SectionBudget';
 import '../styles/v2.css';
 
@@ -72,6 +73,8 @@ export function Shell() {
             <p className="v2-card">{he.v2.guideText}</p>
           ) : current.path === '/v2/personal' ? (
             <Personal />
+          ) : current.path === '/v2/requests' ? (
+            <Requests />
           ) : current.path.startsWith('/v2/group/') ? (
             <SectionBudget groupId={current.path.split('/')[3]} />
           ) : current.path.startsWith('/v2/department/') ? (

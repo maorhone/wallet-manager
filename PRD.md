@@ -418,3 +418,6 @@ Done: the scheduler polls LiteLLM `/health` per model every minute and stores ok
 
 ### Phase 5 — Department screen (Step 5.19)
 `/v2/department/<id>`: four KPIs, distribution bar, section comparison with per-member denominators and previous-period usage, tabs "התקציב שלנו" / "מערכות באחריותנו" (internal systems and org systems listed separately; org systems never enter department totals), and a group hierarchy tree with add-below, add-above and move. Read endpoint `GET /budget/overview?scope=department:<id>`.
+
+### Phase 5 — Requests center (Step 5.20)
+`/v2/requests`: "שלי" and "לטיפולי" tabs with type/status filters, request detail with history, and actions by role. Credits and initiative requests are approved or rejected; throughput requests are only forwarded by section and department heads, and applied or rejected by the AI team. Employees can submit credits, initiative or throughput requests from the same screen.

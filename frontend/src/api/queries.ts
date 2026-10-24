@@ -738,17 +738,66 @@ export const useMyTagUsage = (upn: string, from: string, to: string) =>
     enabled: upn !== '' && from !== '',
   });
 
+export interface RequestItem {
+  id: number;
+  type: 'credits' | 'initiative' | 'throughput';
+  status: string;
+  requester_upn: string;
+  handler_role: string | null;
+  amount: number | string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  events?: { actor_upn: string; action: string; comment: string | null; created_at: string }[];
+}
+
+export const useRequests = (box: 'mine' | 'to_handle', type: string, status: string) =>
+  useQuery({
+    queryKey: ['requests', box, type, status],
+    queryFn: () =>
+      apiFetch<{ items: RequestItem[] }>(
+        `/requests?${new URLSearchParams({ box, ...(type && { type }), ...(status && { status }) })}`,
+      ),
+  });
+
+export const useRequestDetail = (id: number | null) =>
+  useQuery({
+    queryKey: ['requests', 'detail', id],
+    queryFn: () => apiFetch<RequestItem>(`/requests/${id}`),
+    enabled: id !== null,
+  });
+
+export const useDecideRequest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: number; decision: string; comment?: string; amount?: number }) =>
+      apiPost(
+        `/requests/${v.id}/decide`,
+        { decision: v.decision, comment: v.comment || undefined, amount: v.amount },
+        { reason: 'טיפול בבקשה' },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['requests'] }),
+  });
+};
+
 export const useSubmitRequest = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { type: 'credits' | 'throughput'; need: string; maxParallel?: number }) =>
+    mutationFn: (v: {
+      type: 'credits' | 'initiative' | 'throughput';
+      need: string;
+      maxParallel?: number;
+      amount?: number;
+      name?: string;
+    }) =>
       apiPost(
         '/requests',
         {
           type: v.type,
+          amount: v.amount,
           payload: {
             need: v.need,
             ...(v.type === 'throughput' ? { max_parallel: v.maxParallel } : {}),
+            ...(v.type === 'initiative' ? { name: v.name } : {}),
           },
         },
         { reason: 'בקשה מהמסך האישי' },

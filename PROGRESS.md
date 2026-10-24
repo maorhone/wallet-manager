@@ -1054,3 +1054,6 @@ Backend `app/services/overview.py` + `app/routers/views.py` (overview, attention
 
 ## Step 5.19 (UI Department) done
 `overview.department_overview` (scope=department:<id>), `v2/pages/Department.tsx`, `HierarchyEditor.tsx` (uses 5.2 endpoints), Shell route. Tests: tests/api/test_budget_overview.py, Department.test.tsx. e2e `v2-department.spec.ts` written, not run (phase-end mode). Next: 5.20.
+
+## Step 5.20 (UI Requests center) done
+`v2/pages/Requests.tsx` (tabs שלי/לטיפולי, type+status filters, detail with history, role actions: approve/reject credits+initiative, forward-only throughput until AI team applies/rejects), `RequestForm.tsx`, Shell route, queries `useRequests/useRequestDetail/useDecideRequest`. Targeted vitest green (31). e2e `v2-requests.spec.ts` written, not run (phase-end mode). Next: 5.21.
