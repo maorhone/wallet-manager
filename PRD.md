@@ -102,6 +102,7 @@ Bulk allocation (Step 5.10, D-066/D-075): `POST /groups/{id}/bulk-allocation/pre
 replace the base cap of chosen members (`upns`) or all allocatable members (`all`) with one amount plus per-member
 overrides. Preview shows before/after, effective total, remaining allocatable and an over-allocation warning; the
 commit is one transaction (outbox and audit per employee) and follows today's over-allocation factor.
+The section page (Step 5.18) opens this as a drawer: uniform amount, one optional override, preview, confirm with reason.
 
 Transfers of unused balance (Step 5.9, D-069/D-071): `POST /transfers/preview` (read-only before/after) and
 `POST /transfers` move credit between employees, initiatives and sub-groups of one section, or between
