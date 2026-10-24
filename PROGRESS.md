@@ -1057,3 +1057,6 @@ Backend `app/services/overview.py` + `app/routers/views.py` (overview, attention
 
 ## Step 5.20 (UI Requests center) done
 `v2/pages/Requests.tsx` (tabs שלי/לטיפולי, type+status filters, detail with history, role actions: approve/reject credits+initiative, forward-only throughput until AI team applies/rejects), `RequestForm.tsx`, Shell route, queries `useRequests/useRequestDetail/useDecideRequest`. Targeted vitest green (31). e2e `v2-requests.spec.ts` written, not run (phase-end mode). Next: 5.21.
+
+## Step 5.21 (UI Initiative / system details) done
+`v2/pages/Initiative.tsx` (my initiatives, read-only, "בקשת שינוי" link), `SystemDetail.tsx` (budget, consumption = sum of key usage, balance, connection status, key aliases + limits, funding owner, allocator key move). Backend: `GET /initiatives` (owner's own), `/me` adds `initiative_owner` role so the Systems area shows for owners. Tests: test_initiatives.py, Initiative.test.tsx; e2e `v2-initiative.spec.ts` written, not run (phase-end mode). Gaps: blocks-by-reason and per-model trend not shown on this page (reports exist; see 5.23). Next: 5.22.

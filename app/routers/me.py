@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from app.auth.session import CurrentPrincipal, Db
 from app.errors import invalid_request
-from app.models import Department, Employee, Grp, SpendSnapshot
+from app.models import Department, Employee, Grp, Initiative, SpendSnapshot
 from app.schemas.me import MeOut, NamedRef, RoleOut, ScopeOut
 from app.services import blocks, views
 
@@ -96,6 +96,8 @@ async def me(request: Request, principal: CurrentPrincipal, db: Db):
             scopes.append(ScopeOut(kind="platform", role=b.role))
         else:
             scopes.append(ScopeOut(kind=b.scope_kind, id=b.scope_id, name=name, role=b.role))
+    if await db.scalar(select(Initiative.id).where(Initiative.owner_upn == principal.upn).limit(1)):
+        roles.append(RoleOut(role="initiative_owner", scope_kind="self"))
 
     now = datetime.now(ZoneInfo(settings.app_timezone))
     return MeOut(

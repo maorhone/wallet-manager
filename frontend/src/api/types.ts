@@ -382,7 +382,7 @@ export type ServiceKeyStatus = 'pending' | 'active' | 'revoked' | 'failed';
 
 export interface ServiceKey {
   id: number;
-  owner_kind: 'group' | 'system';
+  owner_kind: 'group' | 'system' | 'initiative';
   owner_id: number;
   alias: string;
   max_budget: number;

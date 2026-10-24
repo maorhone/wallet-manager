@@ -104,6 +104,11 @@ async def list_for_group(db, principal: Principal, group_id: int) -> dict:
     return {"items": await _view(db, items)}
 
 
+async def list_mine(db, principal: Principal) -> dict:
+    query = select(Initiative).where(Initiative.owner_upn == principal.upn).order_by(Initiative.id)
+    return {"items": await _view(db, list(await db.scalars(query)))}
+
+
 async def get(db, principal: Principal, initiative_id: int) -> dict:
     initiative = await db.get(Initiative, initiative_id)
     if initiative is None:

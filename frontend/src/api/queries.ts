@@ -539,7 +539,7 @@ export const useMyUsage = (from: string, to: string) =>
 const hasPendingServiceKeys = (d: ServiceKeysList) =>
   d.items.some((k) => k.sync_status === 'pending');
 
-export const useServiceKeys = (ownerKind: 'group' | 'system', ownerId: number) =>
+export const useServiceKeys = (ownerKind: 'group' | 'system' | 'initiative', ownerId: number) =>
   useQuery({
     queryKey: ['service-keys', ownerKind, ownerId],
     queryFn: () =>
@@ -971,6 +971,37 @@ export const useHierarchyChange = () => {
         return apiPost(`/groups/${c.groupId}/insert-parent`, team(c.name), write);
       return apiPatch(`/groups/${c.groupId}/parent`, { parent_group_id: c.parentId }, write);
     },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export interface InitiativeView {
+  id: number;
+  name: string;
+  owner_upn: string;
+  group_id: number;
+  period_start: string | null;
+  period_end: string | null;
+  budget: number;
+  status: string;
+  tech_status: 'connected' | 'pending' | 'not_connected';
+}
+
+export const useMyInitiatives = () =>
+  useQuery({
+    queryKey: ['initiatives', 'mine'],
+    queryFn: () => apiFetch<{ items: InitiativeView[] }>('/initiatives'),
+  });
+
+export const useMoveKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { keyId: number; targetSystemId: number; key: string }) =>
+      apiPost(
+        `/service-keys/${v.keyId}/move`,
+        { target_system_id: v.targetSystemId },
+        { reason: 'העברת מפתח למערכות ארגוניות', idempotencyKey: v.key },
+      ),
     onSuccess: () => qc.invalidateQueries(),
   });
 };

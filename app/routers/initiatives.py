@@ -18,6 +18,11 @@ async def list_for_group(group_id: int, principal: CurrentPrincipal, db: Db):
     return await initiatives.list_for_group(db, principal, group_id)
 
 
+@router.get("/initiatives")
+async def list_mine(principal: CurrentPrincipal, db: Db):
+    return await initiatives.list_mine(db, principal)
+
+
 @router.get("/initiatives/{initiative_id}")
 async def get(initiative_id: int, principal: CurrentPrincipal, db: Db):
     return await initiatives.get(db, principal, initiative_id)

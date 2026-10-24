@@ -89,6 +89,11 @@ async def test_owner_read_only(login_wm, provisioned):
     assert (await owner.get(f"/initiatives/{iid}")).status_code == 200
     listed = await owner.get(f"/groups/{G1}/initiatives")
     assert [i["id"] for i in listed.json()["items"]] == [iid]
+    roles = (await owner.get("/me")).json()["roles"]
+    assert "initiative_owner" in [r["role"] for r in roles]
+    mine = await owner.get("/initiatives")
+    assert [i["id"] for i in mine.json()["items"]] == [iid]
+    assert (await head.get("/initiatives")).json()["items"] == []
     denied = await send(owner, "POST", f"/groups/{G1}/initiatives", initiative(name="Mine"))
     assert denied.status_code == 403, denied.text
     key = {

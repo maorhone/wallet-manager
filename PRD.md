@@ -421,3 +421,6 @@ Done: the scheduler polls LiteLLM `/health` per model every minute and stores ok
 
 ### Phase 5 — Requests center (Step 5.20)
 `/v2/requests`: "שלי" and "לטיפולי" tabs with type/status filters, request detail with history, and actions by role. Credits and initiative requests are approved or rejected; throughput requests are only forwarded by section and department heads, and applied or rejected by the AI team. Employees can submit credits, initiative or throughput requests from the same screen.
+
+### Phase 5 — Initiative / system details (Step 5.21)
+An initiative owner sees their initiatives read-only (budget, consumption, balance, connection status, key aliases and limits, funding owner) and opens a change request; admins and org allocators can move a key to an org system.

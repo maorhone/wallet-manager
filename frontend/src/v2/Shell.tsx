@@ -6,6 +6,7 @@ import { ErrorState } from '../components/ErrorState';
 import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
 import Department from './pages/Department';
+import Initiative from './pages/Initiative';
 import Personal from './pages/Personal';
 import Requests from './pages/Requests';
 import SectionBudget from './pages/SectionBudget';
@@ -73,6 +74,14 @@ export function Shell() {
             <p className="v2-card">{he.v2.guideText}</p>
           ) : current.path === '/v2/personal' ? (
             <Personal />
+          ) : current.path === '/v2/systems' ? (
+            <Initiative
+              canMove={me.roles.some(
+                (r) =>
+                  ['platform_admin', 'org_allocator'].includes(r.role) &&
+                  ['global', 'organization'].includes(r.scope_kind),
+              )}
+            />
           ) : current.path === '/v2/requests' ? (
             <Requests />
           ) : current.path.startsWith('/v2/group/') ? (
