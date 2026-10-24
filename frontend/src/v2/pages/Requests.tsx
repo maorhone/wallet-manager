@@ -23,6 +23,8 @@ function Detail({ id, canAct }: { id: number; canAct: boolean }) {
   const decide = useDecideRequest();
   const [comment, setComment] = useState('');
   if (detail.isPending) return <p role="status">{he.loading}</p>;
+  // After forwarding, the request may leave this user's scope and the refetch 404s.
+  if (decide.isSuccess && (detail.error || !detail.data)) return <p role="status">{s.decided}</p>;
   if (detail.error || !detail.data) return <ErrorState error={detail.error} />;
   const r = detail.data;
   return (

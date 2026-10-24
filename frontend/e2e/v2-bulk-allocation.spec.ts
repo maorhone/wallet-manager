@@ -7,7 +7,7 @@ test('section head sets a uniform amount with one override, sees before/after an
   await page.goto('/v2/group/1');
   await page.getByRole('button', { name: 'הקצאה קבוצתית' }).click();
   await page.getByLabel('סכום אחיד לכל החברים').fill('1000');
-  await page.getByLabel('חריגה לעובד אחד').selectOption({ label: 'dani' });
+  await page.getByLabel('חריגה לעובד אחד').selectOption({ label: 'Dani Cohen' });
   await page.getByLabel('סכום החריגה').fill('2000');
   await page.getByRole('button', { name: 'תצוגה מקדימה' }).click();
   await expect(page.getByText(/נשאר להקצאה/)).toBeVisible();

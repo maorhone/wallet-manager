@@ -14,6 +14,7 @@ test('department head adds a group above a section and sees org systems outside 
   await page.getByLabel('סיבת השינוי').fill('ארגון מחדש');
   await page.getByRole('button', { name: 'שמירה' }).click();
   await expect(page.getByRole('status')).toContainText('השינוי נשמר');
+  await page.getByRole('button', { name: 'סגירה' }).click();
   await page.getByRole('tab', { name: 'מערכות באחריותנו' }).click();
   await expect(page.getByText('מערכות ארגוניות אינן נכללות בסכומי המחלקה.')).toBeVisible();
 });
