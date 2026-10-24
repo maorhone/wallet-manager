@@ -307,7 +307,9 @@ def _bucket(day, granularity):
     return day.replace(day=1) if granularity == "month" else day
 
 
-async def usage(db, principal, settings, clock, kind, id_, start, end, granularity, by, reader=None):
+async def usage(
+    db, principal, settings, clock, kind, id_, start, end, granularity, by, reader=None
+):
     lo, hi = report_window(start, end, settings.app_timezone, 400)
     # Project tags reveal what individuals work on, so they follow the member-visibility rules.
     scope = await _report_scope(db, principal, kind, id_, need_members=by != "model")

@@ -35,7 +35,16 @@ async def usage_report(
 ):
     state = request.app.state
     return await reports.usage(
-        db, principal, state.settings, state.clock, scope, id, from_, to, granularity, by,
+        db,
+        principal,
+        state.settings,
+        state.clock,
+        scope,
+        id,
+        from_,
+        to,
+        granularity,
+        by,
         state.litellm_reader,
     )
 

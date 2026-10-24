@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.config import Settings
+
 from .db import budget, jwt_mapping, organization, spend_logs, team, team_member, token
 from .state import FakeState
 
