@@ -41,6 +41,7 @@ class Spend(BaseModel):
     api_key: str | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    tags: list[str] | None = None
 
 
 @router.post("/reset")
@@ -147,6 +148,7 @@ async def _add_spend(conn, body: Spend, now: datetime):
             spend=body.amount,
             prompt_tokens=body.prompt_tokens,
             completion_tokens=body.completion_tokens,
+            request_tags=body.tags,
         )
     )
     await bump_spend(conn, body.api_key, body.team_id, body.user_id, row[0], body.amount)

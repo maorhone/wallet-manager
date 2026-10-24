@@ -298,22 +298,43 @@ async def _usage_cap(db, scope, settings, clock):
     return scope.entity.base_budget + amounts.get(scope.entity.id, ZERO)
 
 
-async def usage(db, principal, settings, clock, kind, id_, start, end, granularity, by):
-    report_window(start, end, settings.app_timezone, 400)
-    scope = await _report_scope(db, principal, kind, id_, need_members=by == "member")
+UNTAGGED = "ללא תיוג"
+
+
+def _bucket(day, granularity):
+    if granularity == "week":
+        return day - timedelta(days=day.weekday())
+    return day.replace(day=1) if granularity == "month" else day
+
+
+async def usage(db, principal, settings, clock, kind, id_, start, end, granularity, by, reader=None):
+    lo, hi = report_window(start, end, settings.app_timezone, 400)
+    # Project tags reveal what individuals work on, so they follow the member-visibility rules.
+    scope = await _report_scope(db, principal, kind, id_, need_members=by != "model")
+    if by == "tag":
+        rows = await reader.spend_by_tag(
+            lo,
+            hi,
+            team_ids=None if kind == "global" else [g.litellm_team_id for g in scope.groups],
+            users=[scope.entity.upn] if kind == "employee" else None,
+            timezone=settings.app_timezone,
+        )
+        series = defaultdict(Decimal)
+        for project, day, spend in rows:
+            series[(_bucket(day, granularity), project or UNTAGGED)] += spend
+        return {
+            "series": [dict(bucket=b, key=k, spend=s) for (b, k), s in sorted(series.items())],
+            "cap": await _usage_cap(db, scope, settings, clock),
+            "taken_at": clock.now(),
+        }
     snapshot_kind, ids = _snapshot_scope(scope, by)
     rows = await _day_rows(db, snapshot_kind, ids, start, end)
     series = defaultdict(Decimal)
     for r in rows:
         if (by == "model" and r.model is None) or (by == "member" and r.model is not None):
             continue
-        bucket = date.fromisoformat(r.period)
-        if granularity == "week":
-            bucket -= timedelta(days=bucket.weekday())
-        elif granularity == "month":
-            bucket = bucket.replace(day=1)
         key = r.model if by == "model" else r.scope_id
-        series[(bucket, key)] += r.spend
+        series[(_bucket(date.fromisoformat(r.period), granularity), key)] += r.spend
     return {
         "series": [dict(bucket=b, key=k, spend=s) for (b, k), s in sorted(series.items())],
         "cap": await _usage_cap(db, scope, settings, clock),

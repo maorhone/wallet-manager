@@ -30,12 +30,13 @@ async def usage_report(
     from_: Annotated[date, Query(alias="from")],
     to: date,
     granularity: Literal["day", "week", "month"] = "day",
-    by: Literal["model", "member"] = "model",
+    by: Literal["model", "member", "tag"] = "model",
     id: str | None = None,
 ):
     state = request.app.state
     return await reports.usage(
-        db, principal, state.settings, state.clock, scope, id, from_, to, granularity, by
+        db, principal, state.settings, state.clock, scope, id, from_, to, granularity, by,
+        state.litellm_reader,
     )
 
 

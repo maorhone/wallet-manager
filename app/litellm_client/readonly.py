@@ -53,6 +53,20 @@ GROUP BY team_id, "user", api_key, model_group, day
 ORDER BY day, team_id, "user", model_group
 """
 
+# Tags are LiteLLM request_tags (jsonb array of strings); the project is the first "project:<name>".
+_SPEND_BY_TAG = """
+SELECT (SELECT substr(t, 9) FROM jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(request_tags) = 'array' THEN request_tags ELSE '[]'::jsonb END
+        ) t WHERE t LIKE 'project:_%' LIMIT 1) AS project,
+       ("startTime" AT TIME ZONE :timezone)::date AS day, SUM(spend) AS spend
+FROM "LiteLLM_SpendLogs"
+WHERE "startTime" >= :start AND "startTime" < :end
+  AND (CAST(:teams AS text[]) IS NULL OR team_id = ANY(CAST(:teams AS text[])))
+  AND (CAST(:users AS text[]) IS NULL OR "user" = ANY(CAST(:users AS text[])))
+GROUP BY project, day
+ORDER BY day, project NULLS LAST
+"""
+
 # Clip overlaps to local calendar days, then sweep end events before start events.
 # Group equal events before the window sum so ties cannot depend on query row order.
 _CONCURRENCY_PEAKS = """
@@ -158,6 +172,17 @@ class LiteLLMReader:
         return [
             SpendRow(r[0], r[1], r[2], r[3], r[4], _dec(r[5]), int(r[6]), int(r[7]))
             for r in await self._rows(_SPEND_ROWS, start=start, end=end, timezone=timezone)
+        ]
+
+    async def spend_by_tag(
+        self, start: datetime, end: datetime, *, team_ids=None, users=None, timezone="UTC"
+    ) -> list[tuple[str | None, date, Decimal]]:
+        """Daily spend per project tag; project None = untagged."""
+        return [
+            (r[0], r[1], _dec(r[2]))
+            for r in await self._rows(
+                _SPEND_BY_TAG, start=start, end=end, teams=team_ids, users=users, timezone=timezone
+            )
         ]
 
     async def concurrency_peaks(

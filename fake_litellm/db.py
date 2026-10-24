@@ -125,6 +125,7 @@ spend_logs = Table(
     Column("spend", Float),
     Column("prompt_tokens", Integer, server_default="0"),
     Column("completion_tokens", Integer, server_default="0"),
+    Column("request_tags", JSONB),
 )
 
 

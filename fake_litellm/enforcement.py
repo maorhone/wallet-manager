@@ -188,7 +188,13 @@ async def _check_budgets(
 
 
 async def _charge(
-    conn: AsyncConnection, key: dict, model: str, cost: float, start: datetime, end: datetime
+    conn: AsyncConnection,
+    key: dict,
+    model: str,
+    cost: float,
+    start: datetime,
+    end: datetime,
+    tags: list[str] | None = None,
 ) -> None:
     team_id = key["team_id"]
     org_id = None
@@ -209,6 +215,7 @@ async def _charge(
             spend=cost,
             prompt_tokens=1,
             completion_tokens=1,
+            request_tags=tags,
         )
     )
     await bump_spend(conn, key["token"], team_id, key["user_id"], org_id, cost)
@@ -255,6 +262,9 @@ async def chat_completions(request: Request):
         raise HTTPException(503, detail={"error": "service unavailable (simulated outage)"})
     body = await request.json()
     model = body.get("model", "")
+    # LiteLLM reads comma-separated request tags from x-litellm-tags into SpendLogs.request_tags.
+    raw = request.headers.get(Settings().project_tag_header, "")
+    tags = [t.strip() for t in raw.split(",") if t.strip()] or None
     try:
         async with state.engine.connect() as conn:
             key = await _authenticate(conn, request.headers.get("authorization", ""))
@@ -270,7 +280,7 @@ async def chat_completions(request: Request):
                 await asyncio.sleep(state.latency_ms / 1000)
                 end = state.now()
                 async with state.engine.begin() as wconn:
-                    await _charge(wconn, key, model, state.cost_per_request, start, end)
+                    await _charge(wconn, key, model, state.cost_per_request, start, end, tags)
             finally:
                 state.in_flight[tok] -= 1
     except _Reject as r:

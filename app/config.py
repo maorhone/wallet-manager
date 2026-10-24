@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     litellm_master_key: str = ""
     litellm_database_url: str = ""
     app_timezone: str = "Asia/Jerusalem"
+    # Client hook header carrying "project:<name>[,tool:<name>]"; LiteLLM stores it as request_tags.
+    project_tag_header: str = "x-litellm-tags"
     dev_auth: bool = False
     seed_file: str = "seed/dev.yaml"
     session_secret: str = "change-me"
