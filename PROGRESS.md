@@ -1,7 +1,9 @@
 # Progress — Wallet Manager
 
 ## Status
-Phase 5 on `phase-5`: Steps 5.5-5.6 built locally (batch B5 = 5.5-5.7, push at 5.7); Next = Step 5.7 (batch end: full test.sh + review + push; merge-ui before 5.16).
+Phase 5 on `phase-5`: Steps 5.5-5.6 built locally (batch B5 = 5.5-5.7, push at 5.7); BLOCKED: Step 5.7 retry exhausted its three full runs; no push. Steps 5.5–5.6 remain local as completed B5 predecessors. See retry notes below.
+Step 5.7 retry (2026-10-24) BLOCKED: restored implementation, completed one B5 review and fixed all five blockers plus three implementation majors. Consolidated targeted gate: 88 passed / 2 xpassed; lint/typecheck green. First retry full failed a reports-grants setup timeout (isolated pass; quarantined), second full was green (670 passed / 7 skipped / 11 xpassed, Vitest60, browser43 passed /1 skipped). Post-review final full: 689 passed /7 skipped /11 xpassed, Vitest60, browser41 passed /1 skipped /2 failed. Split browser context timeout passed alone (2.1s; quarantined); stale fixed production-budget assertion corrected to derived0 and scenario passed alone (4.2s). Full cap reached3/3, so no confirming full run or push. Work saved at orch-blocked/5.7-retry-1024 (1e427d5) and .claude/state/orch/step-5.7-retry.patch. Only Step5.7 commits were reset; completed Step5.5/5.6 commits retained. B5 findings exist again in active pre-review code; restore saved fixes before any future publication. Next: owner/supervisor must authorize further verification; do not start5.8.
+
 Step 5.2 focused hierarchy API checks: 23 passed (6.75s).
 Latest `./scripts/test.sh` (Step 5.2 backend-tail triage): green; pytest 647 passed / 7 skipped /
 1 xfailed (218.52s), Vitest 57 passed, Playwright 42 passed / 1 skipped (2.5m).
