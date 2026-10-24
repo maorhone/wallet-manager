@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     scheduler_grants_interval_s: float = 60
     scheduler_notify_interval_s: float = 900
     scheduler_report_alerts_interval_s: float = 86400
+    service_health_interval_s: float = 60
     notify_email_enabled: bool = False
     smtp_host: str = "smtp.corp.example"
     smtp_port: int = 25

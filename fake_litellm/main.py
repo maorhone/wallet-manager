@@ -516,6 +516,15 @@ def create_app(
     async def liveliness():
         return "I'm alive!"
 
+    @app.get("/health", dependencies=[Depends(guard)])
+    async def health(request: Request):
+        """Per-model probes like LiteLLM's ``/health`` (endpoints keyed by ``model``)."""
+        probes = request.app.state.fake.model_health
+        return {
+            "healthy_endpoints": [{"model": m} for m, e in probes.items() if e is None],
+            "unhealthy_endpoints": [{"model": m, "error": e} for m, e in probes.items() if e],
+        }
+
     @app.get("/health/readiness", dependencies=[Depends(check_outage)])  # unauthenticated
     async def readiness(request: Request):
         """§5.4 Redis row: ``redis`` config controls ``cache``/``status`` (no real Redis used)."""

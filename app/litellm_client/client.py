@@ -22,6 +22,7 @@ from .models import (
     KeyGenerateResponse,
     KeyListResponse,
     KeyUpdate,
+    ModelHealth,
     OrganizationInfo,
     OrganizationMemberAdd,
     OrganizationNew,
@@ -100,6 +101,21 @@ class LiteLLMClient:
             return HealthReadiness.model_validate(resp.json())
         except ValueError:
             raise LiteLLMTransientError(f"GET /health/readiness: HTTP {resp.status_code}") from None
+
+    async def health_models(self) -> list[tuple[ModelHealth, bool]]:
+        """Per-model probe results from ``/health``: (entry, healthy). Parsed on 4xx/5xx too."""
+        try:
+            resp = await self._http.request("GET", "/health")
+            body = resp.json()
+        except httpx.TransportError as exc:
+            raise LiteLLMTransientError(f"GET /health: {type(exc).__name__}") from None
+        except ValueError:
+            raise LiteLLMTransientError("GET /health: not JSON") from None
+        return [
+            (ModelHealth.model_validate(e), ok)
+            for key, ok in (("healthy_endpoints", True), ("unhealthy_endpoints", False))
+            for e in body.get(key) or []
+        ]
 
     # --- organizations ---
     async def organization_new(self, body: OrganizationNew) -> OrganizationInfo:

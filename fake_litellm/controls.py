@@ -97,6 +97,13 @@ async def config(body: Config, request: Request):
     return body
 
 
+@router.post("/model_health")
+async def model_health(body: dict[str, str | None], request: Request):
+    """Replace the per-model probe results served by ``/health`` (value = error text or null)."""
+    request.app.state.fake.model_health = dict(body)
+    return body
+
+
 class Clock(BaseModel):
     offset_s: float
 

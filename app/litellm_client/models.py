@@ -206,6 +206,13 @@ class HealthReadiness(_Resp):
     litellm_version: str | None = None
 
 
+class ModelHealth(_Resp):
+    """One entry of ``/health`` ``healthy_endpoints`` / ``unhealthy_endpoints``."""
+
+    model: str
+    error: str | None = None
+
+
 class BudgetRecord(_Resp):
     max_budget: float | None = None
     budget_duration: str | None = None

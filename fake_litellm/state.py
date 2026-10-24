@@ -17,6 +17,8 @@ class FakeState:
     timezone: str = "Asia/Jerusalem"  # budget periods follow APP_TIMEZONE
     redis: str = "none"  # none | ok | down (§5.4 Redis status, reported by /health/readiness)
 
+    model_health: dict[str, str | None] = field(default_factory=dict)  # model -> error or None
+
     def now(self) -> datetime:
         return datetime.now(UTC) + timedelta(seconds=self.clock_offset_s)
 
@@ -28,3 +30,4 @@ class FakeState:
         self.cost_per_request = 1
         self.in_flight.clear()
         self.redis = "none"
+        self.model_health.clear()

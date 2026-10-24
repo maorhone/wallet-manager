@@ -23,10 +23,11 @@ from app.db import LockKind, make_engine, make_session_factory
 from app.directory import FixtureDirectory
 from app.litellm_client import LiteLLMClient, LiteLLMReader
 from app.scheduler import jobs
+from app.services import service_health
 
 log = logging.getLogger("app.scheduler")
 
-GRANTS_LOCK, NOTIFY_LOCK, RECONCILE_LOCK, REPORT_ALERTS_LOCK = 1, 2, 3, 4
+GRANTS_LOCK, NOTIFY_LOCK, RECONCILE_LOCK, REPORT_ALERTS_LOCK, SERVICE_HEALTH_LOCK = 1, 2, 3, 4, 5
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,14 @@ def build_jobs(settings: Settings, session_factory, client, reader, directory, c
             lambda: jobs.run_report_alerts(
                 session_factory, client, clock, reader=reader, settings=settings,
                 directory=directory,
+            ),
+            True, timeout,
+        ),
+        Job(
+            "service_health", SERVICE_HEALTH_LOCK,
+            timedelta(seconds=settings.service_health_interval_s),
+            lambda: service_health.run_service_health(
+                session_factory, client, clock, settings=settings
             ),
             True, timeout,
         ),

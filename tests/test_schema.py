@@ -36,6 +36,7 @@ SPEC_8_2 = {
     "spend_snapshot": "scope_kind scope_id period model spend prompt_tokens completion_tokens "
     "taken_at",
     "rate_card": "model input_per_1m output_per_1m currency effective_from",
+    "service_health": "model state detail checked_at",
     "transfer": "id group_id source_kind source_id target_kind target_id amount write_ids "
     "created_by created_at",
     "notification": "id upn kind scope_kind scope_id payload created_at read_at",
@@ -58,4 +59,4 @@ async def test_tables_match_spec_8_2(engine):
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
     assert actual == {t: set(c.split()) for t, c in SPEC_8_2.items()}
-    assert len(SPEC_8_2) == 23  # v1 + production, organization, initiatives and requests/events
+    assert len(SPEC_8_2) == 24  # v1 + phase 5 tables (incl. service health)

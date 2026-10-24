@@ -14,6 +14,7 @@ from .models import (
     KeyUpdate,
     Member,
     ModelBudget,
+    ModelHealth,
     OrganizationMemberAdd,
     OrganizationNew,
     OrganizationUpdate,
@@ -30,6 +31,7 @@ from .readonly import LiteLLMReader
 
 __all__ = [
     "HealthReadiness",
+    "ModelHealth",
     "JwtKeyMappingDelete",
     "JwtKeyMappingNew",
     "JwtKeyMappingUpdate",

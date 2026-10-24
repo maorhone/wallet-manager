@@ -9,9 +9,9 @@ from app.errors import ApiError, invalid_request
 from app.litellm_client import HealthReadiness
 from app.models import Employee, LitellmWrite, SpendSnapshot
 from app.models import Request as DomainRequest
-from app.permissions import ADMIN
+from app.permissions import ADMIN, AI_TEAM
 from app.schemas.platform import OrganizationCreateIn
-from app.services import platform
+from app.services import platform, service_health
 from app.writes import Write, write_response
 
 router = APIRouter()
@@ -72,6 +72,14 @@ async def status(request: Request, principal: CurrentPrincipal, db: Db):
         "spend_taken_at": await db.scalar(select(func.max(SpendSnapshot.taken_at))),
         "last_sync": None,
     }
+
+
+@router.get("/status/service")
+async def service_status(request: Request, principal: CurrentPrincipal, db: Db):
+    """Per-model service state for every user; error detail only for ai_team and admin."""
+    state = request.app.state
+    privileged = principal.is_admin or principal.has(AI_TEAM, "global")
+    return await service_health.current(db, state.clock.now(), state.settings, detail=privileged)
 
 
 def _admin_only(principal) -> None:

@@ -395,6 +395,16 @@ class RateCard(Base):
     effective_from: Mapped[datetime] = _created()
 
 
+class ServiceHealth(Base):
+    """Latest polled state per model: ok | limited | loaded | unknown (D-060)."""
+
+    __tablename__ = "service_health"
+    model: Mapped[str] = mapped_column(Text, primary_key=True)
+    state: Mapped[str] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Notification(Base):
     __tablename__ = "notification"
     id: Mapped[int] = mapped_column(BigInteger, **ID)
