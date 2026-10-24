@@ -825,3 +825,38 @@ export const useTransfer = () => {
     onSuccess: () => qc.invalidateQueries(),
   });
 };
+
+export interface BulkBody {
+  all: boolean;
+  amount: number;
+  overrides: Record<string, number>;
+}
+
+export interface BulkPreview {
+  rows: { upn: string; before: number; after: number }[];
+  allocated_after: number;
+  base_budget: number;
+  remaining_allocatable: number;
+  over_allocation_warning: boolean;
+  exceeds_limit: boolean;
+}
+
+export const useBulkPreview = (groupId: number) =>
+  useMutation({
+    mutationFn: (body: BulkBody) =>
+      apiPost<BulkPreview>(`/groups/${groupId}/bulk-allocation/preview`, body, {
+        reason: 'preview',
+      }),
+  });
+
+export const useBulkAllocation = (groupId: number) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: BulkBody; reason: string; key: string }) =>
+      apiPost(`/groups/${groupId}/bulk-allocation`, v.body, {
+        reason: v.reason,
+        idempotencyKey: v.key,
+      }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};

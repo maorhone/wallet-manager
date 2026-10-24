@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useAttention, useBudgetOverview } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
@@ -7,6 +6,7 @@ import { he } from '../../i18n/he';
 import { AttentionList, type AttentionItem } from '../components/AttentionList';
 import { DistributionBar } from '../components/DistributionBar';
 import { KpiCard } from '../components/KpiCard';
+import { BulkAllocation } from './BulkAllocation';
 import { TransferDrawer } from './TransferDrawer';
 
 const s = he.v2.sectionPage;
@@ -15,6 +15,7 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
   const overview = useBudgetOverview(groupId);
   const attention = useAttention(groupId);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
   if (overview.isPending) return <p role="status">{he.loading}</p>;
   if (overview.error || !overview.data)
     return <ErrorState error={overview.error} onRetry={overview.refetch} />;
@@ -74,7 +75,9 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
         <button type="button" onClick={() => setTransferFrom('')}>
           {s.transfer}
         </button>{' '}
-        <Link to={`/group/${groupId}/members`}>{s.bulk}</Link>
+        <button type="button" onClick={() => setBulkOpen(true)}>
+          {s.bulk}
+        </button>
         <table>
           <thead>
             <tr>
@@ -104,6 +107,9 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
         <summary>{s.advanced}</summary>
         <p>{s.advancedText}</p>
       </details>
+      {bulkOpen && (
+        <BulkAllocation groupId={Number(groupId)} rows={rows} onClose={() => setBulkOpen(false)} />
+      )}
       {transferFrom !== null && (
         <TransferDrawer
           groupId={Number(groupId)}

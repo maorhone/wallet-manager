@@ -1048,3 +1048,6 @@ Step 5.9: transfers of unused balance. Endpoints: employee/initiative/sub-group 
 
 ## Step 5.17 (UI section budget + transfer drawer) done
 Backend `app/services/overview.py` + `app/routers/views.py` (overview, attention; scope=group:<id> only, department scope to be added in 5.19), UI `v2/pages/SectionBudget.tsx`, `TransferDrawer.tsx`. Targeted 5.17-3 green (pytest 3, vitest 27). e2e `v2-section-budget.spec.ts` written, not run (phase-end mode). Bulk CTA links to the existing members page until 5.18. Next: 5.18.
+
+## Step 5.18 (UI bulk allocation) done
+`v2/pages/BulkAllocation.tsx` drawer opened from the section page (replaces the link to the members page); uniform amount + one override, preview before/after + remaining, confirm with reason (uses 5.10 endpoints). Targeted 5.18-2 green (vitest 2). e2e `v2-bulk-allocation.spec.ts` written, not run (phase-end mode). Next: 5.19.
