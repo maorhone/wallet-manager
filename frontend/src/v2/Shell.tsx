@@ -7,7 +7,9 @@ import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
 import Department from './pages/Department';
 import OrgAllocation from './pages/OrgAllocation';
+import Guide from './pages/Guide';
 import Initiative from './pages/Initiative';
+import ServiceStatus from './pages/ServiceStatus';
 import Personal from './pages/Personal';
 import Requests from './pages/Requests';
 import SectionBudget from './pages/SectionBudget';
@@ -72,7 +74,9 @@ export function Shell() {
         <main id="v2-main" tabIndex={-1}>
           <h1>{current.label}</h1>
           {current.path === '/v2/guide' ? (
-            <p className="v2-card">{he.v2.guideText}</p>
+            <Guide />
+          ) : current.path === '/v2/service' ? (
+            <ServiceStatus />
           ) : current.path === '/v2/personal' ? (
             <Personal />
           ) : current.path === '/v2/systems' ? (

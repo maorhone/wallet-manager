@@ -427,3 +427,6 @@ An initiative owner sees their initiatives read-only (budget, consumption, balan
 
 ### Phase 5 — Organization allocation (Step 5.22)
 The organization allocator (and admin) sees two separate envelopes: departments and Org Systems. Allocations to departments and Org Systems are capped by their own envelope; only the admin resizes envelopes, never below what is already allocated. The department recommendation column shows "בהמשך" (excluded). Admin can create a new organization from the same screen.
+
+### Phase 5 — Service status and guide (Step 5.23)
+`/v2/service` lists service state per model (ok / limited / loaded / unknown) with the last update time; a stale state shows as unknown. It explains that RPM/TPM/concurrency limits are separate from Credits and lists the block reasons. `/v2/guide` ("איך זה עובד", WF-08) is static content: top-down budget and bottom-up needs, the four usage kinds, Credits vs rate limits, role tabs, FAQ, and a link to the requests center. Copy is proposed, pending UX review.
