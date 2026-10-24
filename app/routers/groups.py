@@ -2,9 +2,15 @@ from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
 from app.schemas.departments import ModelAmounts
-from app.schemas.groups import GroupLimitsIn, MemberCapIn, MemberDefaultsIn, MemberLimitsIn
+from app.schemas.groups import (
+    BulkAllocationIn,
+    GroupLimitsIn,
+    MemberCapIn,
+    MemberDefaultsIn,
+    MemberLimitsIn,
+)
 from app.schemas.platform import GroupAtDepartmentIn, GroupCreateIn, GroupParentIn
-from app.services import groups, members, platform, views
+from app.services import bulk, groups, members, platform, views
 from app.writes import Write, write_response
 
 router = APIRouter()
@@ -105,4 +111,19 @@ async def put_member_limits(
     entities = await members.set_limits(
         ctx, principal, req.app.state.directory, group_id, upn, body
     )
+    return await write_response(ctx, entities)
+
+
+@router.post("/groups/{group_id}/bulk-allocation/preview")
+async def bulk_allocation_preview(
+    group_id: int, body: BulkAllocationIn, principal: CurrentPrincipal, db: Db, req: Request
+):
+    return await bulk.preview(db, principal, req.app.state.directory, group_id, body)
+
+
+@router.post("/groups/{group_id}/bulk-allocation")
+async def bulk_allocation(
+    group_id: int, body: BulkAllocationIn, ctx: Write, principal: CurrentPrincipal, req: Request
+):
+    entities = await bulk.commit(ctx, principal, req.app.state.directory, group_id, body)
     return await write_response(ctx, entities)

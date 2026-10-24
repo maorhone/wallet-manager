@@ -22,3 +22,12 @@ class MemberLimitsIn(BaseModel):
 class MemberDefaultsIn(BaseModel):
     cap: Money
     model_caps: dict[str, Money] = {}
+
+
+class BulkAllocationIn(BaseModel):
+    """D-066: replace the base cap of the chosen members (or all of them) with one amount."""
+
+    upns: list[str] | None = None
+    all: bool = False
+    amount: Money
+    overrides: dict[str, Money] = {}

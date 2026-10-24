@@ -98,6 +98,11 @@ the section head and then the department rep can only forward (or comment), the 
 or an admin) applies (pending until the LiteLLM write succeeds) or rejects. Rate limits (`max_parallel`,
 `rpm_limit`, `model_tpm_limits`, team TPM) are writable only by the AI team and admins; section heads and
 department reps get 403 (approved behaviour change). The AI team stays bound by the policy maximum; only admins may exceed it.
+Bulk allocation (Step 5.10, D-066/D-075): `POST /groups/{id}/bulk-allocation/preview` and `POST /groups/{id}/bulk-allocation`
+replace the base cap of chosen members (`upns`) or all allocatable members (`all`) with one amount plus per-member
+overrides. Preview shows before/after, effective total, remaining allocatable and an over-allocation warning; the
+commit is one transaction (outbox and audit per employee) and follows today's over-allocation factor.
+
 Transfers of unused balance (Step 5.9, D-069/D-071): `POST /transfers/preview` (read-only before/after) and
 `POST /transfers` move credit between employees, initiatives and sub-groups of one section, or between
 internal systems of a managing section. Only the unspent, uncommitted part can move; the total is unchanged.
