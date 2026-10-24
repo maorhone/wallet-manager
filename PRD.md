@@ -408,3 +408,6 @@ Interactive login lands in v2; legacy routes (including explicit root navigation
 
 ## Phase 5 — Service status (Step 5.14)
 Done: the scheduler polls LiteLLM `/health` per model every minute and stores ok / limited / loaded / unknown. `GET /status/service` shows every signed-in user the per-model state; error detail is visible to the AI team and admins only. Missing or stale (> 2× interval) data reads "unknown", never "healthy".
+
+## Phase 5 — Personal screen (Step 5.16)
+`/v2/personal` ("ה-AI שלי"): one personal wallet (remaining, used), usage by model and by project tag, service status pill, last block with a plain-language reason (rate limit is never shown as exhausted credits) and a matching request CTA (Credits or Throughput), limits behind a disclosure, and an inline request form posting to `/requests`.

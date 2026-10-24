@@ -1042,3 +1042,6 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
 - Next after this unit: Step 5.8; UI shell integration does not complete backend 5.8–5.14.
 
 Step 5.9: transfers of unused balance. Endpoints: employee/initiative/sub-group inside one section; systems only among systems of the managing section (mixed moves 422 `system_mixed`, a decision for the owner if department-envelope moves are wanted). Unused = total minus max(spend, committed allocation). Question for owner: should a section head be able to move credit to/from an internal system? Chosen safest: no (admin or managing head only, systems only with systems).
+
+## Step 5.16 (UI personal screen) done
+`v2/pages/Personal.tsx`, `v2/personal.ts` (explainBlock), queries for /me/status, /status/service, usage by tag, request submit. Targeted 5.16-1 green (vitest 29 passed). e2e `v2-personal.spec.ts` written, not run (phase-end mode). Next: 5.17.

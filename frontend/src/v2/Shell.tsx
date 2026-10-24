@@ -5,6 +5,7 @@ import { apiPost } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
+import Personal from './pages/Personal';
 import '../styles/v2.css';
 
 export function Shell() {
@@ -67,6 +68,8 @@ export function Shell() {
           <h1>{current.label}</h1>
           {current.path === '/v2/guide' ? (
             <p className="v2-card">{he.v2.guideText}</p>
+          ) : current.path === '/v2/personal' ? (
+            <Personal />
           ) : (
             <p className="v2-muted">{he.v2.pending}</p>
           )}

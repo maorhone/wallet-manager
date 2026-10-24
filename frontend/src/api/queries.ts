@@ -692,3 +692,67 @@ export const useBlockedReport = (scope: UsageScope, id: string, period: string) 
     enabled: period !== '' && id !== '',
     refetchInterval: 15000,
   });
+
+export interface MyStatus {
+  wallet: { state: string; remaining: number };
+  limits: { max_parallel: number | null; rpm_limit: number | null };
+  last_blocks: {
+    at: string;
+    model: string | null;
+    reason: string;
+    sub: string | null;
+    retry_after: number | null;
+    action: string;
+  }[];
+  taken_at: string;
+}
+
+export interface ServiceStatus {
+  state: string;
+  models: { model: string; state: string; checked_at: string }[];
+  taken_at: string;
+}
+
+export const useMyStatus = () =>
+  useQuery({
+    queryKey: ['me-status'],
+    queryFn: () => apiFetch<MyStatus>('/me/status'),
+    refetchInterval: 15000,
+  });
+
+export const useServiceStatus = () =>
+  useQuery({
+    queryKey: ['service-status'],
+    queryFn: () => apiFetch<ServiceStatus>('/status/service'),
+    refetchInterval: 30000,
+  });
+
+/** Own spend by project tag for the period (D-059). */
+export const useMyTagUsage = (upn: string, from: string, to: string) =>
+  useQuery({
+    queryKey: ['me-tag-usage', upn, from, to],
+    queryFn: () =>
+      apiFetch<{ series: { bucket: string; key: string; spend: number | null }[] }>(
+        `/reports/usage?${new URLSearchParams({ scope: 'employee', id: upn, from, to, granularity: 'month', by: 'tag' })}`,
+      ),
+    enabled: upn !== '' && from !== '',
+  });
+
+export const useSubmitRequest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { type: 'credits' | 'throughput'; need: string; maxParallel?: number }) =>
+      apiPost(
+        '/requests',
+        {
+          type: v.type,
+          payload: {
+            need: v.need,
+            ...(v.type === 'throughput' ? { max_parallel: v.maxParallel } : {}),
+          },
+        },
+        { reason: 'בקשה מהמסך האישי' },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['requests'] }),
+  });
+};
