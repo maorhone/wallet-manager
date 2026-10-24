@@ -252,29 +252,28 @@ test('Admin lowers the concurrency maximum; a head saving a limit above it gets 
   await expect(page.getByTestId('history-timeline')).toContainText('"max":6');
   await expect(page.getByTestId('history-timeline')).not.toContainText('עדכון מקדם לקבוצה');
 
-  await loginAs(page, 'dana@corp.example');
-  await page.goto('/group/1/members');
-  await page.locator('[data-row="dani@corp.example"]').getByTestId('open-panel').click();
-  await page.getByTestId('limit-parallel').fill('7');
-  await page.getByTestId('panel-review').click();
-  await page.getByTestId('change-reason').fill('בקשת מקביליות מעל התקרה');
-  const rejected = page.waitForResponse(
-    (res) => res.url().includes('/members/dani') && res.url().endsWith('/limits'),
-  );
-  await page.getByTestId('confirm-change').click();
-  const error = await rejected;
-  expect(error.status()).toBe(422);
-  expect((await error.json()).code).toBe('LIMIT_OUT_OF_POLICY');
-  await expect(page.getByTestId('summary-error')).toContainText('מחוץ לטווח המותר (1–6)');
+  // Rate limits are AI-team only: a head gets 403, the AI team gets the policy range check.
   const head = await apiAs('dana@corp.example');
+  const aiTeam = await apiAs('aiteam@corp.example');
   try {
+    const denied = await head.put('/groups/1/members/dani@corp.example/limits', {
+      max_parallel: 7,
+    });
+    expect(denied.status()).toBe(403);
+    const rejected = await aiTeam.put('/groups/1/members/dani@corp.example/limits', {
+      max_parallel: 7,
+    });
+    expect(rejected.status()).toBe(422);
+    expect((await rejected.json()).code).toBe('LIMIT_OUT_OF_POLICY');
     const members = (await (await head.get('/groups/1/members')).json()).members;
     expect(
       members.find((m: { upn: string }) => m.upn === 'dani@corp.example').max_parallel,
     ).toBeNull();
   } finally {
     await head.dispose();
+    await aiTeam.dispose();
   }
+  await loginAs(page, 'dana@corp.example');
   for (const tab of ['policies', 'audit']) {
     await page.goto(`/platform/${tab}`);
     await expect(page.getByText('הגישה לפלטפורמה מוגבלת למנהלי פלטפורמה')).toBeVisible();
