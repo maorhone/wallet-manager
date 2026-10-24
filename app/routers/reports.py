@@ -79,6 +79,23 @@ async def blocked_report(
     return await reports.blocked(db, principal, state.settings, state.clock, scope, id, from_, to)
 
 
+@router.get("/reports/blocks")
+async def blocks_report(
+    request: Request,
+    principal: CurrentPrincipal,
+    db: Db,
+    scope: ReportScopeKind,
+    from_: Annotated[date, Query(alias="from")],
+    to: date,
+    id: str | None = None,
+):
+    """Failed requests aggregated by reason and consumer (member visibility, no content)."""
+    state = request.app.state
+    return await reports.block_reasons(
+        db, principal, state.settings, state.litellm_reader, scope, id, from_, to
+    )
+
+
 @router.get("/reports/allocation", response_model=AllocationReport)
 async def allocation_report(
     request: Request,

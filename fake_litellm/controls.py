@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import exists, insert, select
 
-from .db import reset_db, spend_logs, team, team_member, token
+from .db import error_logs, reset_db, spend_logs, team, team_member, token
 from .enforcement import bump_spend
 
 router = APIRouter(prefix="/_test")
@@ -42,6 +42,38 @@ class Spend(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     tags: list[str] | None = None
+
+
+class ErrorRow(BaseModel):
+    team_id: str | None = None
+    user_id: str | None = None
+    model: str | None = None
+    status_code: int
+    exception_type: str = ""
+    message: str = ""
+    retry_after: int | None = None
+    at: AwareDatetime | None = None
+
+
+@router.post("/errors")
+async def add_errors(body: list[ErrorRow], request: Request):
+    now = request.app.state.fake.now()
+    async with request.app.state.fake.engine.begin() as conn:
+        for e in body:
+            await conn.execute(
+                insert(error_logs).values(
+                    request_id=uuid4().hex,
+                    startTime=e.at or now,
+                    user=e.user_id,
+                    team_id=e.team_id,
+                    model_group=e.model,
+                    status_code=str(e.status_code),
+                    exception_type=e.exception_type,
+                    exception_string=e.message,
+                    retry_after=e.retry_after,
+                )
+            )
+    return {"ok": True}
 
 
 @router.post("/reset")

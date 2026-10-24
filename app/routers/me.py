@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -9,7 +9,7 @@ from app.auth.session import CurrentPrincipal, Db
 from app.errors import invalid_request
 from app.models import Department, Employee, Grp, SpendSnapshot
 from app.schemas.me import MeOut, NamedRef, RoleOut, ScopeOut
-from app.services import views
+from app.services import blocks, views
 
 router = APIRouter()
 
@@ -54,6 +54,23 @@ async def my_usage(
         .order_by(SpendSnapshot.period, SpendSnapshot.model)
     )
     return [{"day": r.period, "model": r.model, "spend": r.spend} for r in rows]
+
+
+@router.get("/me/status")
+async def my_status(request: Request, principal: CurrentPrincipal, db: Db):
+    """Wallet state, limits and the latest blocked requests with their classified reason."""
+    state = request.app.state
+    now = state.clock.now()
+    w = await views.me_wallet(db, state.directory, state.settings, principal, None, now)
+    rows = await state.litellm_reader.failed_requests(
+        now - timedelta(days=7), now + timedelta(minutes=1), users=[principal.upn], limit=10
+    )
+    return {
+        "wallet": {"state": w["wallet"]["state"], "remaining": w["wallet"]["effective_remaining"]},
+        "limits": w["limits"],
+        "last_blocks": [blocks.describe(r) for r in rows],
+        "taken_at": now,
+    }
 
 
 @router.get("/me", response_model=MeOut)

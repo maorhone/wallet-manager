@@ -26,7 +26,7 @@ from app.permissions import (
     can_view_group,
     can_view_members,
 )
-from app.services import grants, views, wallet
+from app.services import blocks, grants, views, wallet
 from app.services.spend import Spend, month_bounds
 
 ZERO = Decimal(0)
@@ -418,3 +418,16 @@ async def blocked(db, principal, settings, clock, kind, id_, start, end):
             day += timedelta(days=1)
     rows.sort(key=lambda r: (r["day"], r["upn"], r["kind"], r["model"] or ""))
     return {"rows": rows}
+
+
+async def block_reasons(db, principal, settings, reader, kind, id_, start, end):
+    lo, hi = report_window(start, end, settings.app_timezone, 400)
+    scope = await _report_scope(db, principal, kind, id_, need_members=True)
+    rows = await reader.failed_requests(
+        lo,
+        hi,
+        team_ids=None if kind == "global" else [g.litellm_team_id for g in scope.groups],
+        users=[scope.entity.upn] if kind == "employee" else None,
+    )
+    by_reason, by_consumer = blocks.aggregate(rows)
+    return {"by_reason": by_reason, "by_consumer": by_consumer}

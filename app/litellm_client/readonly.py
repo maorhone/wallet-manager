@@ -67,6 +67,17 @@ GROUP BY project, day
 ORDER BY day, project NULLS LAST
 """
 
+_FAILED_REQUESTS = """
+SELECT "user", team_id, model_group, "startTime", status_code, exception_type,
+       exception_string, retry_after
+FROM "LiteLLM_ErrorLogs"
+WHERE "startTime" >= :start AND "startTime" < :end
+  AND (CAST(:teams AS text[]) IS NULL OR team_id = ANY(CAST(:teams AS text[])))
+  AND (CAST(:users AS text[]) IS NULL OR "user" = ANY(CAST(:users AS text[])))
+ORDER BY "startTime" DESC
+LIMIT :limit
+"""
+
 # Clip overlaps to local calendar days, then sweep end events before start events.
 # Group equal events before the window sum so ties cannot depend on query row order.
 _CONCURRENCY_PEAKS = """
@@ -138,6 +149,17 @@ class SpendRow(NamedTuple):
     completion_tokens: int = 0
 
 
+class FailedRow(NamedTuple):
+    user: str | None
+    team_id: str | None
+    model: str | None
+    at: datetime
+    status_code: int | None
+    exception_type: str
+    message: str
+    retry_after: int | None
+
+
 class PeakRow(NamedTuple):
     user: str | None
     day: date
@@ -182,6 +204,26 @@ class LiteLLMReader:
             (r[0], r[1], _dec(r[2]))
             for r in await self._rows(
                 _SPEND_BY_TAG, start=start, end=end, teams=team_ids, users=users, timezone=timezone
+            )
+        ]
+
+    async def failed_requests(
+        self, start: datetime, end: datetime, *, team_ids=None, users=None, limit: int = 5000
+    ) -> list[FailedRow]:
+        """Failed requests (LiteLLM_ErrorLogs), newest first; never reads request content."""
+        return [
+            FailedRow(
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                int(r[4]) if r[4] and str(r[4]).isdigit() else None,
+                r[5] or "",
+                r[6] or "",
+                r[7],
+            )
+            for r in await self._rows(
+                _FAILED_REQUESTS, start=start, end=end, teams=team_ids, users=users, limit=limit
             )
         ]
 

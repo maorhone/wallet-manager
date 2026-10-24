@@ -127,6 +127,21 @@ spend_logs = Table(
     Column("completion_tokens", Integer, server_default="0"),
     Column("request_tags", JSONB),
 )
+# Failed requests. Real LiteLLM keeps these in LiteLLM_ErrorLogs; user/team_id/retry_after are
+# fake-only conveniences (real rows carry them inside request_kwargs / the message).
+error_logs = Table(
+    "LiteLLM_ErrorLogs",
+    metadata,
+    Column("request_id", Text, primary_key=True),
+    Column("startTime", DateTime(timezone=True)),
+    Column("user", Text),
+    Column("team_id", Text),
+    Column("model_group", Text),
+    Column("status_code", Text),
+    Column("exception_type", Text),
+    Column("exception_string", Text),
+    Column("retry_after", Integer),
+)
 
 
 async def init_db(engine: AsyncEngine, ro_role: str = "litellm_ro") -> None:
