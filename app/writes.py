@@ -15,7 +15,7 @@ from app.auth.session import CurrentPrincipal, Db
 from app.config import Settings
 from app.db import LockKind, employee_lock_id, lock_parent
 from app.errors import invalid_request
-from app.models import AuditLog, LitellmWrite
+from app.models import AuditLog, LitellmWrite, Transfer
 from app.models import Request as DomainRequest
 from app.outbox.enqueue import enqueue
 
@@ -121,6 +121,15 @@ async def sync_status(db: AsyncSession, entity: str, ids: list[str]) -> dict[str
         )
         for request_id, status in applications:
             out[str(request_id)] = status
+    if entity == "transfer":
+        for transfer in await db.scalars(
+            select(Transfer).where(Transfer.id.in_([int(i) for i in ids]))
+        ):
+            for status in await db.scalars(
+                select(LitellmWrite.status).where(LitellmWrite.id.in_(transfer.write_ids))
+            ):
+                if _RANK[status] > _RANK[out[str(transfer.id)]]:
+                    out[str(transfer.id)] = status
     return out
 
 

@@ -117,6 +117,22 @@ async def create_production_system(
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
 
+async def system_committed(db, spend: Spend, system: ProductionSystem) -> Decimal:
+    keys = await db.scalars(
+        select(ServiceKey).where(
+            ServiceKey.owner_kind == "system",
+            ServiceKey.owner_id == system.id,
+            ServiceKey.status.in_(("active", "pending")),
+        )
+    )
+    # Reserve each key's remaining allocation in addition to all system consumption,
+    # including revoked keys. Active-key consumption is already in system usage.
+    return spend.used("system", system.id) + sum(
+        (max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO) for key in keys),
+        ZERO,
+    )
+
+
 async def update_system_budget(
     ctx: WriteContext,
     principal: Principal,
@@ -146,19 +162,7 @@ async def update_system_budget(
     await _check_department_envelope(ctx.db, dept, others + body.budget)
     pc = period_ctx(ctx.settings, None, clock.now() if clock else None)
     spend = await Spend.load(ctx.db, pc["period"])
-    keys = await ctx.db.scalars(
-        select(ServiceKey).where(
-            ServiceKey.owner_kind == "system",
-            ServiceKey.owner_id == system.id,
-            ServiceKey.status.in_(("active", "pending")),
-        )
-    )
-    # Reserve each key's remaining allocation in addition to all system consumption,
-    # including revoked keys. Active-key consumption is already in system usage.
-    committed = spend.used("system", system.id) + sum(
-        (max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO) for key in keys),
-        ZERO,
-    )
+    committed = await system_committed(ctx.db, spend, system)
     if err := check_sum(committed, body.budget):
         raise err
     before, system.budget = {"budget": system.budget}, body.budget

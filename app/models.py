@@ -414,3 +414,30 @@ class AuditLog(Base):
     after: Mapped[dict | None] = mapped_column(JSONB)
     reason: Mapped[str | None] = mapped_column(Text)
     request_id: Mapped[str | None] = mapped_column(Text)
+
+
+class Transfer(Base):
+    """5.9 (D-069): a move of unused balance; the total budget never changes."""
+
+    __tablename__ = "transfer"
+    __table_args__ = (
+        CheckConstraint(
+            _in("source_kind", "employee", "initiative", "group", "system"),
+            name="ck_transfer_source_kind",
+        ),
+        CheckConstraint(
+            _in("target_kind", "employee", "initiative", "group", "system"),
+            name="ck_transfer_target_kind",
+        ),
+        CheckConstraint("amount > 0", name="ck_transfer_amount"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, **ID)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("grp.id"))
+    source_kind: Mapped[str] = mapped_column(Text)
+    source_id: Mapped[str] = mapped_column(Text)
+    target_kind: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[str] = mapped_column(Text)
+    amount: Mapped[Decimal] = mapped_column(ALLOC)
+    write_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), server_default="{}")
+    created_by: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()

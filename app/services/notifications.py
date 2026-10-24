@@ -29,7 +29,7 @@ KINDS: dict[str, bool] = {
     "drift_repeated": True, "reconcile_missing": True,
     "overallocation": True, "concurrency_at_limit": False,
     "request_submitted": False, "request_approved": False, "request_rejected": False,
-    "request_forwarded": False,
+    "request_forwarded": False, "transfer_released": False, "transfer_received": False,
 }  # fmt: skip
 
 
