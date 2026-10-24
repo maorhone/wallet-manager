@@ -17,7 +17,16 @@ export function Shell() {
   const { pathname, search } = useLocation();
   if (isPending) return <Loader m="xl" aria-label={he.loading} />;
   if (error || !me) return <ErrorState error={error} onRetry={refetch} />;
-  if (pathname === '/') return <Navigate to={scopePath(initialScope(me))} replace />;
+  if (pathname === '/') {
+    // Keep the explicit legacy entry working; interactive login opens the v2 shell.
+    let postLogin = false;
+    try {
+      postLogin = sessionStorage.getItem('wm.v2.login') === '1';
+    } catch {
+      /* Optional storage. */
+    }
+    return <Navigate to={postLogin ? '/v2' : scopePath(initialScope(me))} replace />;
+  }
   const scope = scopeFromPath(pathname, me.scopes);
   const reports = scope ? reportPath(scope) : null;
   const logout = async () => {
