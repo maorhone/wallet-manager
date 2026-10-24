@@ -99,7 +99,9 @@ async def test_spend_rows(litellm, fake_engine, ro_engine):
         )
     start = datetime(2026, 3, 1, tzinfo=UTC)
     rows = await LiteLLMReader(ro_engine).spend_rows(start, datetime(2026, 4, 1, tzinfo=UTC))
-    assert [tuple(r) for r in rows] == [("t", "u@x", "k", "m1", start.date(), Decimal("1.75"))]
+    assert [tuple(r) for r in rows] == [
+        ("t", "u@x", "k", "m1", start.date(), Decimal("1.75"), 0, 0)
+    ]
 
 
 async def test_ping(ro_engine):
