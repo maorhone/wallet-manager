@@ -6,6 +6,7 @@ import { ErrorState } from '../components/ErrorState';
 import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
 import Personal from './pages/Personal';
+import SectionBudget from './pages/SectionBudget';
 import '../styles/v2.css';
 
 export function Shell() {
@@ -70,6 +71,8 @@ export function Shell() {
             <p className="v2-card">{he.v2.guideText}</p>
           ) : current.path === '/v2/personal' ? (
             <Personal />
+          ) : current.path.startsWith('/v2/group/') ? (
+            <SectionBudget groupId={current.path.split('/')[3]} />
           ) : (
             <p className="v2-muted">{he.v2.pending}</p>
           )}

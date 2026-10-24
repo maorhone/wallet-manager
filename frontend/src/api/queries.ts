@@ -756,3 +756,72 @@ export const useSubmitRequest = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['requests'] }),
   });
 };
+
+export interface BudgetRow {
+  kind: 'employee' | 'group' | 'initiative';
+  id: string;
+  name: string;
+  total: number;
+  used: number;
+  percent: number;
+}
+
+export interface BudgetOverview {
+  period: string;
+  kpis: {
+    total: number;
+    allocated: number;
+    used: number;
+    remaining: number;
+    metered_value: number | null;
+  };
+  bar: { used: number; allocated_unused: number; unallocated: number; total: number };
+  rows: BudgetRow[];
+  actions: { edit_members: boolean };
+}
+
+export interface AttentionData {
+  requests: { id: number; type: string; status: string; requester_upn: string }[];
+  shortage_risks: { kind: string; id: string; name: string; percent: number }[];
+  reallocation_opportunities: { grant_id: number; unused: number; model: string | null }[];
+}
+
+export interface TransferBody {
+  group_id: number;
+  source: { kind: string; id: string };
+  target: { kind: string; id: string };
+  amount: number;
+}
+
+export interface TransferPreview {
+  source: { total: number; after: number; unused: number };
+  target: { total: number; after: number };
+  total_unchanged: boolean;
+}
+
+export const useBudgetOverview = (groupId: string) =>
+  useQuery({
+    queryKey: ['budget-overview', groupId],
+    queryFn: () => apiFetch<BudgetOverview>(`/budget/overview?scope=group:${groupId}`),
+  });
+
+export const useAttention = (groupId: string) =>
+  useQuery({
+    queryKey: ['attention', groupId],
+    queryFn: () => apiFetch<AttentionData>(`/attention?scope=group:${groupId}`),
+  });
+
+export const useTransferPreview = () =>
+  useMutation({
+    mutationFn: (body: TransferBody) =>
+      apiPost<TransferPreview>('/transfers/preview', body, { reason: 'preview' }),
+  });
+
+export const useTransfer = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { body: TransferBody; reason: string; key: string }) =>
+      apiPost('/transfers', v.body, { reason: v.reason, idempotencyKey: v.key }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};

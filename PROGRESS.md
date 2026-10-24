@@ -1045,3 +1045,6 @@ Step 5.9: transfers of unused balance. Endpoints: employee/initiative/sub-group 
 
 ## Step 5.16 (UI personal screen) done
 `v2/pages/Personal.tsx`, `v2/personal.ts` (explainBlock), queries for /me/status, /status/service, usage by tag, request submit. Targeted 5.16-1 green (vitest 29 passed). e2e `v2-personal.spec.ts` written, not run (phase-end mode). Next: 5.17.
+
+## Step 5.17 (UI section budget + transfer drawer) done
+Backend `app/services/overview.py` + `app/routers/views.py` (overview, attention; scope=group:<id> only, department scope to be added in 5.19), UI `v2/pages/SectionBudget.tsx`, `TransferDrawer.tsx`. Targeted 5.17-3 green (pytest 3, vitest 27). e2e `v2-section-budget.spec.ts` written, not run (phase-end mode). Bulk CTA links to the existing members page until 5.18. Next: 5.18.

@@ -411,3 +411,6 @@ Done: the scheduler polls LiteLLM `/health` per model every minute and stores ok
 
 ## Phase 5 — Personal screen (Step 5.16)
 `/v2/personal` ("ה-AI שלי"): one personal wallet (remaining, used), usage by model and by project tag, service status pill, last block with a plain-language reason (rate limit is never shown as exhausted credits) and a matching request CTA (Credits or Throughput), limits behind a disclosure, and an inline request form posting to `/requests`.
+
+## Phase 5 — Section budget (Step 5.17)
+`/v2/group/<id>`: period, four KPIs (total, allocated, used, remaining; metered value secondary, "לא זמין" when a consumed model has no rate), distribution bar, "דורש את תשומת לבך" (pending requests, shortage risks at ≥85%, reallocation opportunities), table of employees, initiatives and sub-groups, and a transfer drawer with preview then confirm (total budget unchanged). Read endpoints `GET /budget/overview?scope=group:<id>` and `GET /attention?scope=group:<id>`. Per-model quotas stay in the existing screen under "מתקדם".
