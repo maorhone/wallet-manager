@@ -12,3 +12,8 @@ class OrgSystemIn(BaseModel):
 
 class KeyMoveIn(BaseModel):
     target_system_id: int = Field(gt=0)
+
+
+class EnvelopesIn(BaseModel):
+    departments_envelope: Money
+    systems_envelope: Money

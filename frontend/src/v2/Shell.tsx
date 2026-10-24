@@ -6,6 +6,7 @@ import { ErrorState } from '../components/ErrorState';
 import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
 import Department from './pages/Department';
+import OrgAllocation from './pages/OrgAllocation';
 import Initiative from './pages/Initiative';
 import Personal from './pages/Personal';
 import Requests from './pages/Requests';
@@ -81,6 +82,14 @@ export function Shell() {
                   ['platform_admin', 'org_allocator'].includes(r.role) &&
                   ['global', 'organization'].includes(r.scope_kind),
               )}
+            />
+          ) : current.path === '/v2/organization' ? (
+            <OrgAllocation
+              organizationId={
+                me.roles.find((r) => r.role === 'org_allocator' && r.scope_kind === 'organization')
+                  ?.scope_id ?? 1
+              }
+              isAdmin={me.roles.some((r) => r.role === 'platform_admin')}
             />
           ) : current.path === '/v2/requests' ? (
             <Requests />

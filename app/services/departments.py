@@ -19,6 +19,10 @@ async def set_budget(
     dept = await ctx.db.get(Department, department_id)
     if dept is None:
         raise ApiError(404, "NOT_FOUND", "Department not found")
+    return await apply_budget(ctx, dept, body, role)
+
+
+async def apply_budget(ctx: WriteContext, dept: Department, body: DepartmentBudgetIn, role: str):
     before = {"budget": dept.budget, "budget_period": dept.budget_period}
     dept.budget, dept.budget_period = body.budget, body.budget_period
     after = {"budget": dept.budget, "budget_period": dept.budget_period}

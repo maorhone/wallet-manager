@@ -424,3 +424,6 @@ Done: the scheduler polls LiteLLM `/health` per model every minute and stores ok
 
 ### Phase 5 — Initiative / system details (Step 5.21)
 An initiative owner sees their initiatives read-only (budget, consumption, balance, connection status, key aliases and limits, funding owner) and opens a change request; admins and org allocators can move a key to an org system.
+
+### Phase 5 — Organization allocation (Step 5.22)
+The organization allocator (and admin) sees two separate envelopes: departments and Org Systems. Allocations to departments and Org Systems are capped by their own envelope; only the admin resizes envelopes, never below what is already allocated. The department recommendation column shows "בהמשך" (excluded). Admin can create a new organization from the same screen.

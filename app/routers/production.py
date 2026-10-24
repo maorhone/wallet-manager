@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
-from app.schemas.org_systems import OrgSystemIn
+from app.schemas.departments import DepartmentBudgetIn
+from app.schemas.org_systems import EnvelopesIn, OrgSystemIn
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn, ProductionSystemPatch
-from app.services import org_systems, production
+from app.services import org_envelopes, org_systems, production
 from app.writes import Write, write_response
 
 router = APIRouter()
@@ -59,3 +60,48 @@ async def get_production(
     return await production.get_production(
         db, app.state.settings, app.state.clock, principal, department_id, period
     )
+
+
+@router.get("/organizations/{organization_id}/envelopes")
+async def get_envelopes(
+    organization_id: int, request: Request, principal: CurrentPrincipal, db: Db
+):
+    return await org_envelopes.get_envelopes(
+        db, principal, request.app.state.settings, organization_id
+    )
+
+
+@router.put("/organizations/{organization_id}/envelopes")
+async def put_envelopes(
+    organization_id: int, body: EnvelopesIn, ctx: Write, principal: CurrentPrincipal
+):
+    entities = await org_envelopes.set_envelopes(ctx, principal, organization_id, body)
+    return await write_response(ctx, entities)
+
+
+@router.put("/organizations/{organization_id}/departments/{department_id}/budget")
+async def put_org_department_budget(
+    organization_id: int,
+    department_id: int,
+    body: DepartmentBudgetIn,
+    ctx: Write,
+    principal: CurrentPrincipal,
+):
+    entities = await org_envelopes.set_department_budget(
+        ctx, principal, organization_id, department_id, body
+    )
+    return await write_response(ctx, entities)
+
+
+@router.put("/organizations/{organization_id}/systems/{system_id}/budget")
+async def put_org_system_budget(
+    organization_id: int,
+    system_id: int,
+    body: ProductionSystemPatch,
+    ctx: Write,
+    principal: CurrentPrincipal,
+):
+    entities = await org_envelopes.set_org_system_budget(
+        ctx, principal, organization_id, system_id, body
+    )
+    return await write_response(ctx, entities)

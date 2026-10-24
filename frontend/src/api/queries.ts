@@ -1005,3 +1005,56 @@ export const useMoveKey = () => {
     onSuccess: () => qc.invalidateQueries(),
   });
 };
+
+export type OrgEnvelopeRow = {
+  id: number;
+  name: string;
+  budget: number;
+  previous_used?: number;
+  owner_upn?: string | null;
+};
+export type OrgEnvelopes = {
+  organization: { id: number; name: string };
+  departments: { envelope: number; allocated: number; rows: OrgEnvelopeRow[] };
+  systems: { envelope: number; allocated: number; rows: OrgEnvelopeRow[] };
+};
+
+export const useOrgEnvelopes = (orgId: number) =>
+  useQuery({
+    queryKey: ['org-envelopes', orgId],
+    queryFn: () => apiFetch<OrgEnvelopes>(`/organizations/${orgId}/envelopes`),
+  });
+
+/** One allocation write (department or Org System budget); refreshes both envelopes. */
+export const useOrgAllocate = (orgId: number) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: {
+      kind: 'department' | 'system';
+      id: number;
+      budget: number;
+      reason: string;
+    }) =>
+      apiPut<WriteResponse>(
+        v.kind === 'department'
+          ? `/organizations/${orgId}/departments/${v.id}/budget`
+          : `/organizations/${orgId}/systems/${v.id}/budget`,
+        v.kind === 'department' ? { budget: v.budget, budget_period: '1mo' } : { budget: v.budget },
+        { reason: v.reason, idempotencyKey: crypto.randomUUID() },
+      ),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useCreateOrganization = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { name: string; reason: string }) =>
+      apiPost<WriteResponse>(
+        '/organizations',
+        { name: v.name },
+        { reason: v.reason, idempotencyKey: crypto.randomUUID() },
+      ),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
