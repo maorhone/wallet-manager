@@ -30,7 +30,7 @@ async def test_audit_includes_litellm_call_status(
 async def test_group_timeline_includes_member_changes(login_wm, provisioned):
     dana = await login_wm("dana")
     await _put(dana, "/groups/1/members/caps", [{"upn": "dani@corp.example", "base_cap": 20000}])
-    await _put(await login_wm("rep"), "/groups/1/limits", {"tpm_limit": 5000})
+    await _put(await login_wm("aiteam"), "/groups/1/limits", {"tpm_limit": 5000})
     rows = (await dana.get("/audit?entity=group&id=1")).json()
     assert {(r["entity"], r["entity_id"]) for r in rows} == {
         ("group", "1"),

@@ -15,7 +15,7 @@ from app.config import Settings
 from app.directory import Directory
 from app.errors import invalid_request
 from app.models import Notification, NotificationPref
-from app.permissions import ADMIN, HEAD, REP
+from app.permissions import ADMIN, AI_TEAM, HEAD, REP
 from app.services.owners import holders
 from app.writes import plain
 
@@ -29,6 +29,7 @@ KINDS: dict[str, bool] = {
     "drift_repeated": True, "reconcile_missing": True,
     "overallocation": True, "concurrency_at_limit": False,
     "request_submitted": False, "request_approved": False, "request_rejected": False,
+    "request_forwarded": False,
 }  # fmt: skip
 
 
@@ -91,6 +92,13 @@ async def reps_or_admins(db, directory: Directory, department_id: int | None) ->
     if department_id is None:
         return upns_of(await holders(db, directory, ADMIN, "global", None))
     return upns_of(await holders(db, directory, REP, "department", department_id))
+
+
+async def ai_team_or_admins(db, directory: Directory) -> set[str]:
+    """The AI team (D-065), or platform admins when no one holds the role."""
+    return upns_of(await holders(db, directory, AI_TEAM, "global", None)) or await reps_or_admins(
+        db, directory, None
+    )
 
 
 # --- the /me endpoints -------------------------------------------------------------------------

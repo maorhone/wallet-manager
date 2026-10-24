@@ -2,7 +2,7 @@ from sqlalchemy import select
 
 from app.db import LockKind
 from app.models import DepartmentModelAllowance, GroupModelPot, Grp
-from app.permissions import Principal, can_edit_group_pots_limits
+from app.permissions import Principal, can_edit_group_pots_limits, can_set_rate_limits
 from app.schemas.departments import ModelAmounts
 from app.schemas.groups import GroupLimitsIn
 from app.services.validation import check_model_sums
@@ -59,7 +59,7 @@ async def set_limits(
     ctx: WriteContext, principal: Principal, group_id: int, body: GroupLimitsIn
 ) -> list[dict]:
     """FR-D4: team tpm and per-model tpm limits; no sum rule."""
-    role = await can_edit_group_pots_limits(ctx.db, principal, group_id)
+    role = await can_set_rate_limits(ctx.db, principal, group_id)
     group = await ctx.db.get(Grp, group_id)
     before = {"tpm_limit": group.tpm_limit, "model_tpm_limits": group.model_tpm_limits}
     group.tpm_limit = body.tpm_limit

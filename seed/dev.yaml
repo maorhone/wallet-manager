@@ -132,6 +132,12 @@ users:
       groups:
         ['CN=grp-c1,OU=Groups,DC=corp,DC=example', 'CN=wm-viewer-d1,OU=Groups,DC=corp,DC=example'],
     }
+  - {
+      upn: aiteam@corp.example,
+      display_name: Ari AI-Team,
+      provision: false,
+      groups: ['CN=wm-ai-team,OU=Groups,DC=corp,DC=example'],
+    }
   # Onboarding fixtures (Step 1b.3). `provision: false` = in the directory only, no employee row;
   # `pending: true` = already onboarded and waiting for placement.
   - {
@@ -169,6 +175,7 @@ users:
     }
 
 role_bindings:
+  - { group: 'CN=wm-ai-team,OU=Groups,DC=corp,DC=example', role: ai_team, scope_kind: global }
   - { group: 'CN=wm-admins,OU=Groups,DC=corp,DC=example', role: platform_admin, scope_kind: global }
   - {
       group: 'CN=wm-rep-d1,OU=Groups,DC=corp,DC=example',

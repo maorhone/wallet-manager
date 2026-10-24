@@ -93,7 +93,11 @@ need text, optional amount). One record and one status per request (`submitted`,
 `GET /requests?box=mine|to_handle&type=&status=` lists them; the section head (or admin) decides with
 `POST /requests/{id}/decide`. Approving credits raises the employee's base cap by the approved amount within
 the section's allocatable; protected managers' personal credits are routed to their authorized superior, and self-approval is forbidden. Approved credits stay pending until the linked LiteLLM write succeeds; permanent failures are visible. Approving an initiative creates it (5.6). The requester gets an in-app notification.
-Throughput requests come in Step 5.8.
+Throughput requests (Step 5.8, D-065): an employee asks for new concurrency/RPM/per-model TPM limits;
+the section head and then the department rep can only forward (or comment), the AI team (`ai_team` role,
+or an admin) applies (pending until the LiteLLM write succeeds) or rejects. Rate limits (`max_parallel`,
+`rpm_limit`, `model_tpm_limits`, team TPM) are writable only by the AI team and admins; section heads and
+department reps get 403 (approved behaviour change). The AI team stays bound by the policy maximum; only admins may exceed it.
 
 ### 4.1.4 Org Systems - Phase 5 Step 5.4: Done
 

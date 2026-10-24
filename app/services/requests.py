@@ -9,9 +9,10 @@ from app.db import LockKind
 from app.directory import Directory
 from app.errors import ApiError, invalid_request
 from app.models import Employee, Grp, Request, RequestEvent
-from app.permissions import ADMIN, HEAD, REP, Principal, group_roles_of, target_tier
+from app.permissions import ADMIN, AI_TEAM, HEAD, REP, Principal, group_roles_of, target_tier
+from app.schemas.groups import MemberLimitsIn
 from app.schemas.initiatives import InitiativeIn
-from app.services import initiatives, notifications
+from app.services import initiatives, members, notifications
 from app.services.personal_values import OWNER_ROLE, authorize
 from app.services.validation import check_sum, group_allocated
 from app.writes import WriteContext
@@ -33,6 +34,8 @@ async def _handler_role(db, principal: Principal, req: Request) -> str | None:
         return None
     if principal.is_admin:
         return ADMIN
+    if req.handler_role == AI_TEAM:
+        return AI_TEAM if principal.has(AI_TEAM, "global") else None
     if req.handler_role == HEAD and HEAD in await group_roles_of(db, principal, req.scope_id):
         return HEAD
     if req.handler_role == REP:
@@ -70,6 +73,8 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
         raise invalid_request("A short need description is required", {"field": "payload.need"})
     if body.type == "initiative" and not str(body.payload.get("name", "")).strip():
         raise invalid_request("An initiative request needs a name", {"field": "payload.name"})
+    if body.type == "throughput":
+        _limits_of(body.payload)
     group = await ctx.db.get(Grp, employee.group_id)
     handler_role = (
         OWNER_ROLE[await target_tier(ctx.db, directory, employee.upn)]
@@ -104,6 +109,21 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
         f"request:{req.id}:submitted", settings=ctx.settings,
     )  # fmt: skip
     return [{"entity": "request", "id": req.id, "values": {"status": req.status}}]
+
+
+_LIMIT_FIELDS = ("max_parallel", "rpm_limit", "model_tpm_limits")
+
+
+def _limits_of(payload: dict) -> dict:
+    """The requested limits (D-065); omitted fields keep the member's current value."""
+    wanted = {k: payload[k] for k in _LIMIT_FIELDS if k in payload}
+    if not wanted:
+        raise invalid_request("Name the limits you need", {"field": "payload"})
+    try:
+        MemberLimitsIn(**wanted)
+    except ValidationError as exc:
+        raise invalid_request("Invalid limits", {"errors": str(exc)}) from None
+    return wanted
 
 
 async def list_requests(
@@ -162,11 +182,17 @@ async def decide(
     role = await _handler_role(ctx.db, principal, req)
     if role is None:
         raise _forbidden()
-    if req.status != "submitted":
+    if req.status not in ("submitted", "forwarded"):
         raise ApiError(409, "CONFLICT", "The request was already decided")
+    allowed = ("forward", "apply", "reject") if req.type == "throughput" else ("approve", "reject")
+    if body.decision not in allowed:
+        raise invalid_request("This decision does not fit the request type")
     group = await ctx.db.get(Grp, req.scope_id)
     before = {"status": req.status}
-    if body.decision == "approve":
+    forwarded_to = None
+    if req.type == "throughput":
+        forwarded_to = await _decide_throughput(ctx, directory, req, group, role, body.decision)
+    elif body.decision == "approve":
         amount = body.amount if body.amount is not None else req.amount
         if amount is None or amount <= 0:
             raise invalid_request("An approved amount is required", {"field": "amount"})
@@ -189,7 +215,14 @@ async def decide(
         "request", req.id, before, {"status": req.status, "amount": req.amount}, role,
         group_id=group.id, department_id=group.department_id,
     )  # fmt: skip
-    kind = "request_approved" if body.decision == "approve" else "request_rejected"
+    if forwarded_to is not None:
+        await notifications.notify(
+            ctx.db, forwarded_to, "request_forwarded", "request", req.id,
+            {"request_id": req.id, "type": req.type, "requester": req.requester_upn},
+            f"request:{req.id}:forwarded:{req.handler_role}", settings=ctx.settings,
+        )  # fmt: skip
+        return [{"entity": "request", "id": req.id, "values": {"status": req.status}}]
+    kind = "request_rejected" if req.status == "rejected" else "request_approved"
     await notifications.notify(
         ctx.db, {req.requester_upn}, kind, "request", req.id,
         {"request_id": req.id, "type": req.type, "amount": req.amount},
@@ -228,3 +261,40 @@ async def _apply_initiative(ctx, principal, req: Request, group: Grp, amount: De
     except ValidationError as exc:
         raise invalid_request("Invalid initiative details", {"errors": str(exc)}) from None
     await initiatives.create(ctx, principal, group.id, body)
+
+
+async def _decide_throughput(ctx, directory, req: Request, group: Grp, role, decision):
+    """D-065: heads only forward; the AI team (or an admin) applies or rejects.
+
+    Returns the recipients of a forward, or None once the request is closed.
+    """
+    if decision == "forward":
+        if role not in (HEAD, REP, ADMIN):
+            raise _forbidden()
+        if req.handler_role == HEAD:
+            req.handler_role, req.handler_scope = REP, group.department_id
+            recipients = await notifications.reps_or_admins(ctx.db, directory, group.department_id)
+        elif req.handler_role == REP:
+            req.handler_role, req.handler_scope = AI_TEAM, None
+            recipients = await notifications.ai_team_or_admins(ctx.db, directory)
+        else:
+            raise invalid_request("The request is already with the AI team")
+        req.status = "forwarded"
+        return recipients - {req.requester_upn}
+    if role not in (AI_TEAM, ADMIN):
+        raise _forbidden()
+    if decision == "reject":
+        req.status = "rejected"
+        return None
+    employee = await ctx.db.get(Employee, req.requester_upn)
+    if employee is None or employee.status != "active" or employee.group_id != group.id:
+        raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
+    wanted = {
+        "max_parallel": employee.max_parallel, "rpm_limit": employee.rpm_limit,
+        "model_tpm_limits": employee.model_tpm_limits or {},
+    } | _limits_of(req.payload)  # fmt: skip
+    req.application_write_id = await members.apply_limits(
+        ctx, role, group, employee, MemberLimitsIn(**wanted)
+    )
+    req.status = "pending_apply"
+    return None

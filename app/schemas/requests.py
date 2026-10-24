@@ -6,12 +6,12 @@ from app.schemas.common import Money
 
 
 class RequestIn(BaseModel):
-    type: Literal["credits", "initiative"]
+    type: Literal["credits", "initiative", "throughput"]
     amount: Money | None = None
     payload: dict = Field(default_factory=dict)
 
 
 class DecideIn(BaseModel):
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject", "forward", "apply"]
     amount: Money | None = None
     comment: str | None = Field(default=None, max_length=1000)

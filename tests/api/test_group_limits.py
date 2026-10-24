@@ -4,7 +4,7 @@ from app.outbox.worker import drain
 
 async def test_team_tpm_and_metadata_model_tpm(login, put, provisioned, litellm, prov_settings):
     body = {"tpm_limit": 5000, "model_tpm_limits": {"gpt-4o": 2000}}
-    r = await put(await login("rep"), "/groups/1/limits", body)
+    r = await put(await login("aiteam"), "/groups/1/limits", body)
     assert r.status_code == 200, r.text
     assert r.json()["entities"][0]["sync_status"] == "pending"
     await drain(provisioned, litellm, prov_settings)

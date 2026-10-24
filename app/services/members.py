@@ -8,8 +8,10 @@ from app.directory import Directory
 from app.errors import invalid_request, scope_forbidden
 from app.models import Employee, EmployeeModelCap, GroupModelPot, Grp, Policy
 from app.permissions import (
+    ADMIN,
     Principal,
     can_edit_member_defaults,
+    can_set_rate_limits,
     can_write_members,
     target_tier,
 )
@@ -146,32 +148,40 @@ async def set_limits(
     upn: str,
     body: MemberLimitsIn,
 ) -> list[dict]:
-    """FR-G4, D7: concurrency and rpm within the policy range; admins may exceed the maximum."""
-    await can_write_members(ctx.db, principal, group_id)
+    """FR-G4, D7, D-065: AI team or admin only; admins may exceed the policy maximum."""
+    role = await can_set_rate_limits(ctx.db, principal, group_id)
     group = await ctx.db.get(Grp, group_id)
-    employee, tier = await _target(ctx, directory, group, upn)
-    role = authorize(principal, employee, group, tier)
+    employee = await ctx.db.get(Employee, upn)
+    if employee is None or employee.group_id != group_id or employee.status == "left":
+        raise scope_forbidden("Target is not an active member of the group")
+    await apply_limits(ctx, role, group, employee, body)
+    return [{"entity": "employee", "id": upn, "values": _limit_values(employee)}]
+
+
+def _limit_values(e: Employee) -> dict:
+    return {
+        "max_parallel": e.max_parallel, "rpm_limit": e.rpm_limit,
+        "model_tpm_limits": e.model_tpm_limits,
+    }  # fmt: skip
+
+
+async def apply_limits(ctx: WriteContext, role: str, group: Grp, employee, body) -> int:
+    """Validate against the policy range and write one member's limits (outbox ``/key/update``)."""
+    upn, group_id = employee.upn, group.id
     for field, policy_key in (("max_parallel", "concurrency"), ("rpm_limit", "rpm")):
         value, policy = getattr(body, field), await ctx.db.get(Policy, policy_key)
         if value is not None and policy:
-            if err := check_limit(field, value, policy.value, principal.is_admin):
+            if err := check_limit(field, value, policy.value, role == ADMIN):
                 raise err
 
-    before = {
-        "max_parallel": employee.max_parallel, "rpm_limit": employee.rpm_limit,
-        "model_tpm_limits": employee.model_tpm_limits,
-    }  # fmt: skip
+    before = _limit_values(employee)
     employee.max_parallel, employee.rpm_limit = body.max_parallel, body.rpm_limit
     employee.model_tpm_limits = body.model_tpm_limits or None
-    after = {
-        "max_parallel": employee.max_parallel, "rpm_limit": employee.rpm_limit,
-        "model_tpm_limits": employee.model_tpm_limits,
-    }  # fmt: skip
     ctx.audit(
-        "employee", upn, before, after, role, group_id=group_id, department_id=group.department_id
-    )
-    await ctx.enqueue("employee", upn, "/key/update")
-    return [{"entity": "employee", "id": upn, "values": after}]
+        "employee", upn, before, _limit_values(employee), role,
+        group_id=group_id, department_id=group.department_id,
+    )  # fmt: skip
+    return await ctx.enqueue("employee", upn, "/key/update")
 
 
 async def set_defaults(

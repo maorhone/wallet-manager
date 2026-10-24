@@ -10,6 +10,7 @@ from app.models import Department, Grp, Initiative, RoleBinding
 
 ADMIN, REP, PMO, HEAD, VIEWER = "platform_admin", "department_rep", "pmo", "group_head", "viewer"
 ORG_ALLOCATOR = "org_allocator"
+AI_TEAM = "ai_team"  # D-065: the only role (besides admin) that changes rate limits
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ class Principal:
             roles.add(VIEWER)
         if self.is_admin:
             roles.add(ADMIN)
+        if self.has(AI_TEAM, "global"):
+            roles.add(AI_TEAM)
         return roles
 
     def group_roles(self, group_id: int, department_id: int) -> set[str]:
@@ -147,8 +150,8 @@ def _pick(roles: set[str], allowed: tuple[str, ...], visible: tuple[str, ...]) -
     raise _forbidden()
 
 
-_DEPT_VIEW = (ADMIN, REP, PMO, VIEWER)
-_GROUP_VIEW = (ADMIN, REP, PMO, HEAD, VIEWER)
+_DEPT_VIEW = (ADMIN, AI_TEAM, REP, PMO, VIEWER)
+_GROUP_VIEW = (ADMIN, AI_TEAM, REP, PMO, HEAD, VIEWER)
 
 
 async def _dept_roles(session: AsyncSession, p: Principal, department_id: int) -> set[str]:
@@ -219,6 +222,11 @@ async def can_view_members(session, p: Principal, group_id: int) -> str:
 
 async def can_edit_group_pots_limits(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), (ADMIN, REP), _GROUP_VIEW)
+
+
+async def can_set_rate_limits(session, p: Principal, group_id: int) -> str:
+    """D-065: rate limits are written by the AI team (or an admin) only."""
+    return _pick(await _group_roles(session, p, group_id), (ADMIN, AI_TEAM), _GROUP_VIEW)
 
 
 async def can_share(session, p: Principal, group_id: int) -> str:

@@ -13,7 +13,7 @@ def path(upn=DANI):
 
 
 async def test_out_of_policy_422(login, put, provisioned):
-    dana = await login("dana")
+    dana = await login("aiteam")  # D-065: only the AI team (or an admin) writes rate limits
     r = await put(dana, path(), {"max_parallel": 9})
     assert r.status_code == 422
     body = r.json()
@@ -37,7 +37,7 @@ async def test_admin_above_max_ok(login, put, provisioned, litellm, prov_setting
 
 async def test_key_update_payload_has_no_model_max_budget(login, put, provisioned):
     body = {"max_parallel": 6, "model_tpm_limits": {"gpt-4o": 1000}}
-    assert (await put(await login("dana"), path(), body)).status_code == 200
+    assert (await put(await login("aiteam"), path(), body)).status_code == 200
     async with provisioned() as s:
         row = (
             await s.scalars(
@@ -54,9 +54,11 @@ async def test_key_update_payload_has_no_model_max_budget(login, put, provisione
 
 
 async def test_limits_permissions_and_self(login, put, provisioned):
-    assert (await put(await login("dana"), path("dana@corp.example"), {})).status_code == 422
+    assert (await put(await login("dana"), path(), {})).status_code == 403  # head: forward only
+    assert (await put(await login("rep"), path(), {})).status_code == 403
     assert (await put(await login("dani"), path("yael@corp.example"), {})).status_code == 404
     assert (await put(await login("pmo"), path(), {})).status_code == 403
+    assert (await put(await login("aiteam"), path("avi@corp.example"), {})).status_code == 422
 
 
 async def test_get_policies_readable_by_any_user(login):

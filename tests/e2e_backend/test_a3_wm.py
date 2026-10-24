@@ -6,7 +6,7 @@ async def test_a3_limits_set_via_wm_enforced(login_wm, drain_all, employee, fake
         transport=httpx.ASGITransport(app=fake_app), base_url="http://fake"
     ) as http:
         await http.post("/_test/config", json={"latency_ms": 500})
-    dana = await login_wm("dana")  # head of A1
+    dana = await login_wm("aiteam")  # D-065: only the AI team sets limits
     h = {"X-CSRF-Token": dana.cookies["wm_csrf"], "X-Change-Reason": "limit"}
     r = await dana.put(
         "/groups/1/members/dani@corp.example/limits", json={"max_parallel": 3}, headers=h
