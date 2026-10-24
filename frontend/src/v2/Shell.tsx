@@ -5,6 +5,7 @@ import { apiPost } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { he } from '../i18n/he';
 import { areasFor, areaStorageKey, rememberedArea } from './navigation';
+import Department from './pages/Department';
 import Personal from './pages/Personal';
 import SectionBudget from './pages/SectionBudget';
 import '../styles/v2.css';
@@ -73,6 +74,8 @@ export function Shell() {
             <Personal />
           ) : current.path.startsWith('/v2/group/') ? (
             <SectionBudget groupId={current.path.split('/')[3]} />
+          ) : current.path.startsWith('/v2/department/') ? (
+            <Department departmentId={current.path.split('/')[3]} />
           ) : (
             <p className="v2-muted">{he.v2.pending}</p>
           )}

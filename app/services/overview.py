@@ -2,10 +2,11 @@
 
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import Settings
-from app.models import Grp, Initiative, Policy, Request
+from app.models import Department, Employee, Grp, Initiative, Policy, ProductionSystem, Request
+from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import views
 from app.services.rate_card import metered_value
 from app.services.spend import Spend
@@ -21,6 +22,8 @@ def _group_id(scope: str) -> int:
 
 
 async def overview(db, principal, settings: Settings, scope: str, raw_period: str | None) -> dict:
+    if scope.startswith("department:"):
+        return await department_overview(db, principal, settings, scope, raw_period)
     group_id = _group_id(scope)
     s = await views.group_summary(db, principal, settings, group_id, raw_period)
     spend = await Spend.load(db, s["period"])
@@ -107,4 +110,80 @@ async def attention(db, principal, settings: Settings, scope: str, raw_period: s
         "shortage_risks": risks,
         "reallocation_opportunities": opportunities,
         "threshold": threshold,
+    }  # fmt: skip
+
+
+def _previous(period: str) -> str:
+    year, month = map(int, period.split("-"))
+    return f"{year - (month == 1)}-{(month - 2) % 12 + 1:02d}"
+
+
+async def department_overview(
+    db, principal, settings: Settings, scope: str, raw_period: str | None
+) -> dict:
+    """WF-02: department KPIs, section comparison (per-member denominators), systems, tree.
+
+    Org Systems are listed apart and never enter the department totals (D-076)."""
+    kind, _, raw = scope.partition(":")
+    if not raw.isdigit():
+        raise views.invalid_request("scope must be department:<id>")
+    dept_id = int(raw)
+    pc = views.period_ctx(settings, raw_period)
+    await can_view_department(db, principal, dept_id)
+    dept = await db.get(Department, dept_id)
+    th = await views._thresholds(db)
+    spend = await Spend.load(db, pc["period"])
+    before = await Spend.load(db, _previous(pc["period"]))
+    d = await views._dept(db, dept, spend, pc["at"], th)
+    card = d["card"]
+    groups = d["groups"]
+    sections = []
+    for g in (x for x in groups if x.parent_group_id is None):
+        ids = [g.id, *await views._descendants(db, g.id)]
+        members = await db.scalar(
+            select(func.count()).where(Employee.group_id.in_(ids), Employee.status != "left")
+        )
+        used = sum((spend.used("group", i) for i in ids), Decimal(0))
+        prev = sum((before.used("group", i) for i in ids), Decimal(0))
+        base = d["bases"][g.id]
+        sections.append(
+            {"id": g.id, "name": g.name, "total": base, "used": used, "percent": _pct(used, base),
+             "members": members, "used_per_member": used / members if members else None,
+             "previous_used": prev}
+        )  # fmt: skip
+
+    async def systems(*where):
+        out = []
+        for x in await db.scalars(
+            select(ProductionSystem)
+            .where(ProductionSystem.status == "active", *where)
+            .order_by(ProductionSystem.id)
+        ):
+            out.append({"id": x.id, "name": x.name, "budget": x.budget,
+                        "used": spend.used("system", x.id)})  # fmt: skip
+        return out
+
+    return {
+        "period": pc["period"], "reset_date": pc["reset_date"], "department": dept.name,
+        "kpis": {"total": card["total"], "allocated": card["allocated"], "used": card["used"],
+                 "remaining": card["remaining"]},
+        "bar": {"used": card["used"], "allocated_unused": max(card["allocated"] - card["used"], 0),
+                "unallocated": card["unallocated"], "total": card["total"]},
+        "previous_period": {"period": _previous(pc["period"]),
+                            "used": before.used("department", dept_id)},
+        "sections": sections,
+        "tree": [{"id": g.id, "name": g.name, "parent_group_id": g.parent_group_id}
+                 for g in groups],
+        "internal_systems": await systems(
+            ProductionSystem.funding == "department", ProductionSystem.department_id == dept_id
+        ),
+        "org_systems": await systems(
+            ProductionSystem.funding == "organization",
+            ProductionSystem.responsible_department_id == dept_id,
+        ),
+        "actions": {
+            "edit_hierarchy": bool(
+                principal.department_roles(dept_id) & {ADMIN, REP, ORG_ALLOCATOR}
+            )
+        },
     }  # fmt: skip

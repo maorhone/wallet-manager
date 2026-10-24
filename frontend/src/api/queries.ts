@@ -860,3 +860,68 @@ export const useBulkAllocation = (groupId: number) => {
     onSuccess: () => qc.invalidateQueries(),
   });
 };
+
+export interface DepartmentSystem {
+  id: number;
+  name: string;
+  budget: number;
+  used: number;
+}
+
+export interface DepartmentOverview {
+  period: string;
+  department: string;
+  kpis: { total: number; allocated: number; used: number; remaining: number };
+  bar: { used: number; allocated_unused: number; unallocated: number; total: number };
+  previous_period: { period: string; used: number };
+  sections: {
+    id: number;
+    name: string;
+    total: number;
+    used: number;
+    percent: number;
+    members: number;
+    used_per_member: number | null;
+    previous_used: number;
+  }[];
+  tree: { id: number; name: string; parent_group_id: number | null }[];
+  internal_systems: DepartmentSystem[];
+  org_systems: DepartmentSystem[];
+  actions: { edit_hierarchy: boolean };
+}
+
+export const useDepartmentOverview = (departmentId: string) =>
+  useQuery({
+    queryKey: ['budget-overview', 'department', departmentId],
+    queryFn: () =>
+      apiFetch<DepartmentOverview>(`/budget/overview?scope=department:${departmentId}`),
+  });
+
+export type HierarchyChange =
+  | { kind: 'below'; departmentId: number; parentId: number | null; name: string }
+  | { kind: 'above'; groupId: number; name: string }
+  | { kind: 'move'; groupId: number; parentId: number | null };
+
+export const useHierarchyChange = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { change: HierarchyChange; reason: string; key: string }) => {
+      const c = v.change;
+      const write = { reason: v.reason, idempotencyKey: v.key };
+      const team = (name: string) => ({
+        name,
+        litellm_team_id: `grp-${v.key.slice(0, 8)}`,
+      });
+      if (c.kind === 'below')
+        return apiPost(
+          '/groups',
+          { ...team(c.name), department_id: c.departmentId, parent_group_id: c.parentId },
+          write,
+        );
+      if (c.kind === 'above')
+        return apiPost(`/groups/${c.groupId}/insert-parent`, team(c.name), write);
+      return apiPatch(`/groups/${c.groupId}/parent`, { parent_group_id: c.parentId }, write);
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};

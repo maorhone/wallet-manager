@@ -415,3 +415,6 @@ Done: the scheduler polls LiteLLM `/health` per model every minute and stores ok
 
 ## Phase 5 — Section budget (Step 5.17)
 `/v2/group/<id>`: period, four KPIs (total, allocated, used, remaining; metered value secondary, "לא זמין" when a consumed model has no rate), distribution bar, "דורש את תשומת לבך" (pending requests, shortage risks at ≥85%, reallocation opportunities), table of employees, initiatives and sub-groups, and a transfer drawer with preview then confirm (total budget unchanged). Read endpoints `GET /budget/overview?scope=group:<id>` and `GET /attention?scope=group:<id>`. Per-model quotas stay in the existing screen under "מתקדם".
+
+### Phase 5 — Department screen (Step 5.19)
+`/v2/department/<id>`: four KPIs, distribution bar, section comparison with per-member denominators and previous-period usage, tabs "התקציב שלנו" / "מערכות באחריותנו" (internal systems and org systems listed separately; org systems never enter department totals), and a group hierarchy tree with add-below, add-above and move. Read endpoint `GET /budget/overview?scope=department:<id>`.

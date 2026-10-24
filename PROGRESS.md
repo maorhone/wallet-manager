@@ -1051,3 +1051,6 @@ Backend `app/services/overview.py` + `app/routers/views.py` (overview, attention
 
 ## Step 5.18 (UI bulk allocation) done
 `v2/pages/BulkAllocation.tsx` drawer opened from the section page (replaces the link to the members page); uniform amount + one override, preview before/after + remaining, confirm with reason (uses 5.10 endpoints). Targeted 5.18-2 green (vitest 2). e2e `v2-bulk-allocation.spec.ts` written, not run (phase-end mode). Next: 5.19.
+
+## Step 5.19 (UI Department) done
+`overview.department_overview` (scope=department:<id>), `v2/pages/Department.tsx`, `HierarchyEditor.tsx` (uses 5.2 endpoints), Shell route. Tests: tests/api/test_budget_overview.py, Department.test.tsx. e2e `v2-department.spec.ts` written, not run (phase-end mode). Next: 5.20.
