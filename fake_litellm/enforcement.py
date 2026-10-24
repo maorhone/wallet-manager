@@ -207,6 +207,8 @@ async def _charge(
             startTime=start,
             endTime=end,
             spend=cost,
+            prompt_tokens=1,
+            completion_tokens=1,
         )
     )
     await bump_spend(conn, key["token"], team_id, key["user_id"], org_id, cost)

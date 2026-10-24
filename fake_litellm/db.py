@@ -123,6 +123,8 @@ spend_logs = Table(
     Column("startTime", DateTime(timezone=True)),
     Column("endTime", DateTime(timezone=True)),
     Column("spend", Float),
+    Column("prompt_tokens", Integer, server_default="0"),
+    Column("completion_tokens", Integer, server_default="0"),
 )
 
 

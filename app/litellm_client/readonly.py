@@ -44,7 +44,9 @@ ORDER BY t.team_id
 
 _SPEND_ROWS = """
 SELECT team_id, "user", api_key, model_group,
-       ("startTime" AT TIME ZONE :timezone)::date AS day, SUM(spend) AS spend
+       ("startTime" AT TIME ZONE :timezone)::date AS day, SUM(spend) AS spend,
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens
 FROM "LiteLLM_SpendLogs"
 WHERE "startTime" >= :start AND "startTime" < :end
 GROUP BY team_id, "user", api_key, model_group, day
@@ -118,6 +120,8 @@ class SpendRow(NamedTuple):
     model_group: str | None
     day: date
     spend: Decimal
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class PeakRow(NamedTuple):
@@ -152,7 +156,7 @@ class LiteLLMReader:
     ) -> list[SpendRow]:
         """Daily spend per (team, user, key, model group) in ``timezone`` (UTC by default)."""
         return [
-            SpendRow(r[0], r[1], r[2], r[3], r[4], _dec(r[5]))
+            SpendRow(r[0], r[1], r[2], r[3], r[4], _dec(r[5]), int(r[6]), int(r[7]))
             for r in await self._rows(_SPEND_ROWS, start=start, end=end, timezone=timezone)
         ]
 

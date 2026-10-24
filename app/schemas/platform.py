@@ -49,3 +49,14 @@ class RoleBindingIn(BaseModel):
     scope_id: int | None = None
     role: str
     ad_group_dns: list[str]
+
+
+class RateIn(BaseModel):
+    model: str = Field(min_length=1)
+    input_per_1m: Decimal = Field(ge=0)
+    output_per_1m: Decimal = Field(ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+
+
+class RateCardIn(BaseModel):
+    rates: list[RateIn]

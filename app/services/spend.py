@@ -63,6 +63,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
             log.warning("spend snapshot: LiteLLM database unreachable; keeping old rows")
             return
         totals: dict[tuple, Decimal] = defaultdict(Decimal)
+        tokens: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
         for r in rows:
             group = groups.get(r.team_id)
             if group is not None:
@@ -80,6 +81,9 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
                 for p in (period, day) if day.startswith(period) else (period,):
                     totals[(kind, scope_id, p, None)] += r.spend
                     totals[(kind, scope_id, p, r.model_group)] += r.spend
+                    tok = tokens[(kind, scope_id, p, r.model_group)]
+                    tok[0] += r.prompt_tokens
+                    tok[1] += r.completion_tokens
         async with sf() as db, db.begin():
             await db.execute(
                 delete(SpendSnapshot).where(
@@ -88,7 +92,16 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
             )
             taken = now.astimezone(UTC)
             db.add_all(
-                SpendSnapshot(scope_kind=k, scope_id=i, period=p, model=m, spend=s, taken_at=taken)
+                SpendSnapshot(
+                    scope_kind=k,
+                    scope_id=i,
+                    period=p,
+                    model=m,
+                    spend=s,
+                    taken_at=taken,
+                    prompt_tokens=tokens[(k, i, p, m)][0],
+                    completion_tokens=tokens[(k, i, p, m)][1],
+                )  # fmt: skip
                 for (k, i, p, m), s in totals.items()
             )
 

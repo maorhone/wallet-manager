@@ -33,7 +33,11 @@ SPEC_8_2 = {
     "role_binding": "ad_group_dn role scope_kind scope_id",
     "litellm_write": "id entity entity_id endpoint payload status attempts last_error "
     "idempotency_key created_at depends_on",
-    "spend_snapshot": "scope_kind scope_id period model spend taken_at",
+    "spend_snapshot": "scope_kind scope_id period model spend prompt_tokens completion_tokens "
+    "taken_at",
+    "rate_card": "model input_per_1m output_per_1m currency effective_from",
+    "transfer": "id group_id source_kind source_id target_kind target_id amount write_ids "
+    "created_by created_at",
     "notification": "id upn kind scope_kind scope_id payload created_at read_at",
     "notification_pref": "upn kind muted",
     "audit_log": "id at actor_upn actor_role entity entity_id before after reason request_id",
@@ -54,4 +58,4 @@ async def test_tables_match_spec_8_2(engine):
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
     assert actual == {t: set(c.split()) for t, c in SPEC_8_2.items()}
-    assert len(SPEC_8_2) == 21  # v1 + production, organization, initiatives and requests/events
+    assert len(SPEC_8_2) == 23  # v1 + production, organization, initiatives and requests/events

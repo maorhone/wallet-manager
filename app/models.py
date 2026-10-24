@@ -379,7 +379,20 @@ class SpendSnapshot(Base):
     period: Mapped[str] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     spend: Mapped[Decimal] = mapped_column(SPEND)
+    prompt_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0", default=0)
+    completion_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0", default=0)
     taken_at: Mapped[datetime] = _created()
+
+
+class RateCard(Base):
+    """Price per 1M tokens for the metered usage value (never part of the wallet debit)."""
+
+    __tablename__ = "rate_card"
+    model: Mapped[str] = mapped_column(Text, primary_key=True)
+    input_per_1m: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    output_per_1m: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    currency: Mapped[str] = mapped_column(Text, server_default="USD")
+    effective_from: Mapped[datetime] = _created()
 
 
 class Notification(Base):
