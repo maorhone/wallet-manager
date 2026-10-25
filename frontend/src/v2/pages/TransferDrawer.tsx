@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTransfer, useTransferPreview, type BudgetRow } from '../../api/queries';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
@@ -38,6 +38,9 @@ export function TransferDrawer({
   const [previewed, setPreviewed] = useState<{ body: ReturnType<typeof body>; key: string } | null>(
     null,
   );
+  // One Idempotency-Key per payload until its outcome is resolved: previewing again after a
+  // lost response must replay the original transfer, not run a second one.
+  const keyed = useRef<{ json: string; key: string } | null>(null);
   const current = JSON.stringify(body());
   const fresh =
     previewed !== null && !preview.isPending && JSON.stringify(previewed.body) === current;
@@ -52,7 +55,9 @@ export function TransferDrawer({
           onSubmit={(e) => {
             e.preventDefault();
             const snapshot = body();
-            setPreviewed({ body: snapshot, key: crypto.randomUUID() });
+            const json = JSON.stringify(snapshot);
+            if (keyed.current?.json !== json) keyed.current = { json, key: crypto.randomUUID() };
+            setPreviewed({ body: snapshot, key: keyed.current.key });
             preview.mutate(snapshot);
           }}
         >

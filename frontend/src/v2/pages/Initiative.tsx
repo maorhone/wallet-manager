@@ -64,7 +64,15 @@ export default function Initiative({ canMove }: { canMove: boolean }) {
         }}
         canMove={canMove}
       />
-      <Link to="/v2/requests">{s.change}</Link>
+      <Link
+        to={`/v2/requests?${new URLSearchParams({
+          target_kind: current.kind,
+          target_id: String(current.id),
+          target_name: current.name,
+        })}`}
+      >
+        {s.change}
+      </Link>
     </>
   );
 }

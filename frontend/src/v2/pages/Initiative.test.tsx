@@ -67,4 +67,19 @@ describe('Initiative', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Org sys' }));
     expect(screen.getByRole('heading', { name: 'Org sys' })).toBeTruthy();
   });
+  // review-p5-r2 blocker (F1): the change request carries the selected subject
+  it('links the change request to the selected initiative', () => {
+    render(
+      <MemoryRouter>
+        <Initiative canMove={false} />
+      </MemoryRouter>,
+    );
+    const href = screen.getByText('בקשת שינוי').getAttribute('href')!;
+    const q = new URLSearchParams(href.split('?')[1]);
+    expect([q.get('target_kind'), q.get('target_id'), q.get('target_name')]).toEqual([
+      'initiative',
+      '7',
+      'Pilot',
+    ]);
+  });
 });

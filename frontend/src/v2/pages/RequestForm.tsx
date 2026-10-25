@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useSubmitRequest } from '../../api/queries';
 import { he } from '../../i18n/he';
 
@@ -6,7 +7,21 @@ const s = he.v2.reqPage;
 
 export function RequestForm() {
   const submit = useSubmitRequest();
-  const [type, setType] = useState<'credits' | 'initiative' | 'throughput'>('throughput');
+  // A change request for an existing initiative/system carries that subject as its target.
+  const [params] = useSearchParams();
+  const tk = params.get('target_kind');
+  const ti = Number(params.get('target_id'));
+  const target =
+    (tk === 'initiative' || tk === 'system') && Number.isInteger(ti) && ti > 0
+      ? {
+          kind: tk as 'initiative' | 'system',
+          id: ti,
+          name: params.get('target_name') ?? String(ti),
+        }
+      : undefined;
+  const [type, setType] = useState<'credits' | 'initiative' | 'throughput'>(
+    target ? 'credits' : 'throughput',
+  );
   const [need, setNeed] = useState('');
   const [amount, setAmount] = useState('');
   const [name, setName] = useState('');
@@ -21,6 +36,7 @@ export function RequestForm() {
         const body = {
           type,
           need,
+          ...(target && { target: { kind: target.kind, id: target.id } }),
           ...(type !== 'throughput' && { amount: Number(amount) }),
           ...(type === 'initiative' && { name }),
           ...(type === 'throughput' && { maxParallel: Number(parallel) }),
@@ -38,6 +54,11 @@ export function RequestForm() {
       }}
     >
       <h2>{s.newRequest}</h2>
+      {target && (
+        <p>
+          {s.target}: <bdi>{target.name}</bdi>
+        </p>
+      )}
       <label>
         {s.type}
         <select value={type} onChange={(e) => setType(e.target.value as typeof type)}>

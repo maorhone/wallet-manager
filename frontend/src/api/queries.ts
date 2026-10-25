@@ -788,6 +788,7 @@ export const useSubmitRequest = () => {
       maxParallel?: number;
       amount?: number;
       name?: string;
+      target?: { kind: 'initiative' | 'system'; id: number }; // an existing subject (D-046..048)
       key?: string; // caller-owned idempotency key, kept across retries of one submission
     }) =>
       apiPost(
@@ -795,6 +796,7 @@ export const useSubmitRequest = () => {
         {
           type: v.type,
           amount: v.amount,
+          ...(v.target ? { target: v.target } : {}),
           payload: {
             need: v.need,
             ...(v.type === 'throughput' ? { max_parallel: v.maxParallel } : {}),

@@ -74,4 +74,22 @@ describe('TransferDrawer', () => {
     expect(screen.queryByText('אישור העברה')).toBeNull();
     expect(transferMutate).not.toHaveBeenCalled();
   });
+
+  // review-p5-r2 blocker (F1): a second preview of the same payload keeps the Idempotency-Key
+  it('reuses the idempotency key when the unchanged transfer is previewed again', () => {
+    renderDrawer();
+    const [from, to] = screen.getAllByRole('combobox');
+    fireEvent.change(from, { target: { value: 'group:7' } });
+    fireEvent.change(to, { target: { value: 'initiative:7' } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '10' } });
+    const keys: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      fireEvent.submit(from.closest('form')!);
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'why' } });
+      fireEvent.click(screen.getByText('אישור העברה'));
+      keys.push(transferMutate.mock.calls[i][0].key);
+    }
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
 });

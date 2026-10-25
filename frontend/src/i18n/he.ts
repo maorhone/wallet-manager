@@ -125,6 +125,7 @@ export const he = {
       done: 'ההקצאה נשמרה. הסכום החדש מחליף את התקרה הקיימת.',
     },
     reqPage: {
+      target: 'עבור',
       requestedAmount: 'סכום מבוקש',
       approvedAmount: 'סכום מאושר',
       mine: 'שלי',
