@@ -9,7 +9,7 @@ import { PeriodSelector } from './components/PeriodSelector';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { StatusBanner } from './components/StatusBanner';
 import { he } from './i18n/he';
-import { initialScope, reportPath, scopeFromPath, scopePath } from './scopes';
+import { reportPath, scopeFromPath } from './scopes';
 
 /** Authenticated layout: banner, top bar (switcher, period, user), page outlet. */
 export function Shell() {
@@ -17,16 +17,8 @@ export function Shell() {
   const { pathname, search } = useLocation();
   if (isPending) return <Loader m="xl" aria-label={he.loading} />;
   if (error || !me) return <ErrorState error={error} onRetry={refetch} />;
-  if (pathname === '/') {
-    // Keep the explicit legacy entry working; interactive login opens the v2 shell.
-    let postLogin = false;
-    try {
-      postLogin = sessionStorage.getItem('wm.v2.login') === '1';
-    } catch {
-      /* Optional storage. */
-    }
-    return <Navigate to={postLogin ? '/v2' : scopePath(initialScope(me))} replace />;
-  }
+  // D-073: the root opens the v2 shell, which restores the last authorized workspace.
+  if (pathname === '/') return <Navigate to="/v2" replace />;
   const scope = scopeFromPath(pathname, me.scopes);
   const reports = scope ? reportPath(scope) : null;
   const logout = async () => {

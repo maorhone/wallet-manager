@@ -130,3 +130,25 @@ async def test_allocator_allocates_org_system_within_systems_envelope(login_wm, 
     assert (
         await put(allocator, "/organizations/1/systems/9999/budget", {"budget": 1})
     ).status_code == 404
+
+
+async def test_my_systems_lists_owned_org_systems(login_wm, provisioned):
+    """review-p5 F1: a system owner without initiatives still finds their system."""
+    admin = await login_wm("admin")
+    upn = (await admin.get("/me")).json()["upn"]
+    await put(
+        admin,
+        "/organizations/1/envelopes",
+        {"departments_envelope": 5000000, "systems_envelope": 5000},
+    )
+    made = await admin.post(
+        "/organizations/1/systems",
+        json={"name": "Mine", "budget": 100, "owner_upn": upn},
+        headers=hdrs(admin),
+    )
+    assert made.status_code == 200, made.text
+    await admin.post(
+        "/organizations/1/systems", json={"name": "Other", "budget": 100}, headers=hdrs(admin)
+    )
+    items = (await admin.get("/systems/mine")).json()["items"]
+    assert [i["name"] for i in items] == ["Mine"]

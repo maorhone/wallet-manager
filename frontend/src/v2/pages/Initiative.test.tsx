@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Initiative from './Initiative';
 
 vi.mock('../../api/queries', () => ({
@@ -23,6 +23,10 @@ vi.mock('../../api/queries', () => ({
       ],
     },
   }),
+  useMySystems: () => ({
+    isPending: false,
+    data: { items: [{ id: 7, name: 'Org sys', budget: 500, owner_upn: 'dani@corp.example' }] },
+  }),
   useServiceKeys: () => ({
     isPending: false,
     data: {
@@ -34,6 +38,7 @@ vi.mock('../../api/queries', () => ({
 }));
 
 describe('Initiative', () => {
+  afterEach(cleanup);
   it('shows budget, consumption, balance and the key alias read-only', () => {
     render(
       <MemoryRouter>
@@ -52,5 +57,14 @@ describe('Initiative', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText('העבר מפתח למערכות ארגוניות')).toBeTruthy();
+  });
+  it('lists an owned system next to an initiative with the same id', () => {
+    render(
+      <MemoryRouter>
+        <Initiative canMove={false} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Org sys' }));
+    expect(screen.getByRole('heading', { name: 'Org sys' })).toBeTruthy();
   });
 });

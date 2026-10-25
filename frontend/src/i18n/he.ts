@@ -125,6 +125,8 @@ export const he = {
       done: 'ההקצאה נשמרה. הסכום החדש מחליף את התקרה הקיימת.',
     },
     reqPage: {
+      requestedAmount: 'סכום מבוקש',
+      approvedAmount: 'סכום מאושר',
       mine: 'שלי',
       toHandle: 'לטיפולי',
       type: 'סוג',
@@ -178,6 +180,8 @@ export const he = {
       moveKey: 'העבר מפתח למערכות ארגוניות',
       targetSystem: 'מזהה מערכת ארגונית',
       moved: 'המפתח הועבר.',
+      movePending: 'ההעברה נרשמה וממתינה לסנכרון עם השער.',
+      systemsNone: 'אין יוזמות או מערכות להצגה.',
     },
     deptPage: {
       kpiTotal: 'תקציב המחלקה',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useSubmitRequest } from '../../api/queries';
 import { he } from '../../i18n/he';
 
@@ -11,18 +11,30 @@ export function RequestForm() {
   const [amount, setAmount] = useState('');
   const [name, setName] = useState('');
   const [parallel, setParallel] = useState('');
+  // One key per distinct submission: a retry of the same payload replays, a new one does not.
+  const sent = useRef<{ sig: string; key: string } | null>(null);
   return (
     <form
       className="v2-card"
       onSubmit={(e) => {
         e.preventDefault();
-        submit.mutate({
+        const body = {
           type,
           need,
           ...(type !== 'throughput' && { amount: Number(amount) }),
           ...(type === 'initiative' && { name }),
           ...(type === 'throughput' && { maxParallel: Number(parallel) }),
-        });
+        };
+        const sig = JSON.stringify(body);
+        if (sent.current?.sig !== sig) sent.current = { sig, key: crypto.randomUUID() };
+        submit.mutate(
+          { ...body, key: sent.current.key },
+          {
+            onSuccess: () => {
+              sent.current = null;
+            },
+          },
+        );
       }}
     >
       <h2>{s.newRequest}</h2>

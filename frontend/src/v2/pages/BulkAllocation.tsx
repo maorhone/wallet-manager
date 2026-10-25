@@ -19,7 +19,6 @@ export function BulkAllocation({
   const [override, setOverride] = useState('');
   const [overrideAmount, setOverrideAmount] = useState('');
   const [reason, setReason] = useState('');
-  const [key] = useState(() => crypto.randomUUID());
   const preview = useBulkPreview(groupId);
   const commit = useBulkAllocation(groupId);
   const employees = rows.filter((r) => r.kind === 'employee');
@@ -28,7 +27,12 @@ export function BulkAllocation({
     amount: Number(amount),
     overrides: override && overrideAmount ? { [override]: Number(overrideAmount) } : {},
   });
-  const p = preview.data;
+  // Confirm exactly what was previewed; any later edit invalidates the preview (D-066/D-069).
+  const [previewed, setPreviewed] = useState<{ body: ReturnType<typeof body>; key: string } | null>(
+    null,
+  );
+  const fresh = previewed !== null && JSON.stringify(previewed.body) === JSON.stringify(body());
+  const p = fresh && !preview.isPending ? preview.data : undefined;
   return (
     <Drawer opened onClose={onClose} title={s.title}>
       {commit.isSuccess ? (
@@ -37,7 +41,9 @@ export function BulkAllocation({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            preview.mutate(body());
+            const snapshot = body();
+            setPreviewed({ body: snapshot, key: crypto.randomUUID() });
+            preview.mutate(snapshot);
           }}
         >
           <label>
@@ -106,8 +112,10 @@ export function BulkAllocation({
               </label>
               <button
                 type="button"
-                disabled={!reason || p.exceeds_limit || commit.isPending}
-                onClick={() => commit.mutate({ body: body(), reason, key })}
+                disabled={!reason || p.exceeds_limit || commit.isPending || preview.isPending}
+                onClick={() =>
+                  previewed && commit.mutate({ body: previewed.body, reason, key: previewed.key })
+                }
               >
                 {s.confirm}
               </button>

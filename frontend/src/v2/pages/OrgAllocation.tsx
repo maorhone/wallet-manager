@@ -27,46 +27,66 @@ function Table({
   const [edit, setEdit] = useState<Record<number, string>>({});
   if (!rows.length) return <p className="v2-muted">{s.none}</p>;
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>{s.name}</th>
-          <th>{s.budget}</th>
-          {kind === 'department' && <th>{s.previousUsed}</th>}
-          {kind === 'department' && <th>{s.recommendation}</th>}
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.id}>
-            <td>{r.name}</td>
-            <td>
-              <input
-                type="number"
-                min={0}
-                aria-label={`${s.budget}: ${r.name}`}
-                value={edit[r.id] ?? String(r.budget)}
-                onChange={(e) => setEdit({ ...edit, [r.id]: e.target.value })}
-              />
-            </td>
-            {kind === 'department' && <td>{credits(r.previous_used ?? 0)}</td>}
-            {kind === 'department' && <td className="v2-muted">{s.later}</td>}
-            <td>
-              <button
-                type="button"
-                disabled={!reason || edit[r.id] === undefined}
-                onClick={() =>
-                  allocate.mutate({ kind, id: r.id, budget: Number(edit[r.id]), reason })
-                }
-              >
-                {s.save}
-              </button>
-            </td>
+    <>
+      {allocate.error && <p role="alert">{(allocate.error as Error).message}</p>}
+      <table>
+        <thead>
+          <tr>
+            <th>{s.name}</th>
+            <th>{s.budget}</th>
+            {kind === 'department' && <th>{s.previousUsed}</th>}
+            {kind === 'department' && <th>{s.recommendation}</th>}
+            <th />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td>{r.name}</td>
+              <td>
+                <input
+                  type="number"
+                  min={0}
+                  aria-label={`${s.budget}: ${r.name}`}
+                  value={edit[r.id] ?? String(r.budget)}
+                  onChange={(e) => setEdit({ ...edit, [r.id]: e.target.value })}
+                />
+              </td>
+              {kind === 'department' && <td>{credits(r.previous_used ?? 0)}</td>}
+              {kind === 'department' && <td className="v2-muted">{s.later}</td>}
+              <td>
+                <button
+                  type="button"
+                  disabled={!reason || edit[r.id] === undefined || allocate.isPending}
+                  onClick={() =>
+                    allocate.mutate(
+                      {
+                        kind,
+                        id: r.id,
+                        budget: Number(edit[r.id]),
+                        budgetPeriod: r.budget_period,
+                        reason,
+                      },
+                      {
+                        // Reconcile: after a persisted write the server value replaces the draft.
+                        onSuccess: () =>
+                          setEdit((d) =>
+                            Object.fromEntries(
+                              Object.entries(d).filter(([k]) => k !== String(r.id)),
+                            ),
+                          ),
+                      },
+                    )
+                  }
+                >
+                  {s.save}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }
 
@@ -114,9 +134,21 @@ export default function OrgAllocation({
       </div>
       <section className="v2-card">
         {tab === 'depts' ? (
-          <Table rows={departments.rows} kind="department" orgId={organizationId} reason={reason} />
+          <Table
+            key="department"
+            rows={departments.rows}
+            kind="department"
+            orgId={organizationId}
+            reason={reason}
+          />
         ) : (
-          <Table rows={systems.rows} kind="system" orgId={organizationId} reason={reason} />
+          <Table
+            key="system"
+            rows={systems.rows}
+            kind="system"
+            orgId={organizationId}
+            reason={reason}
+          />
         )}
       </section>
       {isAdmin && (

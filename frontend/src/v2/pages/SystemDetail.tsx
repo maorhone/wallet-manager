@@ -20,7 +20,8 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
   const keys = useServiceKeys(subject.kind, subject.id);
   const move = useMoveKey();
   const [target, setTarget] = useState('');
-  const [rowKey] = useState(() => crypto.randomUUID());
+  // One key per move: retries replay, a later distinct move gets a fresh key.
+  const [rowKey, setRowKey] = useState(() => crypto.randomUUID());
   if (keys.isPending) return <p role="status">{he.loading}</p>;
   if (keys.error || !keys.data) return <ErrorState error={keys.error} onRetry={keys.refetch} />;
   const items = keys.data.items;
@@ -81,7 +82,10 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            move.mutate({ keyId: items[0].id, targetSystemId: Number(target), key: rowKey });
+            move.mutate(
+              { keyId: items[0].id, targetSystemId: Number(target), key: rowKey },
+              { onSuccess: () => setRowKey(crypto.randomUUID()) },
+            );
           }}
         >
           <label>
@@ -97,7 +101,10 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
           <button type="submit" disabled={move.isPending}>
             {s.moveKey}
           </button>
-          {move.isSuccess && <p role="status">{s.moved}</p>}
+          {move.isSuccess && (
+            <p role="status">{move.data?.status === 'applied' ? s.moved : s.movePending}</p>
+          )}
+          {move.isError && <p role="alert">{(move.error as Error).message}</p>}
         </form>
       )}
     </section>

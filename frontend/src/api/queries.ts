@@ -788,6 +788,7 @@ export const useSubmitRequest = () => {
       maxParallel?: number;
       amount?: number;
       name?: string;
+      key?: string; // caller-owned idempotency key, kept across retries of one submission
     }) =>
       apiPost(
         '/requests',
@@ -800,7 +801,7 @@ export const useSubmitRequest = () => {
             ...(v.type === 'initiative' ? { name: v.name } : {}),
           },
         },
-        { reason: 'בקשה מהמסך האישי' },
+        { reason: 'בקשה מהמסך האישי', idempotencyKey: v.key },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['requests'] }),
   });
@@ -993,11 +994,24 @@ export const useMyInitiatives = () =>
     queryFn: () => apiFetch<{ items: InitiativeView[] }>('/initiatives'),
   });
 
+export interface OwnedSystem {
+  id: number;
+  name: string;
+  budget: number;
+  owner_upn: string | null;
+}
+
+export const useMySystems = () =>
+  useQuery({
+    queryKey: ['systems', 'mine'],
+    queryFn: () => apiFetch<{ items: OwnedSystem[] }>('/systems/mine'),
+  });
+
 export const useMoveKey = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { keyId: number; targetSystemId: number; key: string }) =>
-      apiPost(
+      apiPost<WriteResponse>(
         `/service-keys/${v.keyId}/move`,
         { target_system_id: v.targetSystemId },
         { reason: 'העברת מפתח למערכות ארגוניות', idempotencyKey: v.key },
@@ -1011,6 +1025,7 @@ export type OrgEnvelopeRow = {
   name: string;
   budget: number;
   previous_used?: number;
+  budget_period?: string;
   owner_upn?: string | null;
 };
 export type OrgEnvelopes = {
@@ -1033,13 +1048,16 @@ export const useOrgAllocate = (orgId: number) => {
       kind: 'department' | 'system';
       id: number;
       budget: number;
+      budgetPeriod?: string;
       reason: string;
     }) =>
       apiPut<WriteResponse>(
         v.kind === 'department'
           ? `/organizations/${orgId}/departments/${v.id}/budget`
           : `/organizations/${orgId}/systems/${v.id}/budget`,
-        v.kind === 'department' ? { budget: v.budget, budget_period: '1mo' } : { budget: v.budget },
+        v.kind === 'department'
+          ? { budget: v.budget, budget_period: v.budgetPeriod ?? '1mo' }
+          : { budget: v.budget },
         { reason: v.reason, idempotencyKey: crypto.randomUUID() },
       ),
     onSuccess: () => qc.invalidateQueries(),

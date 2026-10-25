@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import OrgAllocation from './OrgAllocation';
 
 const mutate = vi.fn();
+let allocateError: Error | null = null;
 vi.mock('../../api/queries', () => ({
   useOrgEnvelopes: () => ({
     isPending: false,
@@ -12,20 +13,21 @@ vi.mock('../../api/queries', () => ({
       departments: {
         envelope: 1000,
         allocated: 600,
-        rows: [{ id: 3, name: 'מחלקה א', budget: 600, previous_used: 50 }],
+        rows: [{ id: 3, name: 'מחלקה א', budget: 600, previous_used: 50, budget_period: '7d' }],
       },
       systems: {
         envelope: 200,
         allocated: 100,
-        rows: [{ id: 9, name: 'מערכת ארגונית', budget: 100 }],
+        rows: [{ id: 3, name: 'מערכת ארגונית', budget: 100 }],
       },
     },
   }),
-  useOrgAllocate: () => ({ mutate }),
+  useOrgAllocate: () => ({ mutate, error: allocateError }),
   useCreateOrganization: () => ({ mutate: vi.fn() }),
 }));
 
 describe('OrgAllocation', () => {
+  afterEach(cleanup);
   it('keeps two envelopes apart and allocates to a department and an org system', () => {
     render(<OrgAllocation organizationId={1} isAdmin />);
     expect(screen.getByText('מעטפת מחלקות')).toBeTruthy();
@@ -34,16 +36,37 @@ describe('OrgAllocation', () => {
     fireEvent.change(screen.getByLabelText('סיבת השינוי'), { target: { value: 'תכנון' } });
     fireEvent.change(screen.getByLabelText('הקצאה: מחלקה א'), { target: { value: '700' } });
     fireEvent.click(screen.getByRole('button', { name: 'שמירה' }));
-    expect(mutate).toHaveBeenCalledWith({
-      kind: 'department',
-      id: 3,
-      budget: 700,
-      reason: 'תכנון',
-    });
+    expect(mutate).toHaveBeenCalledWith(
+      {
+        kind: 'department',
+        id: 3,
+        budget: 700,
+        budgetPeriod: '7d',
+        reason: 'תכנון',
+      },
+      expect.anything(),
+    );
     fireEvent.click(screen.getByRole('tab', { name: 'מערכות ארגוניות' }));
     fireEvent.change(screen.getByLabelText('הקצאה: מערכת ארגונית'), { target: { value: '150' } });
     fireEvent.click(screen.getByRole('button', { name: 'שמירה' }));
-    expect(mutate).toHaveBeenCalledWith({ kind: 'system', id: 9, budget: 150, reason: 'תכנון' });
+    expect(mutate).toHaveBeenCalledWith(
+      { kind: 'system', id: 3, budget: 150, reason: 'תכנון' },
+      expect.anything(),
+    );
     expect(screen.getByText('ארגון חדש')).toBeTruthy();
+  });
+
+  it('does not carry a department draft into a system with the same id', () => {
+    render(<OrgAllocation organizationId={1} isAdmin />);
+    fireEvent.change(screen.getByLabelText('הקצאה: מחלקה א'), { target: { value: '999' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'מערכות ארגוניות' }));
+    expect((screen.getByLabelText('הקצאה: מערכת ארגונית') as HTMLInputElement).value).toBe('100');
+  });
+
+  it('shows a rejected allocation', () => {
+    allocateError = new Error('exceeds envelope');
+    render(<OrgAllocation organizationId={1} isAdmin />);
+    expect(screen.getByRole('alert').textContent).toContain('exceeds envelope');
+    allocateError = null;
   });
 });

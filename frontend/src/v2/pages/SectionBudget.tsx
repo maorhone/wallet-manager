@@ -94,7 +94,7 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
                 <td>{credits(r.total)}</td>
                 <td>{credits(r.used)}</td>
                 <td>
-                  <button type="button" onClick={() => setTransferFrom(r.id)}>
+                  <button type="button" onClick={() => setTransferFrom(`${r.kind}:${r.id}`)}>
                     {s.transfer}
                   </button>
                 </td>

@@ -243,3 +243,22 @@ async def get_production(
         "spend_taken_at": spend.taken_at, "read_only": pc["read_only"],
         "actions": {"edit": ADMIN in roles and not pc["read_only"]},
     }  # fmt: skip
+
+
+async def list_owned_systems(db: AsyncSession, principal: Principal) -> dict:
+    """Org Systems whose view-only owner is the caller (D-048/D-063)."""
+    query = (
+        select(ProductionSystem)
+        .where(
+            ProductionSystem.owner_upn == principal.upn,
+            ProductionSystem.funding == "organization",
+            ProductionSystem.status == "active",
+        )
+        .order_by(ProductionSystem.id)
+    )
+    return {
+        "items": [
+            {"id": s.id, "name": s.name, "budget": s.budget, "owner_upn": s.owner_upn}
+            for s in await db.scalars(query)
+        ]
+    }

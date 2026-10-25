@@ -21,16 +21,26 @@ export function TransferDrawer({
   const [target, setTarget] = useState('');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
-  const [key] = useState(() => crypto.randomUUID());
   const preview = useTransferPreview();
   const transfer = useTransfer();
-  const find = (id: string) => rows.find((r) => r.id === id);
+  // Endpoints are "kind:id": a group and an initiative may share a numeric id.
+  const endpoint = (ref: string) => {
+    const i = ref.indexOf(':');
+    return { kind: ref.slice(0, i), id: ref.slice(i + 1) };
+  };
   const body = () => ({
     group_id: groupId,
-    source: { kind: find(source)?.kind ?? 'employee', id: source },
-    target: { kind: find(target)?.kind ?? 'employee', id: target },
+    source: endpoint(source),
+    target: endpoint(target),
     amount: Number(amount),
   });
+  // The confirmation is bound to the exact payload that was previewed (D-066/D-069).
+  const [previewed, setPreviewed] = useState<{ body: ReturnType<typeof body>; key: string } | null>(
+    null,
+  );
+  const current = JSON.stringify(body());
+  const fresh =
+    previewed !== null && !preview.isPending && JSON.stringify(previewed.body) === current;
   const ready = source && target && source !== target && Number(amount) > 0;
   const p = preview.data;
   return (
@@ -41,7 +51,9 @@ export function TransferDrawer({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            preview.mutate(body());
+            const snapshot = body();
+            setPreviewed({ body: snapshot, key: crypto.randomUUID() });
+            preview.mutate(snapshot);
           }}
         >
           {(['from', 'to'] as const).map((side) => (
@@ -54,7 +66,7 @@ export function TransferDrawer({
               >
                 <option value="" />
                 {rows.map((r) => (
-                  <option key={r.id} value={r.id}>
+                  <option key={`${r.kind}:${r.id}`} value={`${r.kind}:${r.id}`}>
                     {r.name}
                   </option>
                 ))}
@@ -75,7 +87,7 @@ export function TransferDrawer({
             {s.preview}
           </button>
           {preview.isError && <p role="alert">{(preview.error as Error).message}</p>}
-          {p && (
+          {p && fresh && (
             <table>
               <thead>
                 <tr>
@@ -100,7 +112,7 @@ export function TransferDrawer({
               </tbody>
             </table>
           )}
-          {p && (
+          {p && fresh && previewed && (
             <>
               <label>
                 {s.reason}
@@ -108,8 +120,10 @@ export function TransferDrawer({
               </label>
               <button
                 type="button"
-                disabled={!reason || transfer.isPending}
-                onClick={() => transfer.mutate({ body: body(), reason, key })}
+                disabled={!reason || transfer.isPending || preview.isPending}
+                onClick={() =>
+                  transfer.mutate({ body: previewed.body, reason, key: previewed.key })
+                }
               >
                 {s.confirm}
               </button>

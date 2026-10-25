@@ -1072,3 +1072,6 @@ Fixed: transfer id aliases, personal-value auth on transfer endpoints, `/team/up
 
 ## fix-review-p5 group 2 (B2+B3 authz/services)
 Done: blockers 8-12 and the B2/B3 majors (see OPEN-ITEMS NEEDS-REVIEW lines); tests in tests/api/test_review_authz.py. Next: group 3 (F1+F2 frontend). Blockers: none.
+
+## fix-review-p5 group 3 (F1+F2 frontend)
+Done: blocker 13 (kind:id transfer endpoints), preview-bound confirm (transfer+bulk), OrgAllocation keyed tabs/errors/period kept, approved-amount input, per-move idempotency key, systems workspace (GET /systems/mine), move pending/applied message, submit-request key reuse, `/` -> `/v2`. Next: full run. Blockers: none.

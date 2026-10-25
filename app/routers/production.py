@@ -105,3 +105,8 @@ async def put_org_system_budget(
         ctx, principal, organization_id, system_id, body
     )
     return await write_response(ctx, entities)
+
+
+@router.get("/systems/mine")
+async def my_systems(principal: CurrentPrincipal, db: Db):
+    return await production.list_owned_systems(db, principal)

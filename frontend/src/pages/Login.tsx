@@ -32,18 +32,7 @@ export default function Login() {
       <Title order={2}>{he.appName}</Title>
       <Card withBorder>
         <Stack>
-          <Button
-            component="a"
-            href="/auth/login"
-            onClick={() => {
-              // The OIDC callback returns to /; mark this tab's post-login destination.
-              try {
-                sessionStorage.setItem('wm.v2.login', '1');
-              } catch {
-                /* Optional storage. */
-              }
-            }}
-          >
+          <Button component="a" href="/auth/login">
             {he.loginAdfs}
           </Button>
           {devAuth && (
