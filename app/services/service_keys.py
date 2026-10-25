@@ -4,7 +4,7 @@ import json
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
@@ -152,20 +152,23 @@ async def initiative_committed(db, initiative_id):
     )
 
 
-async def incoming_pending(db, initiative_id) -> Decimal:
-    """Transferred-in credit whose source reduction is not applied yet cannot back a key."""
-    pending = Decimal(0)
-    transfers = await db.scalars(
-        select(Transfer).where(
-            Transfer.target_kind == "initiative", Transfer.target_id == str(initiative_id)
+async def pending_incoming(db, kind: str, ident) -> Decimal:
+    """Transferred-in credit that is not settled yet cannot move on or back a key (D-069).
+
+    One aggregate over the whole transfer history: a transfer counts until its state is
+    ``applied`` (source reduction applied and the late-spend fence passed).
+    """
+    return await db.scalar(
+        select(func.coalesce(func.sum(Transfer.amount), 0)).where(
+            Transfer.target_kind == kind,
+            Transfer.target_id == str(ident),
+            Transfer.state.in_(("pending", "failed")),
         )
     )
-    for transfer in transfers:
-        if transfer.source_kind != "initiative" and transfer.write_ids:
-            first = await db.get(LitellmWrite, transfer.write_ids[0])
-            if first is not None and first.status != "applied":
-                pending += transfer.amount
-    return pending
+
+
+async def incoming_pending(db, initiative_id) -> Decimal:
+    return await pending_incoming(db, "initiative", initiative_id)
 
 
 async def create(ctx, principal, client, body):
@@ -193,7 +196,7 @@ async def create(ctx, principal, client, body):
     ai_team = principal.is_admin or principal.has(AI_TEAM, "global")
     for field, policy_name in (("max_parallel", "concurrency"), ("rpm_limit", "rpm")):
         policy = await ctx.db.get(Policy, policy_name)
-        if policy and not ai_team and body.owner_kind != "group":
+        if policy and not ai_team:
             # D-065: only the AI team picks technical limits; others get the approved floor.
             setattr(body, field, policy.value["min"])
         if policy and (
@@ -231,6 +234,8 @@ async def change(ctx, principal, client, key_id, action):
             # Both credentials can spend until deletion has applied. Never refund the
             # old cap based on a stale spend snapshot, even after revocation/deletion.
             key.retired_budget += key.max_budget
+        elif key.owner_kind == "system":
+            key.retired_budget += key.max_budget  # generations merge in spend: keep reserving
         return await generate(ctx, client, owner, key, role, before, rotating=True)
     key.status = "revoked"
     ctx.audit(

@@ -20,7 +20,7 @@ from app.litellm_client import (
 from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
 from app.services.spend import SpendUnavailable
-from app.services.transfers import compensate_failed_source, fence_release
+from app.services.transfers import compensate_failed_source, fence_release, settle
 
 _METHODS = {
     "/organization/update": "organization_update",
@@ -102,6 +102,10 @@ async def drain(
     sf: async_sessionmaker[AsyncSession], client: LiteLLMClient, settings: Settings, reader=None
 ) -> DrainResult:
     result = DrainResult()
+    tz = ZoneInfo(settings.app_timezone)
+    async with sf() as s:  # transfers whose last write applied earlier (or whose fence was held)
+        await settle(s, settings, reader, datetime.now(tz))
+        await s.commit()
     async with sf() as s:
         ids = list(
             await s.scalars(
@@ -150,6 +154,7 @@ async def drain(
                 await _apply(client, s, row, body)
                 row.status, row.last_error = "applied", None
                 result.applied += 1
+                await settle(s, settings, reader, datetime.now(tz), row.id)
             except LiteLLMTransientError as exc:
                 row.attempts, row.last_error = row.attempts + 1, str(exc)
                 await s.commit()

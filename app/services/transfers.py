@@ -3,6 +3,19 @@
 The total never changes: whatever the source releases the target receives. Only the part of a
 source's budget that is neither spent nor committed can move. Internal systems move only among
 themselves (they are funded from the department envelope, not from the section's allocation).
+
+Money-movement design (review round 3). Every transfer, its compensation and its settlement
+live in this module and change balances only here.
+* Lock order, parent -> child: DEPARTMENT, GROUP (the section), PRODUCTION (systems only), then
+  the child groups the transfer touches by ascending id. Forward moves (``_plan``) and
+  compensation (``_undo``, also from the outbox worker) take exactly this order, with row locks
+  (SELECT ... FOR UPDATE) on the balances they rewrite, in the same transaction.
+* Lifecycle ``Transfer.state``: pending -> applied (source reduction applied, late-spend fence
+  passed) | pending -> compensated (undone), changed only by conditional UPDATEs, so retries,
+  outbox redelivery or two workers change balances exactly once. ``failed`` marks a transfer
+  that cannot be undone safely (needs an operator).
+* Incoming credit counts as pending (not transferable) until the state is ``applied``; all checks
+  are aggregate SQL over the full history.
 """
 
 from dataclasses import dataclass
@@ -10,9 +23,9 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import any_, literal, select, update
 
-from app.db import LockKind
+from app.db import LockKind, lock_parent
 from app.errors import ApiError, invalid_request
 from app.models import (
     Employee,
@@ -36,7 +49,7 @@ from app.schemas.transfers import EndpointIn, TransferIn
 from app.services import notifications
 from app.services.personal_values import authorize
 from app.services.production import system_committed
-from app.services.service_keys import incoming_pending, initiative_committed
+from app.services.service_keys import initiative_committed, pending_incoming
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
 from app.writes import WriteContext
 
@@ -71,6 +84,16 @@ class Side:
 
 def _not_found() -> ApiError:
     return ApiError(404, "NOT_FOUND", "Entity not found")
+
+
+async def lock_scope(db, group: Grp, endpoints) -> None:
+    """The one lock order (module docstring); used by the forward move and by compensation."""
+    await lock_parent(db, LockKind.DEPARTMENT, group.department_id)
+    await lock_parent(db, LockKind.GROUP, group.id)
+    if any(kind == "system" for kind, _ in endpoints):
+        await lock_parent(db, LockKind.PRODUCTION, group.department_id)
+    for gid in sorted({int(i) for kind, i in endpoints if kind == "group" and str(i).isdigit()}):
+        await lock_parent(db, LockKind.GROUP, gid)
 
 
 async def group_committed(db, spend: Spend, group: Grp) -> Decimal:
@@ -129,8 +152,7 @@ async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
         row = await db.get(Initiative, row_id)
         if row is None or row.group_id != group.id or row.status != "active":
             raise _not_found()
-        # credit whose source reduction is not applied yet cannot move on (D-069)
-        committed = await initiative_committed(db, row_id) + await incoming_pending(db, row_id)
+        committed = await initiative_committed(db, row_id)
         return Side("initiative", ep.id, row.name, row.budget, committed, row)
     if ep.kind == "group":
         row = await db.get(Grp, row_id)
@@ -165,9 +187,9 @@ async def _plan(
     group = await ctx.db.get(Grp, body.group_id)
     if group is None:
         raise _not_found()
-    # DEPARTMENT before GROUP everywhere: group_roles_of takes the department lock
-    await ctx.lock(LockKind.DEPARTMENT, group.department_id)
-    await ctx.lock(LockKind.GROUP, group.id)
+    await lock_scope(
+        ctx.db, group, [(body.source.kind, body.source.id), (body.target.kind, body.target.id)]
+    )
     involves_system = "system" in (body.source.kind, body.target.kind)
     if involves_system:
         # Like editing a system budget: an admin or the managing section's head, nobody else.
@@ -181,13 +203,8 @@ async def _plan(
                 "systems",
                 {"reason": "system_mixed"},
             )
-        await ctx.lock(LockKind.DEPARTMENT, group.department_id)
-        await ctx.lock(LockKind.PRODUCTION, group.department_id)
     else:
         role = await can_write_members(ctx.db, principal, group.id)
-    for ep in (body.source, body.target):
-        if ep.kind == "group" and ep.id.isdigit():
-            await ctx.lock(LockKind.GROUP, int(ep.id))
     now = (clock.now() if clock else datetime.now(ZoneInfo(ctx.settings.app_timezone))).astimezone(
         ZoneInfo(ctx.settings.app_timezone)
     )
@@ -201,6 +218,8 @@ async def _plan(
     target = await _side(ctx.db, spend, group, body.target)
     if (source.kind, source.id) == (target.kind, target.id):
         raise invalid_request("Source and target are the same", {"reason": "same_entity"})
+    for side in (source, target):  # unsettled incoming credit cannot move on, whatever the kind
+        side.committed += await pending_incoming(ctx.db, side.kind, side.id)
     for side in (source, target):  # DR9 / FR-G5: the personal-value rules apply to both ends
         if side.kind == "employee":
             tier = await target_tier(ctx.db, directory, side.id)
@@ -242,6 +261,7 @@ async def create(
     amount = body.amount
     writes = []
     source_write = None
+    first_write_id = None
     # Source first: the destination's LiteLLM write waits for the source reduction (D-069).
     for side, delta in ((source, -amount), (target, amount)):
         before = {"total": side.total}
@@ -256,11 +276,14 @@ async def create(
                 _ENTITY[side.kind], side.id, endpoint, depends_on=source_write
             )
             writes.append(write)
+            if side is source:
+                first_write_id = write
             source_write = source_write or write
     transfer = Transfer(
         group_id=group.id, source_kind=source.kind, source_id=source.id,
         target_kind=target.kind, target_id=target.id, amount=amount,
-        write_ids=writes, created_by=principal.upn,
+        write_ids=writes, first_write_id=first_write_id, created_by=principal.upn,
+        state="pending" if writes else "applied",
     )  # fmt: skip
     ctx.db.add(transfer)
     await ctx.db.flush()
@@ -308,26 +331,43 @@ async def get(db, principal: Principal, transfer_id: int) -> dict:
 
 
 async def _transfer_of_source(db, write_id: int) -> Transfer | None:
-    for transfer in await db.scalars(select(Transfer).order_by(Transfer.id.desc()).limit(500)):
-        ids = transfer.write_ids or []
-        if ids and ids[0] == write_id:
-            return transfer
-    return None
+    return await db.scalar(select(Transfer).where(Transfer.first_write_id == write_id))
 
 
 async def _undo(db, transfer: Transfer, reason: str) -> bool:
-    """Restore both domain balances and cancel the held destination writes (idempotent)."""
-    ids = transfer.write_ids or []
-    held = list(await db.scalars(select(LitellmWrite).where(LitellmWrite.id.in_(ids[1:]))))
+    """Restore both domain balances and cancel the held destination writes, exactly once.
+
+    Locks first (module docstring), then the state claim ``pending -> compensated`` is a
+    conditional UPDATE, so a second caller (retry, redelivery, another worker) finds nothing to do.
+    """
+    group = await db.get(Grp, transfer.group_id)
+    ends = [(transfer.source_kind, transfer.source_id), (transfer.target_kind, transfer.target_id)]
+    await lock_scope(db, group, ends)
+    held = list(
+        await db.scalars(
+            select(LitellmWrite)
+            .where(LitellmWrite.id.in_((transfer.write_ids or [])[1:]))
+            .with_for_update()
+        )
+    )
     if any(w.status != "pending" for w in held):
         return False  # the destination already applied: nothing safe to undo here
-    for kind, ident, delta in (
-        (transfer.source_kind, transfer.source_id, transfer.amount),
-        (transfer.target_kind, transfer.target_id, -transfer.amount),
-    ):
-        row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
+    rows = []
+    for (kind, ident), delta in zip(ends, (transfer.amount, -transfer.amount), strict=True):
+        row = await db.get(
+            _MODEL[kind], ident if kind == "employee" else int(ident),
+            with_for_update=True, populate_existing=True,
+        )  # fmt: skip
         field = {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget")
-        setattr(row, field, getattr(row, field) + delta)
+        rows.append((row, field, getattr(row, field) + delta))
+    claim = update(Transfer).where(Transfer.id == transfer.id, Transfer.state == "pending")
+    if any(new < 0 for _, _, new in rows):  # the target already gave the credit away: operator
+        await db.execute(claim.values(state="failed"))
+        return False
+    if await db.scalar(claim.values(state="compensated").returning(Transfer.id)) is None:
+        return False
+    for row, field, new in rows:
+        setattr(row, field, new)
     for w in held:
         w.status, w.last_error = "failed", reason
     return True
@@ -341,8 +381,27 @@ async def compensate_failed_source(db, write: LitellmWrite) -> None:
     A destination without a write (an initiative) is restored as well.
     """
     transfer = await _transfer_of_source(db, write.id)
-    if transfer is not None and transfer.source_kind != "initiative":
+    if transfer is not None:
         await _undo(db, transfer, f"cancelled: source write {write.id} failed")
+
+
+async def _source_overspent(db, reader, transfer: Transfer, now: datetime) -> bool:
+    kind, ident = transfer.source_kind, transfer.source_id
+    row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
+    total = getattr(row, {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget"))
+    spend = await fresh_spend(db, reader, now)  # SpendUnavailable propagates: caller holds
+    return spend.used(kind, ident) > total
+
+
+async def _release_cancelled(db, settings, transfer: Transfer) -> None:
+    await _undo(
+        db, transfer, f"cancelled: source spent the released credit (transfer {transfer.id})"
+    )
+    source_write = await db.get(LitellmWrite, transfer.first_write_id)
+    await enqueue(
+        db, settings, source_write.entity, source_write.entity_id, source_write.endpoint,
+        f"transfer:{transfer.id}:restore-source",
+    )  # fmt: skip
 
 
 async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime) -> bool:
@@ -351,31 +410,48 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
     If the source consumed part of the released credit after the transfer was validated, the
     move is undone (source restored upstream by a new write) and the destination is not raised.
     Fails closed: an unreadable spend holds the write. Returns True when it may be applied.
+    Destinations without a write (initiatives) get the same check in ``settle``.
     """
     if write.depends_on is None or reader is None:
         return True
     transfer = await _transfer_of_source(db, write.depends_on)
     if transfer is None or write.id not in (transfer.write_ids or [])[1:]:
         return True
-    kind, ident = transfer.source_kind, transfer.source_id
-    row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
-    total = getattr(row, {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget"))
-    spend = await fresh_spend(db, reader, now)  # SpendUnavailable propagates: caller holds
-    if spend.used(kind, ident) <= total:
+    if not await _source_overspent(db, reader, transfer, now):
         return True
-    await _undo(
-        db, transfer, f"cancelled: source spent the released credit (transfer {transfer.id})"
-    )
-    source_write = await db.get(LitellmWrite, transfer.write_ids[0])
-    await enqueue(
-        db,
-        settings,
-        source_write.entity,
-        source_write.entity_id,
-        source_write.endpoint,
-        f"transfer:{transfer.id}:restore-source",
-    )
+    if transfer.state == "pending":
+        await _release_cancelled(db, settings, transfer)
     return False
+
+
+async def settle(db, settings, reader, now: datetime, write_id: int | None = None) -> None:
+    """Pending transfers whose writes are all applied become ``applied`` (credit usable).
+
+    A destination without its own write (an initiative) is fenced here: the source's fresh
+    spend is re-read first, and an unreadable spend leaves the transfer pending.
+    """
+    q = select(Transfer).where(Transfer.state == "pending")
+    if write_id is not None:
+        q = q.where(literal(write_id) == any_(Transfer.write_ids))
+    for transfer in list(await db.scalars(q)):
+        ids = transfer.write_ids or []
+        statuses = set(
+            await db.scalars(select(LitellmWrite.status).where(LitellmWrite.id.in_(ids)))
+        )
+        if not ids or statuses != {"applied"}:
+            continue
+        if transfer.first_write_id and len(ids) == 1 and reader is not None:
+            try:
+                if await _source_overspent(db, reader, transfer, now):
+                    await _release_cancelled(db, settings, transfer)
+                    continue
+            except SpendUnavailable:
+                continue
+        await db.execute(
+            update(Transfer)
+            .where(Transfer.id == transfer.id, Transfer.state == "pending")
+            .values(state="applied")
+        )
 
 
 _MODEL = {

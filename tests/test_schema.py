@@ -38,7 +38,7 @@ SPEC_8_2 = {
     "rate_card": "model input_per_1m output_per_1m currency effective_from",
     "service_health": "model state detail checked_at",
     "transfer": "id group_id source_kind source_id target_kind target_id amount write_ids "
-    "created_by created_at",
+    "state first_write_id created_by created_at",
     "notification": "id upn kind scope_kind scope_id payload created_at read_at",
     "notification_pref": "upn kind muted",
     "audit_log": "id at actor_upn actor_role entity entity_id before after reason request_id",

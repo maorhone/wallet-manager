@@ -125,5 +125,8 @@ async def bulk_allocation_preview(
 async def bulk_allocation(
     group_id: int, body: BulkAllocationIn, ctx: Write, principal: CurrentPrincipal, req: Request
 ):
-    entities = await bulk.commit(ctx, principal, req.app.state.directory, group_id, body)
+    entities = await bulk.commit(
+        ctx, principal, req.app.state.directory, group_id, body,
+        req.app.state.litellm_reader, req.app.state.clock,
+    )  # fmt: skip
     return await write_response(ctx, entities)

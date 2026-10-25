@@ -453,6 +453,11 @@ class Transfer(Base):
             name="ck_transfer_target_kind",
         ),
         CheckConstraint("amount > 0", name="ck_transfer_amount"),
+        CheckConstraint(
+            _in("state", "pending", "applied", "failed", "compensated"), name="ck_transfer_state"
+        ),
+        Index("ix_transfer_first_write_id", "first_write_id"),
+        Index("ix_transfer_target", "target_kind", "target_id", "state"),
     )
     id: Mapped[int] = mapped_column(BigInteger, **ID)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("grp.id"))
@@ -462,5 +467,8 @@ class Transfer(Base):
     target_id: Mapped[str] = mapped_column(Text)
     amount: Mapped[Decimal] = mapped_column(ALLOC)
     write_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), server_default="{}")
+    # pending -> applied | failed -> compensated, moved only by conditional UPDATEs (round 3)
+    state: Mapped[str] = mapped_column(Text, server_default="applied")
+    first_write_id: Mapped[int | None] = mapped_column(BigInteger)  # the source's own write
     created_by: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()

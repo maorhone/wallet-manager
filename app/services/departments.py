@@ -8,7 +8,7 @@ from app.errors import ApiError, invalid_request, scope_forbidden
 from app.models import Department, DepartmentModelAllowance, Grp, Organization
 from app.permissions import Principal, can_edit_dept_budget, can_edit_split
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services.validation import check_group_tree, check_sum
+from app.services.validation import check_group_tree, check_sum, internal_allocated
 from app.writes import WriteContext
 
 
@@ -49,6 +49,18 @@ async def check_envelope(
 
 
 async def apply_budget(ctx: WriteContext, dept: Department, body: DepartmentBudgetIn, role: str):
+    # parent -> child: a reduction may not release what the department already committed to its
+    # top-level groups, PMO pool, reserve and active internal systems
+    await ctx.lock(LockKind.DEPARTMENT, dept.id)
+    await ctx.db.refresh(dept)
+    top = await ctx.db.scalar(
+        select(func.coalesce(func.sum(Grp.base_budget), 0)).where(
+            Grp.department_id == dept.id, Grp.parent_group_id.is_(None), Grp.status != "archived"
+        )
+    )
+    internal = await internal_allocated(ctx.db, dept.id)
+    if err := check_sum(top + dept.pmo_pool + dept.reserve + internal, body.budget):
+        raise err
     before = {"budget": dept.budget, "budget_period": dept.budget_period}
     dept.budget, dept.budget_period = body.budget, body.budget_period
     after = {"budget": dept.budget, "budget_period": dept.budget_period}

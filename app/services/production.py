@@ -30,7 +30,9 @@ from app.writes import WriteContext, sync_status
 ZERO = Decimal(0)
 
 
-async def _check_department_envelope(db, dept: Department, internal: Decimal) -> None:
+async def _check_department_envelope(
+    db, dept: Department, internal: Decimal, budget: Decimal | None = None
+) -> None:
     top = await db.scalar(
         select(func.coalesce(func.sum(Grp.base_budget), 0)).where(
             Grp.department_id == dept.id,
@@ -38,7 +40,9 @@ async def _check_department_envelope(db, dept: Department, internal: Decimal) ->
             Grp.status != "archived",
         )
     )
-    if err := check_sum(top + dept.pmo_pool + dept.reserve + internal, dept.budget):
+    if err := check_sum(
+        top + dept.pmo_pool + dept.reserve + internal, dept.budget if budget is None else budget
+    ):
         raise err
 
 
@@ -135,6 +139,12 @@ async def spend_for_budget_change(ctx, reader, clock, current, wanted, pc) -> Sp
 
 
 async def system_committed(db, spend: Spend, system: ProductionSystem) -> Decimal:
+    """All consumption of the system (every key it ever had) plus what its keys can still spend.
+
+    Spend is aggregated by system, so rotated and revoked keys are inside ``used("system")``.
+    A key that was ever rotated reserves its full cap (and the retired generations theirs):
+    per-key spend merges all generations, so it cannot lower the current credential's reserve.
+    """
     keys = await db.scalars(
         select(ServiceKey).where(
             ServiceKey.owner_kind == "system",
@@ -142,12 +152,14 @@ async def system_committed(db, spend: Spend, system: ProductionSystem) -> Decima
             ServiceKey.status.in_(("active", "pending")),
         )
     )
-    # Reserve each key's remaining allocation in addition to all system consumption,
-    # including revoked keys. Active-key consumption is already in system usage.
-    return spend.used("system", system.id) + sum(
-        (max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO) for key in keys),
-        ZERO,
-    )
+    reserved = ZERO
+    for key in keys:
+        cap = key.max_budget or ZERO
+        if key.retired_budget > ZERO:
+            reserved += cap + key.retired_budget
+        else:
+            reserved += max(cap - spend.used("service_key", key.id), ZERO)
+    return spend.used("system", system.id) + reserved
 
 
 async def update_system_budget(

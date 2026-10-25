@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 
 import app.permissions as permissions
+import app.services.transfers as transfers
 import app.writes as writes
 from app.errors import ApiError
 from app.models import Department, Employee, Grp, Initiative, Organization, Request, ServiceKey
@@ -51,7 +52,7 @@ async def test_review_owner_with_stale_inherited_head_cannot_manage(seeded):
 # review-p5: DEPARTMENT is locked before GROUP on the transfer path (deadlock with member caps)
 async def test_review_transfer_locks_department_before_group(login_wm, monkeypatch):
     seen = []
-    for mod in (permissions, writes):
+    for mod in (permissions, writes, transfers):
         original = mod.lock_parent
 
         async def rec(session, kind, id, _o=original):
