@@ -53,19 +53,52 @@ async def internal_allocated(db, department_id: int, exclude_id: int | None = No
     )
 
 
+async def pending_incoming(db, kind: str, ident) -> Decimal:
+    """The ONE definition of unsettled credit (D-069, review-p5-r3).
+
+    A transfer's target budget grows at once, but the credit is not spendable, allocatable or
+    key-reservable until the transfer is ``applied`` (source reduction applied, fence passed).
+    Available balance = budget - commitments - this; every allocation check counts it as committed.
+    """
+    from sqlalchemy import func, select
+
+    from app.models import Transfer
+
+    return await db.scalar(
+        select(func.coalesce(func.sum(Transfer.amount), 0)).where(
+            Transfer.target_kind == kind,
+            Transfer.target_id == str(ident),
+            Transfer.state.in_(("pending", "failed")),
+        )
+    )
+
+
 async def key_allocated(db, owner_kind: str, owner_id: int) -> Decimal:
-    """Pending keys reserve budget while synchronous generation is in flight."""
+    """Pending keys reserve budget while synchronous generation is in flight.
+
+    A system also keeps every retired generation reserved and its unsettled incoming credit.
+    """
     from sqlalchemy import func, select
 
     from app.models import ServiceKey
 
-    return await db.scalar(
+    total = await db.scalar(
         select(func.coalesce(func.sum(ServiceKey.max_budget), 0)).where(
             ServiceKey.owner_kind == owner_kind,
             ServiceKey.owner_id == owner_id,
             ServiceKey.status.in_(("active", "pending")),
         )
     )
+    if owner_kind != "system":
+        return total
+    retired = await db.scalar(
+        select(func.coalesce(func.sum(ServiceKey.retired_budget), 0)).where(
+            ServiceKey.owner_kind == "system",
+            ServiceKey.owner_id == owner_id,
+            ServiceKey.status.in_(("active", "pending")),
+        )
+    )
+    return total + retired + await pending_incoming(db, "system", owner_id)
 
 
 async def group_own_allocated(db, group) -> Decimal:
@@ -81,7 +114,12 @@ async def group_own_allocated(db, group) -> Decimal:
         )
     )
     initiatives = await initiative_allocated(db, group.id)
-    return members + initiatives + await key_allocated(db, "group", group.id)
+    return (
+        members
+        + initiatives
+        + await key_allocated(db, "group", group.id)
+        + await pending_incoming(db, "group", group.id)
+    )
 
 
 async def initiative_allocated(db, group_id: int, exclude_id: int | None = None) -> Decimal:

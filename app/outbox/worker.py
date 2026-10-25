@@ -20,7 +20,7 @@ from app.litellm_client import (
 from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
 from app.services.spend import SpendUnavailable
-from app.services.transfers import compensate_failed_source, fence_release, settle
+from app.services.transfers import compensate_failed_source, fence_release, held_by_incoming, settle
 
 _METHODS = {
     "/organization/update": "organization_update",
@@ -131,6 +131,9 @@ async def drain(
                 )
                 != "applied"
             ):
+                result.held += 1
+                continue
+            if await held_by_incoming(s, row):
                 result.held += 1
                 continue
             try:

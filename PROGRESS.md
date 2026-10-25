@@ -384,6 +384,8 @@ Phase 1 (Steps 1–13): `./scripts/test.sh` green (pytest 217 passed, 4 skipped;
   (+1). No new API path prefix (directory is internal), so `frontend/vite.config.ts` is unchanged. `./scripts/test.sh`:
   pytest 477 passed, 6 skipped; vitest 43; Playwright 34.
 
+- fix-review-p5-r4: 5 r3 blockers fixed (shared pending_incoming helper, worker hold for older destination writes, compensation parent check, system key/rotation commitments); tests/api/test_review_r4.py.
+
 ## Next
 - Step 5.4 Org Systems as a virtual org on `phase-5` (not started).
 - Separate prior-phase backlog: Step 3.6 Department Production tab (resume from wip/main-3.6).

@@ -4,7 +4,7 @@ import json
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
@@ -17,11 +17,16 @@ from app.models import (
     Policy,
     ProductionSystem,
     ServiceKey,
-    Transfer,
 )
 from app.permissions import AI_TEAM, can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
-from app.services.validation import check_limit, check_sum, group_allocated, key_allocated
+from app.services.validation import (
+    check_limit,
+    check_sum,
+    group_allocated,
+    key_allocated,
+    pending_incoming,
+)
 from app.writes import sync_status, write_response
 
 GEN = "/key/service-account/generate"
@@ -152,21 +157,6 @@ async def initiative_committed(db, initiative_id):
     )
 
 
-async def pending_incoming(db, kind: str, ident) -> Decimal:
-    """Transferred-in credit that is not settled yet cannot move on or back a key (D-069).
-
-    One aggregate over the whole transfer history: a transfer counts until its state is
-    ``applied`` (source reduction applied and the late-spend fence passed).
-    """
-    return await db.scalar(
-        select(func.coalesce(func.sum(Transfer.amount), 0)).where(
-            Transfer.target_kind == kind,
-            Transfer.target_id == str(ident),
-            Transfer.state.in_(("pending", "failed")),
-        )
-    )
-
-
 async def incoming_pending(db, initiative_id) -> Decimal:
     return await pending_incoming(db, "initiative", initiative_id)
 
@@ -235,6 +225,10 @@ async def change(ctx, principal, client, key_id, action):
             # old cap based on a stale spend snapshot, even after revocation/deletion.
             key.retired_budget += key.max_budget
         elif key.owner_kind == "system":
+            # Another full-cap credential: the whole system commitment must still fit (r3 B3).
+            allocated = await key_allocated(ctx.db, "system", owner.id)
+            if err := check_sum(allocated + key.max_budget, owner.budget):
+                raise err
             key.retired_budget += key.max_budget  # generations merge in spend: keep reserving
         return await generate(ctx, client, owner, key, role, before, rotating=True)
     key.status = "revoked"

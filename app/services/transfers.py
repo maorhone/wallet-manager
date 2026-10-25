@@ -23,7 +23,8 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import any_, literal, select, update
+from sqlalchemy import all_, any_, literal, select, update
+from sqlalchemy.orm import aliased
 
 from app.db import LockKind, lock_parent
 from app.errors import ApiError, invalid_request
@@ -49,8 +50,9 @@ from app.schemas.transfers import EndpointIn, TransferIn
 from app.services import notifications
 from app.services.personal_values import authorize
 from app.services.production import system_committed
-from app.services.service_keys import initiative_committed, pending_incoming
+from app.services.service_keys import initiative_committed
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
+from app.services.validation import check_sum, group_allocated, pending_incoming
 from app.writes import WriteContext
 
 ZERO = Decimal(0)
@@ -343,6 +345,14 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
     group = await db.get(Grp, transfer.group_id)
     ends = [(transfer.source_kind, transfer.source_id), (transfer.target_kind, transfer.target_id)]
     await lock_scope(db, group, ends)
+    parents = {}  # a group endpoint may have been moved: its CURRENT parent funds the restore
+    for kind, ident in ends:
+        if kind == "group":
+            moved = await db.get(Grp, int(ident))
+            if moved is not None and moved.parent_group_id is not None:
+                parents[ident] = moved.parent_group_id
+    for pid in sorted(set(parents.values())):
+        await lock_parent(db, LockKind.GROUP, pid)
     held = list(
         await db.scalars(
             select(LitellmWrite)
@@ -361,7 +371,9 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
         field = {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget")
         rows.append((row, field, getattr(row, field) + delta))
     claim = update(Transfer).where(Transfer.id == transfer.id, Transfer.state == "pending")
-    if any(new < 0 for _, _, new in rows):  # the target already gave the credit away: operator
+    if any(new < 0 for _, _, new in rows) or await _overallocates_parent(db, rows, parents):
+        # the target gave the credit away, or returning it would overfill the source's current
+        # parent: no balance change, the transfer stays failed for an operator (never silent)
         await db.execute(claim.values(state="failed"))
         return False
     if await db.scalar(claim.values(state="compensated").returning(Transfer.id)) is None:
@@ -371,6 +383,25 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
     for w in held:
         w.status, w.last_error = "failed", reason
     return True
+
+
+async def _overallocates_parent(db, rows, parents) -> bool:
+    """Net effect of the restore on each current parent (both ends may share one)."""
+    net: dict[int, Decimal] = {}
+    for row, field, new in rows:
+        if isinstance(row, Grp):
+            pid = parents.get(str(row.id))
+            if pid is not None:
+                net[pid] = net.get(pid, ZERO) + new - getattr(row, field)
+    for pid, delta in net.items():
+        if delta <= 0:
+            continue
+        parent = await db.get(Grp, pid, populate_existing=True)
+        if check_sum(
+            await group_allocated(db, parent) + delta, parent.base_budget, parent.overalloc_factor
+        ):
+            return True
+    return False
 
 
 async def compensate_failed_source(db, write: LitellmWrite) -> None:
@@ -402,6 +433,31 @@ async def _release_cancelled(db, settings, transfer: Transfer) -> None:
         db, settings, source_write.entity, source_write.entity_id, source_write.endpoint,
         f"transfer:{transfer.id}:restore-source",
     )  # fmt: skip
+
+
+async def held_by_incoming(db, row: LitellmWrite) -> bool:
+    """A rebuilt write would publish credit whose source reduction is not applied yet (r3 B1).
+
+    Any write of a transfer's target entity waits until that transfer's source write applied,
+    so an older write cannot carry the incoming credit upstream first.
+    """
+    kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
+    source = aliased(LitellmWrite)
+    return (
+        await db.scalar(
+            select(Transfer.id)
+            .join(source, source.id == Transfer.first_write_id)
+            .where(
+                Transfer.target_kind.in_(kinds),
+                Transfer.target_id == row.entity_id,
+                Transfer.state.in_(("pending", "failed")),
+                source.status != "applied",
+                literal(row.id) != all_(Transfer.write_ids),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime) -> bool:
