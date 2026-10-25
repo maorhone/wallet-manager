@@ -14,8 +14,9 @@ from app.schemas.org_systems import EnvelopesIn
 from app.schemas.production import ProductionSystemPatch
 from app.services import departments, views
 from app.services.overview import _previous
+from app.services.production import system_committed
 from app.services.spend import Spend
-from app.services.validation import check_sum, key_allocated
+from app.services.validation import check_sum
 from app.writes import WriteContext
 
 
@@ -151,7 +152,8 @@ async def set_org_system_budget(
     )
     if err := check_sum(others + body.budget, org.systems_envelope):
         raise err
-    if err := check_sum(await key_allocated(ctx.db, "system", system_id), body.budget):
+    spend = await Spend.load(ctx.db, views.period_ctx(ctx.settings, None, None)["period"])
+    if err := check_sum(await system_committed(ctx.db, spend, system), body.budget):
         raise err
     before, system.budget = {"budget": system.budget}, body.budget
     after = {"budget": system.budget}

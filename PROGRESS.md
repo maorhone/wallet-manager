@@ -1066,3 +1066,6 @@ Backend `app/services/org_envelopes.py`: `GET/PUT /organizations/{id}/envelopes`
 
 ## Step 5.23 (UI service status + guide) done — Phase 5 build complete
 `v2/pages/ServiceStatus.tsx` (per-model state, updated-at, stale = unknown, limits note, block-reason glossary), `Guide.tsx` (WF-08 static: flow, kinds, Credits vs rate, role tabs, FAQ, CTA to /v2/requests). Tests: ServiceStatus.test.tsx (vitest); e2e not run (phase-end mode). Next: `stabilize-p5` (full suite, run-time vs budget, hygiene, Codex review of whole phase).
+
+## fix-review-p5 group 1 (B1 money core)
+Fixed: transfer id aliases, personal-value auth on transfer endpoints, `/team/update` for production systems, source-first transfer order with rollback on source failure, fresh-spend unused check (503 when unreadable), consumption-aware commitments (groups, org systems), D-045 narrative throughput, D-046..048 request targets, over-allocation totals. Tests: tests/api/test_review_money.py. Next: group 2 (B2+B3), group 3 (F1+F2).

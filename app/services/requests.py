@@ -8,11 +8,20 @@ from sqlalchemy import func, select
 from app.db import LockKind
 from app.directory import Directory
 from app.errors import ApiError, invalid_request
-from app.models import Employee, Grp, Request, RequestEvent
+from app.models import (
+    Employee,
+    Grp,
+    Initiative,
+    LitellmWrite,
+    ProductionSystem,
+    Request,
+    RequestEvent,
+)
 from app.permissions import ADMIN, AI_TEAM, HEAD, REP, Principal, group_roles_of, target_tier
 from app.schemas.groups import MemberLimitsIn
 from app.schemas.initiatives import InitiativeIn
-from app.services import initiatives, members, notifications
+from app.schemas.production import ProductionSystemPatch
+from app.services import initiatives, members, notifications, production
 from app.services.personal_values import OWNER_ROLE, authorize
 from app.services.validation import check_sum, group_allocated
 from app.writes import WriteContext
@@ -60,32 +69,40 @@ def _view(req: Request) -> dict:
 
 async def create(ctx: WriteContext, principal: Principal, directory: Directory, body) -> list[dict]:
     """An active employee asks their section head; the section is the request's scope."""
-    employee = await ctx.db.get(Employee, principal.upn)
-    if employee is None or employee.status != "active" or employee.group_id is None:
-        raise _forbidden()
-    group_id = employee.group_id
-    await ctx.lock(LockKind.GROUP, group_id)
-    await ctx.db.refresh(employee)
-    if employee.status != "active" or employee.group_id != group_id:
-        raise ApiError(409, "CONFLICT", "The requester's membership changed")
+    target = body.target
+    if target is not None and body.type == "initiative":
+        raise invalid_request("A new initiative has no target", {"field": "target"})
+    if target is not None:
+        group_id = await _target_group(ctx.db, principal, target)
+        await ctx.lock(LockKind.GROUP, group_id)
+        body.payload = {**body.payload, "target": target.model_dump()}
+    else:
+        employee = await ctx.db.get(Employee, principal.upn)
+        if employee is None or employee.status != "active" or employee.group_id is None:
+            raise _forbidden()
+        group_id = employee.group_id
+        await ctx.lock(LockKind.GROUP, group_id)
+        await ctx.db.refresh(employee)
+        if employee.status != "active" or employee.group_id != group_id:
+            raise ApiError(409, "CONFLICT", "The requester's membership changed")
     need = body.payload.get("need")
     if not isinstance(need, str) or not need.strip() or len(need) > 1000:
         raise invalid_request("A short need description is required", {"field": "payload.need"})
     if body.type == "initiative" and not str(body.payload.get("name", "")).strip():
         raise invalid_request("An initiative request needs a name", {"field": "payload.name"})
-    if body.type == "throughput":
+    if body.type == "throughput" and any(k in body.payload for k in _LIMIT_FIELDS):
         _limits_of(body.payload)
-    group = await ctx.db.get(Grp, employee.group_id)
+    group = await ctx.db.get(Grp, group_id)
     handler_role = (
-        OWNER_ROLE[await target_tier(ctx.db, directory, employee.upn)]
-        if body.type == "credits"
+        OWNER_ROLE[await target_tier(ctx.db, directory, principal.upn)]
+        if body.type == "credits" and target is None
         else HEAD
     )
     handler_scope = (
         group.id if handler_role == HEAD else (group.department_id if handler_role == REP else None)
     )
     req = Request(
-        type=body.type, scope_kind="group", scope_id=employee.group_id,
+        type=body.type, scope_kind="group", scope_id=group_id,
         requester_upn=principal.upn, handler_role=handler_role, handler_scope=handler_scope,
         amount=body.amount, payload=body.payload,
     )  # fmt: skip
@@ -114,11 +131,21 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
 _LIMIT_FIELDS = ("max_parallel", "rpm_limit", "model_tpm_limits")
 
 
+async def _target_group(db, principal: Principal, target) -> int:
+    """The section that handles a request about an initiative / internal system the caller owns."""
+    row = await db.get(Initiative if target.kind == "initiative" else ProductionSystem, target.id)
+    if row is None or row.owner_upn != principal.upn or row.status != "active":
+        raise _forbidden()
+    if target.kind == "initiative":
+        return row.group_id
+    if row.funding != "department" or row.managing_group_id is None:
+        raise invalid_request("This system's requests are not routed in WM yet")
+    return row.managing_group_id
+
+
 def _limits_of(payload: dict) -> dict:
     """The requested limits (D-065); omitted fields keep the member's current value."""
-    wanted = {k: payload[k] for k in _LIMIT_FIELDS if k in payload}
-    if not wanted:
-        raise invalid_request("Name the limits you need", {"field": "payload"})
+    wanted = {k: payload[k] for k in _LIMIT_FIELDS if payload.get(k) is not None}
     try:
         MemberLimitsIn(**wanted)
     except ValidationError as exc:
@@ -191,12 +218,14 @@ async def decide(
     before = {"status": req.status}
     forwarded_to = None
     if req.type == "throughput":
-        forwarded_to = await _decide_throughput(ctx, directory, req, group, role, body.decision)
+        forwarded_to = await _decide_throughput(ctx, directory, req, group, role, body)
     elif body.decision == "approve":
         amount = body.amount if body.amount is not None else req.amount
         if amount is None or amount <= 0:
             raise invalid_request("An approved amount is required", {"field": "amount"})
-        if req.type == "credits":
+        if req.type == "credits" and req.payload.get("target"):
+            req.status = await _apply_target_credits(ctx, principal, req, group, Decimal(amount))
+        elif req.type == "credits":
             await _apply_credits(ctx, principal, directory, req, group, Decimal(amount))
             req.status = "pending_apply"
         else:
@@ -251,6 +280,36 @@ async def _apply_credits(
     req.application_write_id = await ctx.enqueue("employee", employee.upn, "/team/member_update")
 
 
+async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount: Decimal) -> str:
+    """D-046..D-048: the decision applies to the targeted initiative / internal system."""
+    t = req.payload["target"]
+    if t["kind"] == "initiative":
+        row = await ctx.db.get(Initiative, t["id"])
+        if row is None or row.status != "active" or row.group_id != group.id:
+            raise ApiError(409, "CONFLICT", "The target is no longer active in this section")
+        allocated = await group_allocated(ctx.db, group)
+        if err := check_sum(allocated + amount, group.base_budget, group.overalloc_factor):
+            raise err
+        before, row.budget = {"budget": row.budget}, row.budget + amount
+        ctx.audit(
+            "initiative", row.id, before, {"budget": row.budget}, HEAD,
+            group_id=group.id, department_id=group.department_id,
+        )  # fmt: skip
+        return "applied"
+    row = await ctx.db.get(ProductionSystem, t["id"])
+    if row is None or row.status != "active" or row.managing_group_id != group.id:
+        raise ApiError(409, "CONFLICT", "The target is no longer managed by this section")
+    await production.update_system_budget(
+        ctx, principal, row.id, ProductionSystemPatch(budget=row.budget + amount)
+    )
+    req.application_write_id = await ctx.db.scalar(
+        select(func.max(LitellmWrite.id)).where(
+            LitellmWrite.entity == "production_system", LitellmWrite.entity_id == str(row.id)
+        )
+    )
+    return "pending_apply"
+
+
 async def _apply_initiative(ctx, principal, req: Request, group: Grp, amount: Decimal) -> None:
     p = req.payload
     try:
@@ -263,11 +322,12 @@ async def _apply_initiative(ctx, principal, req: Request, group: Grp, amount: De
     await initiatives.create(ctx, principal, group.id, body)
 
 
-async def _decide_throughput(ctx, directory, req: Request, group: Grp, role, decision):
+async def _decide_throughput(ctx, directory, req: Request, group: Grp, role, body):
     """D-065: heads only forward; the AI team (or an admin) applies or rejects.
 
     Returns the recipients of a forward, or None once the request is closed.
     """
+    decision = body.decision
     if decision == "forward":
         if role not in (HEAD, REP, ADMIN):
             raise _forbidden()
@@ -286,13 +346,19 @@ async def _decide_throughput(ctx, directory, req: Request, group: Grp, role, dec
     if decision == "reject":
         req.status = "rejected"
         return None
+    supplied = _limits_of(req.payload) | _limits_of(body.model_dump())
+    if req.payload.get("target"):  # initiatives/systems carry no WM-managed limits: the AI team
+        req.status = "applied"  # sets them in LiteLLM; the decision is recorded on the request
+        return None
+    if not supplied:  # D-045: a narrative-only request needs the AI team's technical values
+        raise invalid_request("Name the limits to apply", {"field": "max_parallel"})
     employee = await ctx.db.get(Employee, req.requester_upn)
     if employee is None or employee.status != "active" or employee.group_id != group.id:
         raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
     wanted = {
         "max_parallel": employee.max_parallel, "rpm_limit": employee.rpm_limit,
         "model_tpm_limits": employee.model_tpm_limits or {},
-    } | _limits_of(req.payload)  # fmt: skip
+    } | supplied  # fmt: skip
     req.application_write_id = await members.apply_limits(
         ctx, role, group, employee, MemberLimitsIn(**wanted)
     )

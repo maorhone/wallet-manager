@@ -1,8 +1,9 @@
 """Step 5.9: transfers of unused balance (D-069, D-071); the total budget never changes."""
 
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.models import AuditLog, Employee, Initiative, Notification, ProductionSystem, Transfer
 from app.outbox.worker import drain
@@ -41,8 +42,16 @@ async def test_preview_before_after(login_wm, provisioned):
         assert (await s.get(Employee, "dani@corp.example")).base_cap == 15000
 
 
-async def test_cannot_move_spent_amount_422(login_wm, snapshot):
-    await snapshot([("employee", "dani@corp.example", None, 14500)])
+async def test_cannot_move_spent_amount_422(login_wm, fake_engine):
+    now = datetime.now(UTC)
+    async with fake_engine.begin() as conn:  # spend is read fresh from LiteLLM, not the cache
+        await conn.execute(
+            text(
+                'INSERT INTO "LiteLLM_SpendLogs" (request_id, "user", team_id, model_group,'
+                " \"startTime\", \"endTime\", spend) VALUES ('t1', :u, 'A1', 'm', :at, :at, 14500)"
+            ),
+            {"u": "dani@corp.example", "at": now},
+        )
     head = await login_wm("dana")
     over = await send(head, "POST", "/transfers", move(1000))
     assert over.status_code == 422, over.text

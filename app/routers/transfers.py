@@ -12,14 +12,18 @@ router = APIRouter()
 async def preview(body: TransferIn, principal: CurrentPrincipal, db: Db, req: Request):
     """Read-only: before/after for both ends; nothing is written, so no change reason is needed."""
     ctx = WriteContext(db, req.app.state.settings, principal.upn, "", "preview")
-    return await transfers.preview(ctx, principal, body, req.app.state.clock)
+    return await transfers.preview(
+        ctx, principal, req.app.state.directory, req.app.state.litellm_reader, body,
+        req.app.state.clock,
+    )  # fmt: skip
 
 
 @router.post("/transfers")
 async def create(body: TransferIn, ctx: Write, principal: CurrentPrincipal, req: Request):
     entities = await transfers.create(
-        ctx, principal, req.app.state.directory, body, req.app.state.clock
-    )
+        ctx, principal, req.app.state.directory, req.app.state.litellm_reader, body,
+        req.app.state.clock,
+    )  # fmt: skip
     return await write_response(ctx, entities)
 
 

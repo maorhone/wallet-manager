@@ -17,6 +17,7 @@ from app.models import (
     Policy,
     ProductionSystem,
     ServiceKey,
+    Transfer,
 )
 from app.permissions import can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
@@ -151,6 +152,22 @@ async def initiative_committed(db, initiative_id):
     )
 
 
+async def incoming_pending(db, initiative_id) -> Decimal:
+    """Transferred-in credit whose source reduction is not applied yet cannot back a key."""
+    pending = Decimal(0)
+    transfers = await db.scalars(
+        select(Transfer).where(
+            Transfer.target_kind == "initiative", Transfer.target_id == str(initiative_id)
+        )
+    )
+    for transfer in transfers:
+        if transfer.source_kind != "initiative" and transfer.write_ids:
+            first = await db.get(LitellmWrite, transfer.write_ids[0])
+            if first is not None and first.status != "applied":
+                pending += transfer.amount
+    return pending
+
+
 async def create(ctx, principal, client, body):
     role = await can_manage_service_keys(ctx.db, principal, body.owner_kind, body.owner_id)
     owner = await owner_lock(ctx, body.owner_kind, body.owner_id)
@@ -160,7 +177,8 @@ async def create(ctx, principal, client, body):
         if initiative.status != "active":
             raise invalid_request("Initiative is closed", {"status": initiative.status})
         allocated = await initiative_committed(ctx.db, initiative.id)
-        err = check_sum(allocated + body.max_budget, initiative.budget)
+        budget = initiative.budget - await incoming_pending(ctx.db, initiative.id)
+        err = check_sum(allocated + body.max_budget, budget)
         entity = "group"
     elif body.owner_kind == "group":
         allocated = await group_allocated(ctx.db, owner)
@@ -202,7 +220,8 @@ async def change(ctx, principal, client, key_id, action):
         if key.owner_kind == "initiative":
             initiative = await ctx.db.get(Initiative, key.owner_id)
             allocated = await initiative_committed(ctx.db, initiative.id)
-            err = check_sum(allocated + key.max_budget, initiative.budget)
+            budget = initiative.budget - await incoming_pending(ctx.db, initiative.id)
+            err = check_sum(allocated + key.max_budget, budget)
             if err:
                 raise err
             # Both credentials can spend until deletion has applied. Never refund the

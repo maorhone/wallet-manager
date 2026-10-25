@@ -19,6 +19,9 @@ from app.models import (
     EmployeeModelCap,
     GroupModelPot,
     Grp,
+    Initiative,
+    ProductionSystem,
+    ServiceKey,
 )
 from app.permissions import ADMIN, REP, VIEWER, Principal
 from app.services.notifications import notify, reps_or_admins, upns_of
@@ -81,9 +84,20 @@ async def _wm(db: AsyncSession, depts, groups) -> list[dict]:
     for g in live_groups:
         if g.parent_group_id is not None:
             carved[g.parent_group_id] += g.base_budget
+    internal = dict(
+        (
+            await db.execute(
+                select(ProductionSystem.department_id, func.sum(ProductionSystem.budget))
+                .where(
+                    ProductionSystem.funding == "department", ProductionSystem.status == "active"
+                )
+                .group_by(ProductionSystem.department_id)
+            )
+        ).all()
+    )
     out = []
     for d in depts:
-        allocated = bases[d.id] + d.pmo_pool + d.reserve
+        allocated = bases[d.id] + d.pmo_pool + d.reserve + internal.get(d.id, ZERO)
         if allocated > d.budget:
             out.append(_finding("wm", "department", d.id, d.name, allocated, d.budget, d.id))
 
@@ -96,9 +110,33 @@ async def _wm(db: AsyncSession, depts, groups) -> list[dict]:
             )
         ).all()
     )
+    initiatives = dict(
+        (
+            await db.execute(
+                select(Initiative.group_id, func.sum(Initiative.budget))
+                .where(Initiative.status == "active")
+                .group_by(Initiative.group_id)
+            )
+        ).all()
+    )
+    keys = dict(
+        (
+            await db.execute(
+                select(ServiceKey.owner_id, func.sum(ServiceKey.max_budget))
+                .where(
+                    ServiceKey.owner_kind == "group",
+                    ServiceKey.status.in_(("active", "pending")),
+                )
+                .group_by(ServiceKey.owner_id)
+            )
+        ).all()
+    )
     for g in live_groups:
         total = g.base_budget * g.overalloc_factor
-        allocated = caps.get(g.id, ZERO) + carved[g.id]
+        allocated = (
+            caps.get(g.id, ZERO) + carved[g.id] + initiatives.get(g.id, ZERO)
+            + keys.get(g.id, ZERO)
+        )  # fmt: skip
         if allocated > total:
             out.append(_finding("wm", "group", g.id, g.name, allocated, total, g.department_id))
 

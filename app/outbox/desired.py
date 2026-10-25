@@ -243,7 +243,12 @@ async def build(
             )
             return TeamNew(**fields)
         case "/team/update":
-            return TeamUpdate(**await _team_fields(session, entity_id, settings.app_timezone))
+            fields = await (
+                _prod_system_fields(session, entity_id)
+                if entity == "production_system"
+                else _team_fields(session, entity_id, settings.app_timezone)
+            )
+            return TeamUpdate(**fields)
         case "/user/new":
             e = await _get(session, Employee, entity_id)
             return UserNew(user_id=e.upn, sso_user_id=e.upn, user_email=e.upn)

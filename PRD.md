@@ -109,7 +109,7 @@ Transfers of unused balance (Step 5.9, D-069/D-071): `POST /transfers/preview` (
 internal systems of a managing section. Only the unspent, uncommitted part can move; the total is unchanged.
 Authority is the section's head, the department rep or an admin (systems: admin or managing head). Org
 Systems and mixed section/system moves are refused. Each transfer writes a ledger row, audit and in-app
-notices, with status `done`, `pending_apply` or `failed` from the outbox (`GET /transfers/{id}`).
+notices, with status `done`, `pending_apply` or `failed` from the outbox (`GET /transfers/{id}`). The source is reduced first and the destination waits for it; unused balance is checked against fresh LiteLLM usage (refused when unreadable); a failed source write rolls the move back. Requests may name an owned initiative/internal system as target; a throughput request may be narrative-only and the AI team supplies the numbers.
 
 ### 4.1.4 Org Systems - Phase 5 Step 5.4: Done
 

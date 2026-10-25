@@ -60,14 +60,15 @@ async def test_section_head_cannot_reject_throughput(login_wm, ai_team):
     assert (await dani.get(f"/requests/{rid}")).json()["status"] == "forwarded"
 
 
-async def test_throughput_request_needs_limits(login_wm):
+async def test_throughput_request_narrative_only_accepted(login_wm):
+    """D-045: a usage description is enough; the AI team fills in the numbers when applying."""
     r = await send(
         await login_wm("dani"),
         "POST",
         "/requests",
         {"type": "throughput", "payload": {"need": "x"}},
     )
-    assert r.status_code == 422, r.text
+    assert r.status_code == 200, r.text
 
 
 async def test_rep_rate_limit_write_403(login_wm, provisioned):

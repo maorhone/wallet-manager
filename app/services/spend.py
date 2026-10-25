@@ -26,6 +26,84 @@ def previous_period(period: str) -> str:
     return f"{year - (month == 1)}-{(month - 2) % 12 + 1:02d}"
 
 
+async def _scope_maps(db) -> tuple:
+    groups = {g.litellm_team_id: g for g in await db.scalars(select(Grp))}
+    systems = {s.litellm_team_id: s for s in await db.scalars(select(ProductionSystem))}
+    keys = {
+        k.litellm_token_hash: k.id
+        for k in await db.scalars(select(ServiceKey))
+        if k.litellm_token_hash
+    }
+    # Frozen deletion payloads preserve former hashes after rotation, including pending
+    # deletions, so a refresh never drops spend from an earlier key generation.
+    for write in await db.scalars(
+        select(LitellmWrite).where(
+            LitellmWrite.entity == "service_key",
+            LitellmWrite.endpoint == "/key/delete",
+        )
+    ):
+        for token in (write.payload or {}).get("keys", []):
+            keys[token] = int(write.entity_id)
+    member_group = dict((await db.execute(select(Employee.upn, Employee.group_id))).all())
+    return groups, systems, keys, member_group
+
+
+def _aggregate(rows, period: str, maps: tuple):
+    groups, systems, keys, member_group = maps
+    totals: dict[tuple, Decimal] = defaultdict(Decimal)
+    tokens: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
+    for r in rows:
+        group = groups.get(r.team_id)
+        if group is not None:
+            scopes = [("group", str(group.id)), ("department", str(group.department_id))]
+            if r.user and member_group.get(r.user) == group.id:  # membership spend only
+                scopes.append(("employee", r.user))
+        else:
+            system = systems.get(r.team_id)
+            scopes = [("system", str(system.id))] if system is not None else []
+        if r.api_key in keys:
+            scopes.append(("service_key", str(keys[r.api_key])))
+        for kind, scope_id in scopes:
+            day = r.day.isoformat()
+            # Reader buckets in APP_TIMEZONE, including the local month boundary.
+            for p in (period, day) if day.startswith(period) else (period,):
+                totals[(kind, scope_id, p, None)] += r.spend
+                totals[(kind, scope_id, p, r.model_group)] += r.spend
+                tok = tokens[(kind, scope_id, p, r.model_group)]
+                tok[0] += r.prompt_tokens
+                tok[1] += r.completion_tokens
+    return totals, tokens
+
+
+async def fresh_spend(db, reader, now: datetime) -> "Spend":
+    """Spend read straight from LiteLLM at call time (not the 5-minute UI cache).
+
+    Money decisions (transfers) use this; a missing reader or an unreadable database raises
+    ``SpendUnavailable`` so nothing is ever treated as zero spend.
+    """
+    if reader is None:
+        raise SpendUnavailable
+    period = now.strftime("%Y-%m")
+    start, end = month_bounds(period, now.tzinfo)
+    try:
+        rows = await reader.spend_rows(start, end, timezone=str(now.tzinfo))
+    except Exception:
+        raise SpendUnavailable from None
+    totals, _ = _aggregate(rows, period, await _scope_maps(db))
+    taken = now.astimezone(UTC)
+    return Spend(
+        [
+            SpendSnapshot(scope_kind=k, scope_id=i, period=p, model=m, spend=s, taken_at=taken)
+            for (k, i, p, m), s in totals.items()
+        ],
+        period,
+    )
+
+
+class SpendUnavailable(Exception):
+    """Fresh LiteLLM spend could not be read."""
+
+
 async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
     """Refresh the current period, and the previous one if it has no rows.
 
@@ -33,24 +111,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
     """
     current = now.strftime("%Y-%m")
     async with sf() as db:
-        groups = {g.litellm_team_id: g for g in await db.scalars(select(Grp))}
-        systems = {s.litellm_team_id: s for s in await db.scalars(select(ProductionSystem))}
-        keys = {
-            k.litellm_token_hash: k.id
-            for k in await db.scalars(select(ServiceKey))
-            if k.litellm_token_hash
-        }
-        # Frozen deletion payloads preserve former hashes after rotation, including pending
-        # deletions, so a refresh never drops spend from an earlier key generation.
-        for write in await db.scalars(
-            select(LitellmWrite).where(
-                LitellmWrite.entity == "service_key",
-                LitellmWrite.endpoint == "/key/delete",
-            )
-        ):
-            for token in (write.payload or {}).get("keys", []):
-                keys[token] = int(write.entity_id)
-        member_group = dict((await db.execute(select(Employee.upn, Employee.group_id))).all())
+        maps = await _scope_maps(db)
         have_previous = await db.scalar(
             select(SpendSnapshot.period).where(SpendSnapshot.period == previous_period(current))
         )
@@ -62,28 +123,7 @@ async def take_snapshot(sf: async_sessionmaker, reader, now: datetime) -> None:
         except Exception:
             log.warning("spend snapshot: LiteLLM database unreachable; keeping old rows")
             return
-        totals: dict[tuple, Decimal] = defaultdict(Decimal)
-        tokens: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
-        for r in rows:
-            group = groups.get(r.team_id)
-            if group is not None:
-                scopes = [("group", str(group.id)), ("department", str(group.department_id))]
-                if r.user and member_group.get(r.user) == group.id:  # membership spend only
-                    scopes.append(("employee", r.user))
-            else:
-                system = systems.get(r.team_id)
-                scopes = [("system", str(system.id))] if system is not None else []
-            if r.api_key in keys:
-                scopes.append(("service_key", str(keys[r.api_key])))
-            for kind, scope_id in scopes:
-                day = r.day.isoformat()
-                # Reader buckets in APP_TIMEZONE, including the local month boundary.
-                for p in (period, day) if day.startswith(period) else (period,):
-                    totals[(kind, scope_id, p, None)] += r.spend
-                    totals[(kind, scope_id, p, r.model_group)] += r.spend
-                    tok = tokens[(kind, scope_id, p, r.model_group)]
-                    tok[0] += r.prompt_tokens
-                    tok[1] += r.completion_tokens
+        totals, tokens = _aggregate(rows, period, maps)
         async with sf() as db, db.begin():
             await db.execute(
                 delete(SpendSnapshot).where(

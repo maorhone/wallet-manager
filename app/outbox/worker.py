@@ -17,6 +17,7 @@ from app.litellm_client import (
 )
 from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
+from app.services.transfers import compensate_failed_source
 
 _METHODS = {
     "/organization/update": "organization_update",
@@ -144,6 +145,7 @@ async def drain(
             except (LiteLLMPermanentError, DesiredUnavailable) as exc:
                 row.status, row.last_error = "failed", str(exc)
                 result.failed += 1
+                await compensate_failed_source(s, row)
             await s.execute(
                 update(Request)
                 .where(Request.application_write_id == row.id)

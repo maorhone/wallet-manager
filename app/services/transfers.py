@@ -6,21 +6,37 @@ themselves (they are funded from the department envelope, not from the section's
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
-from app.models import Employee, Grp, Initiative, LitellmWrite, ProductionSystem, Transfer
-from app.permissions import ADMIN, HEAD, Principal, can_write_members, group_roles_of
+from app.models import (
+    Employee,
+    Grp,
+    Initiative,
+    LitellmWrite,
+    ProductionSystem,
+    ServiceKey,
+    Transfer,
+)
+from app.permissions import (
+    ADMIN,
+    HEAD,
+    Principal,
+    can_write_members,
+    group_roles_of,
+    target_tier,
+)
 from app.schemas.transfers import EndpointIn, TransferIn
 from app.services import notifications
+from app.services.personal_values import authorize
 from app.services.production import system_committed
 from app.services.service_keys import initiative_committed
-from app.services.spend import Spend
-from app.services.validation import group_allocated
-from app.services.views import period_ctx
+from app.services.spend import Spend, SpendUnavailable, fresh_spend
 from app.writes import WriteContext
 
 ZERO = Decimal(0)
@@ -56,6 +72,45 @@ def _not_found() -> ApiError:
     return ApiError(404, "NOT_FOUND", "Entity not found")
 
 
+async def group_committed(db, spend: Spend, group: Grp) -> Decimal:
+    """Consumption plus what is still allocated and unspent; spent credit is counted once.
+
+    Employee and key spend is part of the group team's own spend, so only the unspent rest of
+    each allocation is added. A child group has its own team: its whole carve (or its spend,
+    if larger) stays reserved in the parent.
+    """
+    committed = spend.used("group", group.id)
+    for cap, upn in await db.execute(
+        select(Employee.base_cap, Employee.upn).where(
+            Employee.group_id == group.id, Employee.status != "left"
+        )
+    ):
+        committed += max(cap - spend.used("employee", upn), ZERO)
+    for child in await db.scalars(
+        select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
+    ):
+        committed += max(child.base_budget, spend.used("group", child.id))
+    keys = await db.scalars(
+        select(ServiceKey).where(
+            ServiceKey.status.in_(("active", "pending")),
+            ServiceKey.owner_kind.in_(("group", "initiative")),
+        )
+    )
+    initiatives = {
+        i.id: i for i in await db.scalars(select(Initiative).where(Initiative.group_id == group.id))
+    }
+    spent: dict[int, Decimal] = {}
+    for key in keys:
+        if key.owner_kind == "group" and key.owner_id == group.id:
+            committed += max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO)
+        elif key.owner_kind == "initiative" and key.owner_id in initiatives:
+            spent[key.owner_id] = spent.get(key.owner_id, ZERO) + spend.used("service_key", key.id)
+    for i in initiatives.values():
+        if i.status == "active":
+            committed += max(i.budget - spent.get(i.id, ZERO), ZERO)
+    return committed
+
+
 async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
     """Load one end, which must belong to ``group``; anything else is invisible (404)."""
     if ep.kind == "employee":
@@ -79,7 +134,7 @@ async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
         row = await db.get(Grp, row_id)
         if row is None or row.parent_group_id != group.id or row.status == "archived":
             raise _not_found()
-        committed = max(spend.used("group", row_id), await group_allocated(db, row))
+        committed = await group_committed(db, spend, row)
         return Side("group", ep.id, row.name, row.base_budget, committed, row)
     row = await db.get(ProductionSystem, row_id)
     if (
@@ -92,7 +147,19 @@ async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
     return Side("system", ep.id, row.name, row.budget, await system_committed(db, spend, row), row)
 
 
-async def _plan(ctx: WriteContext, principal: Principal, body: TransferIn, clock=None):
+def _canonical(ep: EndpointIn) -> EndpointIn:
+    """Numeric ids compare as integers, so "1", "01" and "١" name one entity."""
+    if ep.kind != "employee" and ep.id.isdecimal():
+        return EndpointIn(kind=ep.kind, id=str(int(ep.id)))
+    return ep
+
+
+async def _plan(
+    ctx: WriteContext, principal: Principal, directory, reader, body: TransferIn, clock=None
+):
+    body = body.model_copy(
+        update={"source": _canonical(body.source), "target": _canonical(body.target)}
+    )
     group = await ctx.db.get(Grp, body.group_id)
     if group is None:
         raise _not_found()
@@ -117,12 +184,23 @@ async def _plan(ctx: WriteContext, principal: Principal, body: TransferIn, clock
     for ep in (body.source, body.target):
         if ep.kind == "group" and ep.id.isdigit():
             await ctx.lock(LockKind.GROUP, int(ep.id))
-    if (body.source.kind, body.source.id) == (body.target.kind, body.target.id):
-        raise invalid_request("Source and target are the same", {"reason": "same_entity"})
-    period = period_ctx(ctx.settings, None, clock.now() if clock else None)["period"]
-    spend = await Spend.load(ctx.db, period)
+    now = (clock.now() if clock else datetime.now(ZoneInfo(ctx.settings.app_timezone))).astimezone(
+        ZoneInfo(ctx.settings.app_timezone)
+    )
+    try:  # not the 5-minute UI cache: a missing or stale reading must never count as zero
+        spend = await fresh_spend(ctx.db, reader, now)
+    except SpendUnavailable:
+        raise ApiError(
+            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
+        ) from None
     source = await _side(ctx.db, spend, group, body.source)
     target = await _side(ctx.db, spend, group, body.target)
+    if (source.kind, source.id) == (target.kind, target.id):
+        raise invalid_request("Source and target are the same", {"reason": "same_entity"})
+    for side in (source, target):  # DR9 / FR-G5: the personal-value rules apply to both ends
+        if side.kind == "employee":
+            tier = await target_tier(ctx.db, directory, side.id)
+            role = authorize(principal, side.row, group, tier)
     if body.amount > source.unused:
         raise invalid_request(
             "Only the unused balance can be transferred",
@@ -131,8 +209,10 @@ async def _plan(ctx: WriteContext, principal: Principal, body: TransferIn, clock
     return group, role, source, target
 
 
-async def preview(ctx: WriteContext, principal: Principal, body: TransferIn, clock=None) -> dict:
-    _, _, source, target = await _plan(ctx, principal, body, clock)
+async def preview(
+    ctx: WriteContext, principal: Principal, directory, reader, body: TransferIn, clock=None
+) -> dict:
+    _, _, source, target = await _plan(ctx, principal, directory, reader, body, clock)
     return {
         "amount": body.amount,
         "source": source.view(-body.amount),
@@ -152,11 +232,13 @@ async def _recipients(ctx, directory, side: Side) -> set[str]:
 
 
 async def create(
-    ctx: WriteContext, principal: Principal, directory, body: TransferIn, clock=None
+    ctx: WriteContext, principal: Principal, directory, reader, body: TransferIn, clock=None
 ) -> list[dict]:
-    group, role, source, target = await _plan(ctx, principal, body, clock)
+    group, role, source, target = await _plan(ctx, principal, directory, reader, body, clock)
     amount = body.amount
     writes = []
+    source_write = None
+    # Source first: the destination's LiteLLM write waits for the source reduction (D-069).
     for side, delta in ((source, -amount), (target, amount)):
         before = {"total": side.total}
         side.set_total(side.total + delta)
@@ -164,10 +246,13 @@ async def create(
             "transfer_" + side.kind, side.id, before, {"total": side.total + delta}, role,
             group_id=group.id, department_id=group.department_id,
         )  # fmt: skip
-        if side.kind in _ENDPOINT:
-            writes.append(await ctx.enqueue(_ENTITY[side.kind], side.id, _ENDPOINT[side.kind]))
-        elif side.kind == "system":
-            writes.append(await ctx.enqueue("production_system", side.id, "/team/update"))
+        if side.kind in _ENDPOINT or side.kind == "system":
+            endpoint = _ENDPOINT.get(side.kind, "/team/update")
+            write = await ctx.enqueue(
+                _ENTITY[side.kind], side.id, endpoint, depends_on=source_write
+            )
+            writes.append(write)
+            source_write = source_write or write
     transfer = Transfer(
         group_id=group.id, source_kind=source.kind, source_id=source.id,
         target_kind=target.kind, target_id=target.id, amount=amount,
@@ -216,3 +301,38 @@ async def get(db, principal: Principal, transfer_id: int) -> dict:
         "status": await transfer_status(db, transfer), "created_by": transfer.created_by,
         "created_at": transfer.created_at,
     }  # fmt: skip
+
+
+async def compensate_failed_source(db, write: LitellmWrite) -> None:
+    """The source reduction failed for good: undo the move so no credit exists twice.
+
+    Called by the outbox worker when a write turns ``failed``. The held destination write is
+    failed too (it is rebuilt from the restored domain rows if an operator ever retries it).
+    """
+    for transfer in await db.scalars(select(Transfer).order_by(Transfer.id.desc()).limit(500)):
+        ids = transfer.write_ids or []
+        if not ids or ids[0] != write.id or transfer.source_kind == "initiative":
+            continue
+        held = [
+            w for w in await db.scalars(select(LitellmWrite).where(LitellmWrite.id.in_(ids[1:])))
+        ]
+        if not held or any(w.status != "pending" for w in held):
+            return
+        for kind, ident, delta in (
+            (transfer.source_kind, transfer.source_id, transfer.amount),
+            (transfer.target_kind, transfer.target_id, -transfer.amount),
+        ):
+            row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
+            field = {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget")
+            setattr(row, field, getattr(row, field) + delta)
+        for w in held:
+            w.status, w.last_error = "failed", f"cancelled: source write {write.id} failed"
+        return
+
+
+_MODEL = {
+    "employee": Employee,
+    "group": Grp,
+    "initiative": Initiative,
+    "system": ProductionSystem,
+}
