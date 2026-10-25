@@ -1,9 +1,10 @@
 """Step 5.5: internal systems are funded from the department envelope (D-076)."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models import ProductionSystem
 
@@ -139,7 +140,7 @@ async def test_department_usage_includes_only_internal_system_spend(
 
 
 async def test_system_budget_reduction_preserves_keys_and_consumed_credit(
-    login_wm, provisioned, snapshot
+    login_wm, provisioned, fake_engine
 ):
     from app.models import ServiceKey
 
@@ -153,6 +154,9 @@ async def test_system_budget_reduction_preserves_keys_and_consumed_credit(
         active = ServiceKey(
             owner_kind="system", owner_id=system_id, max_budget=6000, status="active"
         )
+        active.litellm_token_hash = "tok-active"
+        team = "sys-reduce"
+        (await db.get(ProductionSystem, system_id)).litellm_team_id = team
         db.add_all(
             [
                 active,
@@ -164,7 +168,17 @@ async def test_system_budget_reduction_preserves_keys_and_consumed_credit(
         await db.commit()
         active_id = active.id
     # 1000 used by the active key plus 1000 consumed by a revoked key: 9000 committed.
-    await snapshot([("system", system_id, None, 2000), ("service_key", active_id, None, 1000)])
+    del active_id
+    async with fake_engine.begin() as conn:  # reductions read live spend, not the snapshot
+        for rid, token in (("a", "tok-active"), ("b", "tok-revoked")):
+            await conn.execute(
+                text(
+                    'INSERT INTO "LiteLLM_SpendLogs" (request_id, "user", team_id, model_group,'
+                    ' api_key, "startTime", "endTime", spend)'
+                    " VALUES (:r, 'u', :t, 'm', :k, :at, :at, 1000)"
+                ),
+                {"r": rid, "t": team, "k": token, "at": datetime.now(UTC)},
+            )
     denied = await send(admin, "PATCH", f"/production/systems/{system_id}", {"budget": 8999})
     assert denied.status_code == 422, denied.text
     assert denied.json()["code"] == "PARENT_OVERALLOCATED"
@@ -177,7 +191,7 @@ async def test_system_budget_reduction_preserves_keys_and_consumed_credit(
 
 
 async def test_system_budget_reduction_preserves_consumption_after_key_revocation(
-    login_wm, provisioned, snapshot
+    login_wm, provisioned, fake_engine
 ):
     admin = await login_wm("admin")
     await make_org(admin)
@@ -185,7 +199,18 @@ async def test_system_budget_reduction_preserves_consumption_after_key_revocatio
         admin, "POST", "/production/departments/1/systems", {"name": "S", "budget": 10000}
     )
     system_id = int(r.json()["entities"][0]["id"])
-    await snapshot([("system", system_id, None, 8000)])
+    async with provisioned() as db:
+        (await db.get(ProductionSystem, system_id)).litellm_team_id = "sys-revoked"
+        await db.commit()
+    async with fake_engine.begin() as conn:  # absent from the snapshot, present upstream
+        await conn.execute(
+            text(
+                'INSERT INTO "LiteLLM_SpendLogs" (request_id, "user", team_id, model_group,'
+                ' "startTime", "endTime", spend)'
+                " VALUES ('rv', 'u', 'sys-revoked', 'm', :at, :at, 8000)"
+            ),
+            {"at": datetime.now(UTC)},
+        )
     denied = await send(admin, "PATCH", f"/production/systems/{system_id}", {"budget": 7999})
     assert denied.status_code == 422, denied.text
     allowed = await send(admin, "PATCH", f"/production/systems/{system_id}", {"budget": 8000})
