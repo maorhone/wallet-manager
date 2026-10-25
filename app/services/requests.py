@@ -75,6 +75,8 @@ def _view(req: Request) -> dict:
 async def create(ctx: WriteContext, principal: Principal, directory: Directory, body) -> list[dict]:
     """An active employee asks their section head; the section is the request's scope."""
     target = body.target
+    if "target" in body.payload:  # server-generated only, from the validated top-level target
+        raise invalid_request("Use the top-level target field", {"field": "payload.target"})
     if target is not None and body.type == "initiative":
         raise invalid_request("A new initiative has no target", {"field": "target"})
     if target is not None:
@@ -288,9 +290,12 @@ async def _apply_credits(
 async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount: Decimal) -> str:
     """D-046..D-048: the decision applies to the targeted initiative / internal system."""
     t = req.payload["target"]
+    owned = await ctx.db.get(Initiative if t["kind"] == "initiative" else ProductionSystem, t["id"])
+    if owned is None or owned.owner_upn != req.requester_upn:  # re-check at apply time
+        raise ApiError(409, "CONFLICT", "The requester no longer owns the target")
     if t["kind"] == "initiative":
-        row = await ctx.db.get(Initiative, t["id"])
-        if row is None or row.status != "active" or row.group_id != group.id:
+        row = owned
+        if row.status != "active" or row.group_id != group.id:
             raise ApiError(409, "CONFLICT", "The target is no longer active in this section")
         allocated = await group_allocated(ctx.db, group)
         if err := check_sum(allocated + amount, group.base_budget, group.overalloc_factor):

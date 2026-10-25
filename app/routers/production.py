@@ -35,7 +35,7 @@ async def patch_production_system(
     principal: CurrentPrincipal,
 ):
     entities = await production.update_system_budget(
-        ctx, principal, system_id, body, request.app.state.clock
+        ctx, principal, system_id, body, request.app.state.clock, request.app.state.litellm_reader
     )
     return await write_response(ctx, entities)
 
@@ -98,11 +98,12 @@ async def put_org_system_budget(
     organization_id: int,
     system_id: int,
     body: ProductionSystemPatch,
+    request: Request,
     ctx: Write,
     principal: CurrentPrincipal,
 ):
     entities = await org_envelopes.set_org_system_budget(
-        ctx, principal, organization_id, system_id, body
+        ctx, principal, organization_id, system_id, body, request.app.state.litellm_reader
     )
     return await write_response(ctx, entities)
 

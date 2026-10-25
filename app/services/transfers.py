@@ -23,6 +23,7 @@ from app.models import (
     ServiceKey,
     Transfer,
 )
+from app.outbox.enqueue import enqueue
 from app.permissions import (
     ADMIN,
     HEAD,
@@ -35,7 +36,7 @@ from app.schemas.transfers import EndpointIn, TransferIn
 from app.services import notifications
 from app.services.personal_values import authorize
 from app.services.production import system_committed
-from app.services.service_keys import initiative_committed
+from app.services.service_keys import incoming_pending, initiative_committed
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
 from app.writes import WriteContext
 
@@ -128,7 +129,8 @@ async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
         row = await db.get(Initiative, row_id)
         if row is None or row.group_id != group.id or row.status != "active":
             raise _not_found()
-        committed = await initiative_committed(db, row_id)
+        # credit whose source reduction is not applied yet cannot move on (D-069)
+        committed = await initiative_committed(db, row_id) + await incoming_pending(db, row_id)
         return Side("initiative", ep.id, row.name, row.budget, committed, row)
     if ep.kind == "group":
         row = await db.get(Grp, row_id)
@@ -305,31 +307,75 @@ async def get(db, principal: Principal, transfer_id: int) -> dict:
     }  # fmt: skip
 
 
+async def _transfer_of_source(db, write_id: int) -> Transfer | None:
+    for transfer in await db.scalars(select(Transfer).order_by(Transfer.id.desc()).limit(500)):
+        ids = transfer.write_ids or []
+        if ids and ids[0] == write_id:
+            return transfer
+    return None
+
+
+async def _undo(db, transfer: Transfer, reason: str) -> bool:
+    """Restore both domain balances and cancel the held destination writes (idempotent)."""
+    ids = transfer.write_ids or []
+    held = list(await db.scalars(select(LitellmWrite).where(LitellmWrite.id.in_(ids[1:]))))
+    if any(w.status != "pending" for w in held):
+        return False  # the destination already applied: nothing safe to undo here
+    for kind, ident, delta in (
+        (transfer.source_kind, transfer.source_id, transfer.amount),
+        (transfer.target_kind, transfer.target_id, -transfer.amount),
+    ):
+        row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
+        field = {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget")
+        setattr(row, field, getattr(row, field) + delta)
+    for w in held:
+        w.status, w.last_error = "failed", reason
+    return True
+
+
 async def compensate_failed_source(db, write: LitellmWrite) -> None:
     """The source reduction failed for good: undo the move so no credit exists twice.
 
     Called by the outbox worker when a write turns ``failed``. The held destination write is
     failed too (it is rebuilt from the restored domain rows if an operator ever retries it).
+    A destination without a write (an initiative) is restored as well.
     """
-    for transfer in await db.scalars(select(Transfer).order_by(Transfer.id.desc()).limit(500)):
-        ids = transfer.write_ids or []
-        if not ids or ids[0] != write.id or transfer.source_kind == "initiative":
-            continue
-        held = [
-            w for w in await db.scalars(select(LitellmWrite).where(LitellmWrite.id.in_(ids[1:])))
-        ]
-        if not held or any(w.status != "pending" for w in held):
-            return
-        for kind, ident, delta in (
-            (transfer.source_kind, transfer.source_id, transfer.amount),
-            (transfer.target_kind, transfer.target_id, -transfer.amount),
-        ):
-            row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
-            field = {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget")
-            setattr(row, field, getattr(row, field) + delta)
-        for w in held:
-            w.status, w.last_error = "failed", f"cancelled: source write {write.id} failed"
-        return
+    transfer = await _transfer_of_source(db, write.id)
+    if transfer is not None and transfer.source_kind != "initiative":
+        await _undo(db, transfer, f"cancelled: source write {write.id} failed")
+
+
+async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime) -> bool:
+    """D-069: before the destination of a transfer is raised, re-read the source's real spend.
+
+    If the source consumed part of the released credit after the transfer was validated, the
+    move is undone (source restored upstream by a new write) and the destination is not raised.
+    Fails closed: an unreadable spend holds the write. Returns True when it may be applied.
+    """
+    if write.depends_on is None or reader is None:
+        return True
+    transfer = await _transfer_of_source(db, write.depends_on)
+    if transfer is None or write.id not in (transfer.write_ids or [])[1:]:
+        return True
+    kind, ident = transfer.source_kind, transfer.source_id
+    row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
+    total = getattr(row, {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget"))
+    spend = await fresh_spend(db, reader, now)  # SpendUnavailable propagates: caller holds
+    if spend.used(kind, ident) <= total:
+        return True
+    await _undo(
+        db, transfer, f"cancelled: source spent the released credit (transfer {transfer.id})"
+    )
+    source_write = await db.get(LitellmWrite, transfer.write_ids[0])
+    await enqueue(
+        db,
+        settings,
+        source_write.entity,
+        source_write.entity_id,
+        source_write.endpoint,
+        f"transfer:{transfer.id}:restore-source",
+    )
+    return False
 
 
 _MODEL = {

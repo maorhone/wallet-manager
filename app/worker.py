@@ -20,10 +20,12 @@ async def outbox_loop(settings: Settings) -> None:
     engine = make_engine(settings.database_url)
     sf = make_session_factory(engine)
     client = LiteLLMClient(settings.litellm_base_url, settings.litellm_master_key)
+    ro_engine = create_async_engine(settings.litellm_database_url)
+    reader = LiteLLMReader(ro_engine)
     backoff = 0.0  # global, in memory: keeps per-entity order without extra columns (NFR4)
     try:
         while True:
-            result = await drain(sf, client, settings)
+            result = await drain(sf, client, settings, reader)
             if result.stopped:
                 backoff = min(max(backoff * 2, BACKOFF_START), settings.outbox_backoff_max_s)
             else:
@@ -31,6 +33,7 @@ async def outbox_loop(settings: Settings) -> None:
             await asyncio.sleep(max(settings.outbox_poll_s, backoff))
     finally:
         await client.aclose()
+        await ro_engine.dispose()
         await engine.dispose()
 
 

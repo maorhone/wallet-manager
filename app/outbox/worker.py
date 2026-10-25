@@ -1,6 +1,8 @@
 """Outbox drain (SPEC §5.3/§5.4): apply pending ``litellm_write`` rows to LiteLLM in id order."""
 
 from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -17,7 +19,8 @@ from app.litellm_client import (
 )
 from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
-from app.services.transfers import compensate_failed_source
+from app.services.spend import SpendUnavailable
+from app.services.transfers import compensate_failed_source, fence_release
 
 _METHODS = {
     "/organization/update": "organization_update",
@@ -96,7 +99,7 @@ async def _apply(client: LiteLLMClient, session: AsyncSession, row: LitellmWrite
 
 
 async def drain(
-    sf: async_sessionmaker[AsyncSession], client: LiteLLMClient, settings: Settings
+    sf: async_sessionmaker[AsyncSession], client: LiteLLMClient, settings: Settings, reader=None
 ) -> DrainResult:
     result = DrainResult()
     async with sf() as s:
@@ -125,6 +128,16 @@ async def drain(
                 != "applied"
             ):
                 result.held += 1
+                continue
+            try:
+                if not await fence_release(
+                    s, settings, reader, row, datetime.now(ZoneInfo(settings.app_timezone))
+                ):
+                    result.failed += 1
+                    await s.commit()
+                    continue
+            except SpendUnavailable:
+                result.held += 1  # fail closed: never release credit on an unreadable spend
                 continue
             try:
                 if row.endpoint in _FROZEN:

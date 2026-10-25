@@ -1,7 +1,9 @@
 """Production organizations and systems (SPEC §4, DR4, FR-K1, FR-K2; §12.5.4 tab 6)."""
 
 import asyncio
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +22,7 @@ from app.permissions import (
     group_roles_of,
 )
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn, ProductionSystemPatch
-from app.services.spend import Spend
+from app.services.spend import Spend, SpendUnavailable, fresh_spend
 from app.services.validation import check_sum, internal_allocated
 from app.services.views import period_ctx
 from app.writes import WriteContext, sync_status
@@ -117,6 +119,21 @@ async def create_production_system(
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
 
+async def spend_for_budget_change(ctx, reader, clock, current, wanted, pc) -> Spend:
+    """A reduction releases funding, so it must see real consumption, not the 5-minute cache."""
+    if wanted >= current:
+        return await Spend.load(ctx.db, pc["period"])
+    now = (clock.now() if clock else datetime.now(ZoneInfo(ctx.settings.app_timezone))).astimezone(
+        ZoneInfo(ctx.settings.app_timezone)
+    )
+    try:
+        return await fresh_spend(ctx.db, reader, now)
+    except SpendUnavailable:
+        raise ApiError(
+            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
+        ) from None
+
+
 async def system_committed(db, spend: Spend, system: ProductionSystem) -> Decimal:
     keys = await db.scalars(
         select(ServiceKey).where(
@@ -139,6 +156,7 @@ async def update_system_budget(
     system_id: int,
     body: ProductionSystemPatch,
     clock: Clock | None = None,
+    reader=None,
 ) -> list[dict]:
     """Admin, or the head of the system's managing section (delegation), edits the budget."""
     system = await ctx.db.get(ProductionSystem, system_id)
@@ -161,7 +179,7 @@ async def update_system_budget(
     others = await internal_allocated(ctx.db, department_id, exclude_id=system.id)
     await _check_department_envelope(ctx.db, dept, others + body.budget)
     pc = period_ctx(ctx.settings, None, clock.now() if clock else None)
-    spend = await Spend.load(ctx.db, pc["period"])
+    spend = await spend_for_budget_change(ctx, reader, clock, system.budget, body.budget, pc)
     committed = await system_committed(ctx.db, spend, system)
     if err := check_sum(committed, body.budget):
         raise err

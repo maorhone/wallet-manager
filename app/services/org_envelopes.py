@@ -14,7 +14,7 @@ from app.schemas.org_systems import EnvelopesIn
 from app.schemas.production import ProductionSystemPatch
 from app.services import departments, views
 from app.services.overview import _previous
-from app.services.production import system_committed
+from app.services.production import spend_for_budget_change, system_committed
 from app.services.spend import Spend
 from app.services.validation import check_sum
 from app.writes import WriteContext
@@ -122,6 +122,7 @@ async def set_org_system_budget(
     organization_id: int,
     system_id: int,
     body: ProductionSystemPatch,
+    reader=None,
 ) -> list[dict]:
     """Allocate to an Org System within the systems envelope, never below its issued keys."""
     role = can_manage_org_systems(principal, organization_id)
@@ -142,7 +143,8 @@ async def set_org_system_budget(
     )
     if err := check_sum(others + body.budget, org.systems_envelope):
         raise err
-    spend = await Spend.load(ctx.db, views.period_ctx(ctx.settings, None, None)["period"])
+    pc = views.period_ctx(ctx.settings, None, None)
+    spend = await spend_for_budget_change(ctx, reader, None, system.budget, body.budget, pc)
     if err := check_sum(await system_committed(ctx.db, spend, system), body.budget):
         raise err
     before, system.budget = {"budget": system.budget}, body.budget

@@ -19,7 +19,7 @@ from app.models import (
     ServiceKey,
     Transfer,
 )
-from app.permissions import can_manage_service_keys, can_view_service_keys
+from app.permissions import AI_TEAM, can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
 from app.services.validation import check_limit, check_sum, group_allocated, key_allocated
 from app.writes import sync_status, write_response
@@ -190,8 +190,12 @@ async def create(ctx, principal, client, body):
         entity = "production_system"
     if err:
         raise err
+    ai_team = principal.is_admin or principal.has(AI_TEAM, "global")
     for field, policy_name in (("max_parallel", "concurrency"), ("rpm_limit", "rpm")):
         policy = await ctx.db.get(Policy, policy_name)
+        if policy and not ai_team and body.owner_kind != "group":
+            # D-065: only the AI team picks technical limits; others get the approved floor.
+            setattr(body, field, policy.value["min"])
         if policy and (
             err := check_limit(field, getattr(body, field), policy.value, principal.is_admin)
         ):

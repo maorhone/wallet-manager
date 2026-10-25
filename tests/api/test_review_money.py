@@ -183,7 +183,7 @@ async def test_review_group_commitment_counts_spent_plus_unspent(
 
 
 # review-p5 blocker 7: org-system reductions keep consumed credit
-async def test_review_org_system_floor_keeps_consumption(login_wm, provisioned, snapshot):
+async def test_review_org_system_floor_keeps_consumption(login_wm, provisioned, fake_engine):
     async with provisioned() as s:
         (await s.get(Organization, 1)).systems_envelope = Decimal(1000)
         row = ProductionSystem(
@@ -193,7 +193,14 @@ async def test_review_org_system_floor_keeps_consumption(login_wm, provisioned, 
         s.add(row)
         await s.commit()
         sid = row.id
-    await snapshot([("system", sid, None, 80)])
+    async with fake_engine.begin() as conn:  # r2 blocker: reductions read live spend, no snapshot
+        await conn.execute(
+            text(
+                'INSERT INTO "LiteLLM_SpendLogs" (request_id, "user", team_id, model_group,'
+                " \"startTime\", \"endTime\", spend) VALUES ('o1', 'u', 'sys-org', 'm', :at, :at, 80)"
+            ),
+            {"at": datetime.now(UTC)},
+        )
     admin = await login_wm("admin")
     r = await send(admin, "PUT", f"/organizations/1/systems/{sid}/budget", {"budget": 0})
     assert r.status_code == 422, r.text
