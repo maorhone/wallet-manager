@@ -68,6 +68,7 @@ async def test_pending_placements_count_admin_only(login_wm, provisioned):
     assert (await dani.get("/status")).json()["pending_placements"] is None
 
 
+@pytest.mark.usefixtures("wide_envelope")
 async def test_retry_failed_row(login_wm, put_budget, provisioned, litellm, prov_settings):
     admin = await login_wm("admin")
     assert (await put_budget(admin, 1, 1100000)).status_code == 200

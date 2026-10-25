@@ -1,11 +1,13 @@
 """§4, DR4, FR-K1, FR-K2: production organizations and systems."""
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models import AuditLog, LitellmWrite
 from app.outbox.worker import drain
 
 D1, D2 = 1, 2
+pytestmark = pytest.mark.usefixtures("wide_envelope")
 
 
 async def post(client, path, body, reason="production", **headers):

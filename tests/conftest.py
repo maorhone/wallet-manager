@@ -198,6 +198,18 @@ async def provisioned(seeded, prov_settings, litellm):
     return seeded
 
 
+@pytest_asyncio.fixture
+async def wide_envelope(seeded):
+    """Budget writes now respect the organization envelope; tests that grow budgets widen it."""
+    from decimal import Decimal
+
+    from app.models import Organization
+
+    async with seeded() as s:
+        (await s.get(Organization, 1)).departments_envelope = Decimal(10_000_000)
+        await s.commit()
+
+
 @pytest.fixture
 def put_budget():
     async def _put(client, dept_id=1, budget=1200000, reason="Q3 plan", **headers):

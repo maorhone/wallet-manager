@@ -2,11 +2,13 @@
 
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from app.models import ProductionSystem
 
 D1 = 1
+pytestmark = pytest.mark.usefixtures("wide_envelope")
 
 
 async def send(client, method, path, body, reason="internal systems"):

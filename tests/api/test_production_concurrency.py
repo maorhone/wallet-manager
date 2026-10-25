@@ -1,10 +1,12 @@
 import asyncio
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models import ProductionSystem
 
 D1 = 1
+pytestmark = pytest.mark.usefixtures("wide_envelope")
 
 
 async def post(client, path, body, reason="production", **headers):
