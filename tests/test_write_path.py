@@ -14,6 +14,7 @@ async def test_missing_reason_422_invalid_request(login, put_budget):
         assert r.status_code == 422 and r.json()["code"] == "INVALID_REQUEST"
 
 
+@pytest.mark.usefixtures("wide_envelope")
 async def test_same_idempotency_key_replays_without_duplicates(login, put_budget, seeded):
     client = await login("admin")
     first = await put_budget(client, budget=1100000, **{"Idempotency-Key": "k1"})
@@ -31,6 +32,7 @@ async def test_same_idempotency_key_replays_without_duplicates(login, put_budget
     assert other.json()["request_id"] != rid
 
 
+@pytest.mark.usefixtures("wide_envelope")
 async def test_audit_row_has_who_role_before_after_reason_request_id(login, put_budget, seeded):
     client = await login("admin")
     r = await put_budget(client, budget=1300000, reason=quote("תקציב חדש"))  # percent-encoded UTF-8
