@@ -92,16 +92,16 @@ async def test_allocator_sets_department_budget_within_envelope(login_wm, provis
     )
     assert ok.status_code == 200, ok.text
     dep = rows["rows"][0]
-    base = Decimal(str(dep["budget"]))
+    base = Decimal(str(dep["budget"]))  # fully allocated to children: the floor forbids a cut
     allocator = await allocator_client(login_wm, provisioned)
     path = f"/organizations/1/departments/{dep['id']}/budget"
     assert (
-        await put(allocator, path, {"budget": float(base - 1), "budget_period": "1mo"})
+        await put(allocator, path, {"budget": float(base), "budget_period": "1mo"})
     ).status_code == 200
     over = await put(allocator, path, {"budget": float(base + 1), "budget_period": "1mo"})
     assert over.status_code == 422, over.text
     async with provisioned() as s:
-        assert (await s.get(Department, dep["id"])).budget == base - 1
+        assert (await s.get(Department, dep["id"])).budget == base
 
 
 async def test_department_of_another_organization_is_404(login_wm):
