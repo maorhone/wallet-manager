@@ -127,20 +127,22 @@ spend_logs = Table(
     Column("completion_tokens", Integer, server_default="0"),
     Column("request_tags", JSONB),
 )
-# Failed requests. Real LiteLLM keeps these in LiteLLM_ErrorLogs; user/team_id/retry_after are
-# fake-only conveniences (real rows carry them inside request_kwargs / the message).
+# Failed requests: the real LiteLLM_ErrorLogs columns; the caller's user/team live in
+# request_kwargs.litellm_params.metadata (retry_after: a fake-only key in request_kwargs).
 error_logs = Table(
     "LiteLLM_ErrorLogs",
     metadata,
     Column("request_id", Text, primary_key=True),
     Column("startTime", DateTime(timezone=True)),
-    Column("user", Text),
-    Column("team_id", Text),
-    Column("model_group", Text),
-    Column("status_code", Text),
-    Column("exception_type", Text),
-    Column("exception_string", Text),
-    Column("retry_after", Integer),
+    Column("endTime", DateTime(timezone=True)),
+    Column("api_base", Text, server_default=""),
+    Column("model_group", Text, server_default=""),
+    Column("litellm_model_name", Text, server_default=""),
+    Column("model_id", Text, server_default=""),
+    Column("request_kwargs", JSONB, server_default="{}"),
+    Column("exception_type", Text, server_default=""),
+    Column("exception_string", Text, server_default=""),
+    Column("status_code", Text, server_default=""),
 )
 
 

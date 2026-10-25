@@ -1,8 +1,14 @@
 async def test_put_budget_pending_then_applied(
     login, put_budget, provisioned, litellm, prov_settings
 ):
+    from decimal import Decimal
+
+    from app.models import Organization
     from app.outbox.worker import drain
 
+    async with provisioned() as s:  # the legacy route now respects the organization envelope
+        (await s.get(Organization, 1)).departments_envelope = Decimal(10_000_000)
+        await s.commit()
     client = await login("admin")
     r = await put_budget(client, budget=1250000)
     assert r.status_code == 200

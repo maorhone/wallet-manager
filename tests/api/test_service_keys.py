@@ -178,6 +178,13 @@ async def test_rep_viewer_list_no_actions_and_write_403(login_wm, provisioned):
 async def test_system_key_admin_only_and_within_system_budget(
     login_wm, provisioned, put, litellm, prov_settings
 ):
+    from decimal import Decimal
+
+    from app.models import Organization
+
+    async with provisioned() as s:  # department budgets must now fit the organization's envelope
+        (await s.get(Organization, 1)).departments_envelope = Decimal(10_000_000)
+        await s.commit()
     admin = await login_wm("admin")
     freed = await put(admin, "/departments/1/budget", {"budget": 1000100, "budget_period": "1mo"})
     assert freed.status_code == 200, freed.text

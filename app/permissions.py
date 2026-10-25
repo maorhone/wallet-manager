@@ -297,7 +297,7 @@ ROLE_BINDING_SCOPES: dict[str, tuple[str, ...]] = {
     "organization": (ORG_ALLOCATOR,),
     "department": (REP, PMO, VIEWER),
     "group": (HEAD, VIEWER),
-    "global": (ADMIN, VIEWER),
+    "global": (ADMIN, VIEWER, AI_TEAM),
 }
 
 
@@ -351,12 +351,18 @@ async def can_manage_service_keys(session, p: Principal, owner_kind: str, owner_
     viewed = await can_view_service_keys(session, p, owner_kind, owner_id)
     if owner_kind == "initiative":  # managed by the section's head or an admin
         owner_kind, owner_id = "group", (await session.get(Initiative, owner_id)).group_id
+    if owner_kind == "group":
+        # Always re-resolve under the department lock: an owner's read access skips it (blocker 8).
+        roles = await _group_roles(session, p, owner_id)
+        if p.is_admin:
+            return ADMIN
+        if HEAD in roles:
+            return HEAD
+        raise _forbidden()
     if p.is_admin:
         return ADMIN
     if owner_kind == "system" and viewed == ORG_ALLOCATOR:
         return ORG_ALLOCATOR
-    if owner_kind == "group" and p.has(HEAD, "group", owner_id):
-        return HEAD
     raise _forbidden()
 
 

@@ -64,13 +64,20 @@ async def add_errors(body: list[ErrorRow], request: Request):
                 insert(error_logs).values(
                     request_id=uuid4().hex,
                     startTime=e.at or now,
-                    user=e.user_id,
-                    team_id=e.team_id,
+                    endTime=e.at or now,
                     model_group=e.model,
                     status_code=str(e.status_code),
                     exception_type=e.exception_type,
                     exception_string=e.message,
-                    retry_after=e.retry_after,
+                    request_kwargs={
+                        "litellm_params": {
+                            "metadata": {
+                                "user_api_key_user_id": e.user_id,
+                                "user_api_key_team_id": e.team_id,
+                            }
+                        },
+                        "retry_after": e.retry_after,
+                    },
                 )
             )
     return {"ok": True}

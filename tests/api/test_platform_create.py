@@ -24,6 +24,13 @@ async def post(client, path, body, reason="create", **headers):
 async def test_create_department_enqueues_organization_new(
     login_wm, provisioned, litellm, prov_settings
 ):
+    from decimal import Decimal
+
+    from app.models import Organization
+
+    async with provisioned() as s:  # department budgets must now fit the organization's envelope
+        (await s.get(Organization, 1)).departments_envelope = Decimal(10_000_000)
+        await s.commit()
     admin = await login_wm("admin")
     body = {
         "name": "Department D3", "litellm_org_id": "D3",

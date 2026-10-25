@@ -67,13 +67,25 @@ GROUP BY project, day
 ORDER BY day, project NULLS LAST
 """
 
+# The deployed LiteLLM_ErrorLogs has no user/team columns: the caller identity lives in the
+# request_kwargs JSON (metadata.user_api_key_*; the content fields are never selected).
 _FAILED_REQUESTS = """
-SELECT "user", team_id, model_group, "startTime", status_code, exception_type,
-       exception_string, retry_after
-FROM "LiteLLM_ErrorLogs"
-WHERE "startTime" >= :start AND "startTime" < :end
-  AND (CAST(:teams AS text[]) IS NULL OR team_id = ANY(CAST(:teams AS text[])))
-  AND (CAST(:users AS text[]) IS NULL OR "user" = ANY(CAST(:users AS text[])))
+WITH e AS (
+    SELECT COALESCE(request_kwargs #>> '{litellm_params,metadata,user_api_key_user_id}',
+                    request_kwargs #>> '{metadata,user_api_key_user_id}') AS usr,
+           COALESCE(request_kwargs #>> '{litellm_params,metadata,user_api_key_team_id}',
+                    request_kwargs #>> '{metadata,user_api_key_team_id}') AS team,
+           model_group, "startTime", status_code, exception_type, exception_string,
+           CASE WHEN request_kwargs ->> 'retry_after' ~ '^[0-9]+$'
+                THEN (request_kwargs ->> 'retry_after')::int END AS retry_after
+    FROM "LiteLLM_ErrorLogs"
+    WHERE "startTime" >= :start AND "startTime" < :end
+)
+SELECT usr, team, model_group, "startTime", status_code, exception_type, exception_string,
+       retry_after
+FROM e
+WHERE (CAST(:teams AS text[]) IS NULL OR team = ANY(CAST(:teams AS text[])))
+  AND (CAST(:users AS text[]) IS NULL OR usr = ANY(CAST(:users AS text[])))
 ORDER BY "startTime" DESC
 LIMIT :limit
 """

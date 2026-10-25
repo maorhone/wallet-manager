@@ -48,6 +48,9 @@ async def create_org_system(
         raise err
     first = org.systems_litellm_org_id is None
     if first:
+        virtual = f"orgsys-{org.id}"
+        if await ctx.db.scalar(select(Department.id).where(Department.litellm_org_id == virtual)):
+            raise ApiError(409, "CONFLICT", "The virtual organization id is already in use")
         org.systems_litellm_org_id = f"orgsys-{org.id}"
     system = ProductionSystem(
         funding="organization", organization_id=organization_id, name=body.name,

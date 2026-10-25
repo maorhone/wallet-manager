@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.config import Settings
 from app.db import LockKind
@@ -37,15 +37,6 @@ async def _systems(db, organization_id: int) -> list[ProductionSystem]:
             )
         )
     )
-
-
-async def _dept_allocated(db, organization_id: int, exclude: int | None = None) -> Decimal:
-    q = select(func.coalesce(func.sum(Department.budget), 0)).where(
-        Department.organization_id == organization_id
-    )
-    if exclude is not None:
-        q = q.where(Department.id != exclude)
-    return await db.scalar(q)
 
 
 async def get_envelopes(db, principal, settings: Settings, organization_id: int) -> dict:
@@ -87,7 +78,9 @@ async def set_envelopes(
     org = await _org(ctx.db, organization_id)
     await ctx.db.refresh(org)
     systems = sum((s.budget for s in await _systems(ctx.db, organization_id)), Decimal(0))
-    if err := check_sum(await _dept_allocated(ctx.db, organization_id), body.departments_envelope):
+    if err := check_sum(
+        await departments.dept_allocated(ctx.db, organization_id), body.departments_envelope
+    ):
         raise err
     if err := check_sum(systems, body.systems_envelope):
         raise err
@@ -115,14 +108,11 @@ async def set_department_budget(
     """Allocator (or admin) allocates to a department within the departments envelope."""
     role = can_manage_org_systems(principal, organization_id)
     await ctx.lock(LockKind.PRODUCTION, -organization_id)
-    org = await _org(ctx.db, organization_id)
-    await ctx.db.refresh(org)
+    await _org(ctx.db, organization_id)
     dept = await ctx.db.get(Department, department_id)
     if dept is None or dept.organization_id != organization_id:
         raise ApiError(404, "NOT_FOUND", "Department not found")
-    others = await _dept_allocated(ctx.db, organization_id, exclude=department_id)
-    if err := check_sum(others + body.budget, org.departments_envelope):
-        raise err
+    await departments.check_envelope(ctx, organization_id, department_id, body.budget)
     return await departments.apply_budget(ctx, dept, body, role)
 
 

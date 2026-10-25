@@ -163,6 +163,8 @@ async def _plan(
     group = await ctx.db.get(Grp, body.group_id)
     if group is None:
         raise _not_found()
+    # DEPARTMENT before GROUP everywhere: group_roles_of takes the department lock
+    await ctx.lock(LockKind.DEPARTMENT, group.department_id)
     await ctx.lock(LockKind.GROUP, group.id)
     involves_system = "system" in (body.source.kind, body.target.kind)
     if involves_system:

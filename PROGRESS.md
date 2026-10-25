@@ -1069,3 +1069,6 @@ Backend `app/services/org_envelopes.py`: `GET/PUT /organizations/{id}/envelopes`
 
 ## fix-review-p5 group 1 (B1 money core)
 Fixed: transfer id aliases, personal-value auth on transfer endpoints, `/team/update` for production systems, source-first transfer order with rollback on source failure, fresh-spend unused check (503 when unreadable), consumption-aware commitments (groups, org systems), D-045 narrative throughput, D-046..048 request targets, over-allocation totals. Tests: tests/api/test_review_money.py. Next: group 2 (B2+B3), group 3 (F1+F2).
+
+## fix-review-p5 group 2 (B2+B3 authz/services)
+Done: blockers 8-12 and the B2/B3 majors (see OPEN-ITEMS NEEDS-REVIEW lines); tests in tests/api/test_review_authz.py. Next: group 3 (F1+F2 frontend). Blockers: none.

@@ -25,6 +25,7 @@ from app.schemas.platform import (
     OrganizationCreateIn,
     RoleBindingIn,
 )
+from app.services import departments
 from app.services.owners import holders
 from app.services.validation import check_group_tree
 from app.writes import WriteContext
@@ -164,6 +165,10 @@ async def create_department(
         raise invalid_request(
             "litellm_org_id cannot use the reserved '-prod' suffix", {"field": "litellm_org_id"}
         )
+    if body.litellm_org_id.startswith("orgsys-"):  # the Org Systems' virtual organization ids
+        raise invalid_request(
+            "litellm_org_id cannot use the reserved 'orgsys-' prefix", {"field": "litellm_org_id"}
+        )
     if await ctx.db.scalar(
         select(Department.id).where(Department.litellm_org_id == body.litellm_org_id)
     ):
@@ -173,6 +178,7 @@ async def create_department(
     ):
         raise invalid_request("ad_group_dn already exists", {"field": "ad_group_dn"})
 
+    await departments.check_envelope(ctx, body.organization_id, None, body.budget)
     dept = Department(
         name=body.name, litellm_org_id=body.litellm_org_id, ad_group_dn=body.ad_group_dn,
         budget=body.budget, budget_period=body.budget_period, organization_id=body.organization_id,

@@ -5,8 +5,18 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from app.config import Settings
-from app.models import Department, Employee, Grp, Initiative, Policy, ProductionSystem, Request
+from app.models import (
+    Department,
+    Employee,
+    Grp,
+    Initiative,
+    Policy,
+    ProductionSystem,
+    Request,
+    ServiceKey,
+)
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
+from app.services import requests as requests_service
 from app.services import views
 from app.services.rate_card import metered_value
 from app.services.spend import Spend
@@ -49,20 +59,28 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     for ini in await db.scalars(
         select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
     ):
-        used = spend.used("initiative", ini.id)
+        # No initiative snapshot scope exists: sum its keys (revoked/rotated generations included).
+        key_ids = await db.scalars(
+            select(ServiceKey.id).where(
+                ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == ini.id
+            )
+        )
+        used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
         rows.append(
             {"kind": "initiative", "id": str(ini.id), "name": ini.name, "total": ini.budget,
              "used": used, "percent": _pct(used, ini.budget), "state": None}
         )  # fmt: skip
+    used = w["rollup_used"]  # D-055: descendants' consumption counts once, in the parent's view
+    remaining = w["total"] - used
     return {
         "period": s["period"], "reset_date": s["reset_date"], "spend_taken_at": s["spend_taken_at"],
         "group": s["group"],
         "kpis": {
-            "total": w["total"], "allocated": w["allocated"], "used": w["used"],
-            "remaining": w["remaining"],
+            "total": w["total"], "allocated": w["allocated"], "used": used,
+            "remaining": remaining,
             "metered_value": await metered_value(db, "group", group_id, s["period"]),
         },
-        "bar": {"used": w["used"], "allocated_unused": max(w["allocated"] - w["used"], 0),
+        "bar": {"used": used, "allocated_unused": max(w["allocated"] - used, 0),
                 "unallocated": w["unallocated"], "total": w["total"]},
         "rows": rows,
         "actions": s["actions"],
@@ -78,15 +96,19 @@ async def attention(db, principal, settings: Settings, scope: str, raw_period: s
     o = await overview(db, principal, settings, scope, raw_period)
     row = await db.get(Policy, "shortage_threshold")
     threshold = Decimal(str(row.value)) if row and row.value else DEFAULT_SHORTAGE
-    pending = list(
-        await db.scalars(
-            select(Request).where(
+    pending = [
+        r
+        for r in await db.scalars(
+            select(Request)
+            .where(
                 Request.scope_kind == "group",
                 Request.scope_id == group_id,
                 Request.status.in_(("submitted", "forwarded")),
             )
+            .order_by(Request.id)
         )
-    )
+        if await requests_service.can_see(db, principal, r)
+    ]
     s = await views.group_summary(db, principal, settings, group_id, raw_period)
     risks = [
         {"kind": r["kind"], "id": r["id"], "name": r["name"], "percent": r["percent"]}

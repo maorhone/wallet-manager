@@ -58,6 +58,11 @@ async def _handler_role(db, principal: Principal, req: Request) -> str | None:
     return None
 
 
+async def can_see(db, principal: Principal, req: Request) -> bool:
+    """The Requests visibility rule: the requester or an authorized handler."""
+    return req.requester_upn == principal.upn or await _handler_role(db, principal, req) is not None
+
+
 def _view(req: Request) -> dict:
     return {
         "id": req.id, "type": req.type, "scope_kind": req.scope_kind, "scope_id": req.scope_id,

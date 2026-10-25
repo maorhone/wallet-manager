@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.db import LockKind
 from app.directory import Directory
-from app.errors import invalid_request, scope_forbidden
+from app.errors import invalid_request, scope_forbidden, self_allocation_forbidden
 from app.models import Employee, EmployeeModelCap, GroupModelPot, Grp, Policy
 from app.permissions import (
     ADMIN,
@@ -168,6 +168,8 @@ def _limit_values(e: Employee) -> dict:
 async def apply_limits(ctx: WriteContext, role: str, group: Grp, employee, body) -> int:
     """Validate against the policy range and write one member's limits (outbox ``/key/update``)."""
     upn, group_id = employee.upn, group.id
+    if upn == ctx.actor_upn:  # DR9: another person sets your limits
+        raise self_allocation_forbidden()
     for field, policy_key in (("max_parallel", "concurrency"), ("rpm_limit", "rpm")):
         value, policy = getattr(body, field), await ctx.db.get(Policy, policy_key)
         if value is not None and policy:

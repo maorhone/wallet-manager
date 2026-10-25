@@ -27,7 +27,7 @@ async def test_attention_groups(login, seeded):
         s.add(
             Request(
                 type="credits", scope_kind="group", scope_id=A1, requester_upn="dani@corp.example",
-                handler_role="head", handler_scope=A1, status="submitted", amount=500,
+                handler_role="group_head", handler_scope=A1, status="submitted", amount=500,
             )
         )  # fmt: skip
         s.add(Grant(department_id=1, group_id=A1, amount=1000, status="active", created_by="x"))

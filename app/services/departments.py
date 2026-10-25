@@ -1,13 +1,14 @@
 import asyncio
+from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.db import LockKind
 from app.errors import ApiError, invalid_request, scope_forbidden
-from app.models import Department, DepartmentModelAllowance, Grp
+from app.models import Department, DepartmentModelAllowance, Grp, Organization
 from app.permissions import Principal, can_edit_dept_budget, can_edit_split
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services.validation import check_group_tree
+from app.services.validation import check_group_tree, check_sum
 from app.writes import WriteContext
 
 
@@ -19,7 +20,32 @@ async def set_budget(
     dept = await ctx.db.get(Department, department_id)
     if dept is None:
         raise ApiError(404, "NOT_FOUND", "Department not found")
+    await check_envelope(ctx, dept.organization_id, department_id, body.budget)
+    await ctx.db.refresh(dept)
     return await apply_budget(ctx, dept, body, role)
+
+
+async def dept_allocated(db, organization_id: int, exclude: int | None = None) -> Decimal:
+    q = select(func.coalesce(func.sum(Department.budget), 0)).where(
+        Department.organization_id == organization_id
+    )
+    if exclude is not None:
+        q = q.where(Department.id != exclude)
+    return await db.scalar(q)
+
+
+async def check_envelope(
+    ctx: WriteContext, organization_id: int, department_id: int | None, budget: Decimal
+) -> None:
+    """Every department budget write fits the organization's departments envelope.
+
+    Takes the organization's allocation lock first (shared by all routes and creation)."""
+    await ctx.lock(LockKind.PRODUCTION, -organization_id)
+    org = await ctx.db.get(Organization, organization_id)
+    await ctx.db.refresh(org)
+    others = await dept_allocated(ctx.db, organization_id, exclude=department_id)
+    if err := check_sum(others + budget, org.departments_envelope):
+        raise err
 
 
 async def apply_budget(ctx: WriteContext, dept: Department, body: DepartmentBudgetIn, role: str):
