@@ -7,7 +7,7 @@ test.afterEach(async () => {
 
 test('U6 switcher lists self + group + department for noa', async ({ page }) => {
   await loginAs(page, 'noa@corp.example');
-  await page.goto('/');
+  await page.goto('/wallet');
   const switcher = page.getByTestId('scope-switcher');
   await expect(switcher).toBeVisible();
   const labels = await switcher.locator('option').allTextContents();
@@ -22,7 +22,7 @@ test('U6 switcher lists self + group + department for noa', async ({ page }) => 
   expect(await page.evaluate(() => localStorage.getItem('wm.scope.noa@corp.example'))).toMatch(
     /^group:\d+$/,
   );
-  await page.goto('/');
+  await page.goto('/wallet');
   await expect(page).toHaveURL(/\/group\/\d+\/overview/);
 });
 

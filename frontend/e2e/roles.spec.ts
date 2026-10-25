@@ -4,7 +4,7 @@ test.beforeAll(() => resetData());
 
 test('U6 permissions follow selected scope', async ({ page }) => {
   await loginAs(page, 'noa@corp.example');
-  await page.goto('/');
+  await page.goto('/wallet');
   const switcher = page.getByTestId('scope-switcher');
   const me = await (await page.request.get('/me')).json();
   const csrf = (await page.context().cookies()).find((c) => c.name === 'wm_csrf')?.value ?? '';
