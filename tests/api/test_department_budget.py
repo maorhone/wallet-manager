@@ -20,7 +20,7 @@ async def test_put_budget_pending_then_applied(
 
     await drain(provisioned, litellm, prov_settings)
     assert (await litellm.organization_info("D1")).litellm_budget_table.max_budget == 1250000
-    replay = await put_budget(client, budget=1, **{"Idempotency-Key": "x"})  # new request
+    replay = await put_budget(client, budget=1300000, **{"Idempotency-Key": "x"})  # new request
     assert replay.json()["entities"][0]["sync_status"] == "pending"
 
 
