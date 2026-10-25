@@ -22,8 +22,9 @@ test('U6 switcher lists self + group + department for noa', async ({ page }) => 
   expect(await page.evaluate(() => localStorage.getItem('wm.scope.noa@corp.example'))).toMatch(
     /^group:\d+$/,
   );
-  await page.goto('/wallet');
-  await expect(page).toHaveURL(/\/group\/\d+\/overview/);
+  // D-073: the authenticated root opens the v2 workspace; the legacy scope stays remembered above.
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/v2/);
 });
 
 test('U8 html is rtl/he and numbers render ltr', async ({ page }) => {
