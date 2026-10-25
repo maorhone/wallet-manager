@@ -3,7 +3,7 @@ from urllib.parse import quote
 import pytest
 from sqlalchemy import func, select
 
-from app.models import AuditLog, Department, LitellmWrite
+from app.models import AuditLog, Department, LitellmWrite, Organization
 from app.writes import WriteContext
 
 
@@ -56,8 +56,11 @@ async def test_domain_audit_outbox_single_transaction(login, put_budget, seeded,
 
     monkeypatch.setattr(WriteContext, "enqueue", boom)
     client = await login("admin")
+    async with seeded() as s:  # the change must pass the envelope to reach the enqueue
+        (await s.get(Organization, 1)).departments_envelope = 10_000_000
+        await s.commit()
     with pytest.raises(RuntimeError):
-        await put_budget(client, budget=5)
+        await put_budget(client, budget=1000001)
     async with seeded() as s:
         assert await s.scalar(select(func.count()).select_from(AuditLog)) == 0
         assert await s.scalar(select(func.count()).select_from(LitellmWrite)) == 0
