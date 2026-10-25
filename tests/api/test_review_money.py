@@ -197,7 +197,8 @@ async def test_review_org_system_floor_keeps_consumption(login_wm, provisioned, 
         await conn.execute(
             text(
                 'INSERT INTO "LiteLLM_SpendLogs" (request_id, "user", team_id, model_group,'
-                " \"startTime\", \"endTime\", spend) VALUES ('o1', 'u', 'sys-org', 'm', :at, :at, 80)"
+                ' "startTime", "endTime", spend)'
+                " VALUES ('o1', 'u', 'sys-org', 'm', :at, :at, 80)"
             ),
             {"at": datetime.now(UTC)},
         )
