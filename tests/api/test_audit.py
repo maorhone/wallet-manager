@@ -11,6 +11,13 @@ async def _put(client, path, body, reason="plan"):
 async def test_audit_includes_litellm_call_status(
     login_wm, put_budget, provisioned, litellm, prov_settings
 ):
+    from decimal import Decimal
+
+    from app.models import Organization
+
+    async with provisioned() as s:  # the budget route now respects the organization envelope
+        (await s.get(Organization, 1)).departments_envelope = Decimal(10_000_000)
+        await s.commit()
     admin = await login_wm("admin")
     rid = (await put_budget(admin, 1, 1100000, reason="Q4")).json()["request_id"]
     [row] = (await admin.get("/audit?entity=department&id=1&actor=admin@corp.example")).json()
