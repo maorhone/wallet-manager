@@ -1122,3 +1122,7 @@ Groups (shared root cause):
 - C Personal: a failed refresh wins over cached data (`tele`), service pill too. (Personal:28)
 - D navigation: remembered inherited routes restored; Shell `DrillGuard` falls back only on 403/404; sidebar keeps `?org=`; OrgSelector also on Systems. (navigation:74, Shell:140)
 Tests: tests/api/test_initiatives.py (+2), vitest SystemDetail/Shell/Personal/navigation. e2e not run (phase-end mode N/A, full run at the end).
+
+## fix-review-p5-r8 (2 blockers + 11 majors)
+Groups: (1) money/fence: B1a1 unsettled incoming excluded at the fence via `unsettled_incoming`, B1a2 `_window_start` covers s/m/h/d/mo durations; (2) locks: key move org -> owner order; (3) overview semantics: unused from live allocations (`group_committed`), historical child budgets, initiative usage stops at the move day; (4) history: `_parent_map` consumes parent-insertion audits; (5) rate card: per-day rates, unmapped tokens -> unavailable; (6) live parent vs live children finding; (7) /systems/mine includes department-funded; (8) frontend: `WriteOutcome` (replays the idempotent write until synced) in bulk + org allocation, managed inventory error state.
+Tests: tests/api/test_review_r8.py, v2/components/WriteOutcome.test.tsx, Initiative.test.tsx. Done: all 2 blockers, 11 majors. Next: full run. e2e not run in targeted mode.

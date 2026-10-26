@@ -45,7 +45,8 @@ ORDER BY t.team_id
 _TEAM_ALLOCATIONS = """
 SELECT t.team_id, t.team_alias, t.max_budget AS group_budget,
        COALESCE(SUM(mb.max_budget + CASE WHEN mb.temp_budget_expiry > now()
-                                THEN COALESCE(mb.temp_budget_increase, 0) ELSE 0 END), 0) AS allocated
+                                    THEN COALESCE(mb.temp_budget_increase, 0) ELSE 0 END),
+                0) AS allocated
 FROM "LiteLLM_TeamTable"      t
 LEFT JOIN "LiteLLM_TeamMembership" m  ON m.team_id = t.team_id
 LEFT JOIN "LiteLLM_BudgetTable"    mb ON mb.budget_id = m.budget_id
