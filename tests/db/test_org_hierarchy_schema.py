@@ -242,3 +242,39 @@ async def test_seed_initializes_empty_migrated_org(engine, settings):
         org = await session.get(Organization, 1)
         budgets = await session.scalars(select(Department.budget))
         assert org.departments_envelope == sum(budgets, Decimal(0))
+
+
+# review-p5-r6 blocker B1b: a system key rotated before 0017 keeps its retired reservation
+async def test_r7_system_key_retired_budget_backfilled(pg_server):
+    await create_database(pg_server.get_uri(), "wm_retired_backfill")
+    url = to_asyncpg_url(pg_server.get_uri(), database="wm_retired_backfill")
+    env = {**os.environ, "DATABASE_URL": url}
+
+    def migrate(rev):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", rev],
+            env=env, check=True, capture_output=True,
+        )  # fmt: skip
+
+    migrate("0016")
+    db = create_async_engine(url)
+    try:
+        async with db.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO service_key (owner_kind, owner_id, max_budget, status) "
+                    "VALUES ('system', 1, 40, 'active')"
+                )
+            )
+            for _ in range(3):  # initial generation plus two rotation attempts
+                await conn.execute(
+                    text(
+                        "INSERT INTO litellm_write (entity, entity_id, endpoint, status) "
+                        "VALUES ('service_key', '1', '/key/service-account/generate', 'failed')"
+                    )
+                )
+        migrate("head")
+        async with db.connect() as conn:
+            assert await conn.scalar(text("SELECT retired_budget FROM service_key")) == 80
+    finally:
+        await db.dispose()
