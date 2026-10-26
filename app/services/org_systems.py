@@ -79,6 +79,38 @@ async def create_org_system(
     return [{"entity": "production_system", "id": system.id, "values": after}]
 
 
+async def raise_budget(
+    ctx: WriteContext, principal: Principal, system_id: int, amount: Decimal
+) -> int:
+    """Raise an Org System's budget inside the systems envelope; returns the outbox write id.
+
+    Used by an approved owner request (D-048): the organization's allocator or an admin applies.
+    """
+    system = await ctx.db.get(ProductionSystem, system_id)
+    if system is None or system.funding != "organization":
+        raise ApiError(404, "NOT_FOUND", "System not found")
+    role = can_manage_org_systems(principal, system.organization_id)
+    await ctx.lock(LockKind.PRODUCTION, -system.organization_id)
+    org = await ctx.db.get(Organization, system.organization_id)
+    await ctx.db.refresh(org)
+    await ctx.db.refresh(system)
+    if system.status != "active":
+        raise ApiError(409, "CONFLICT", "The system is no longer active")
+    others = await ctx.db.scalar(
+        select(func.coalesce(func.sum(ProductionSystem.budget), 0)).where(
+            ProductionSystem.organization_id == system.organization_id,
+            ProductionSystem.funding == "organization",
+            ProductionSystem.status == "active",
+            ProductionSystem.id != system.id,
+        )
+    )
+    if err := check_sum(others + system.budget + amount, org.systems_envelope):
+        raise err
+    before, system.budget = {"budget": system.budget}, system.budget + amount
+    ctx.audit("production_system", system.id, before, {"budget": system.budget}, role)
+    return await ctx.enqueue("production_system", system.id, "/team/update")
+
+
 async def move_key(
     ctx: WriteContext, principal: Principal, key_id: int, body: KeyMoveIn
 ) -> list[dict]:

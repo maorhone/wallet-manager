@@ -17,11 +17,20 @@ from app.models import (
     Request,
     RequestEvent,
 )
-from app.permissions import ADMIN, AI_TEAM, HEAD, REP, Principal, group_roles_of, target_tier
+from app.permissions import (
+    ADMIN,
+    AI_TEAM,
+    HEAD,
+    ORG_ALLOCATOR,
+    REP,
+    Principal,
+    group_roles_of,
+    target_tier,
+)
 from app.schemas.groups import MemberLimitsIn
 from app.schemas.initiatives import InitiativeIn
 from app.schemas.production import ProductionSystemPatch
-from app.services import initiatives, members, notifications, production
+from app.services import initiatives, members, notifications, org_systems, production
 from app.services.personal_values import OWNER_ROLE, authorize
 from app.services.validation import check_sum, group_allocated, settled_budget
 from app.writes import WriteContext
@@ -45,6 +54,10 @@ async def _handler_role(db, principal: Principal, req: Request) -> str | None:
         return ADMIN
     if req.handler_role == AI_TEAM:
         return AI_TEAM if principal.has(AI_TEAM, "global") else None
+    if req.handler_role == ORG_ALLOCATOR and principal.has(
+        ORG_ALLOCATOR, "organization", req.handler_scope
+    ):
+        return ORG_ALLOCATOR
     if req.handler_role == HEAD and HEAD in await group_roles_of(db, principal, req.scope_id):
         return HEAD
     if req.handler_role == REP:
@@ -79,11 +92,16 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
         raise invalid_request("Use the top-level target field", {"field": "payload.target"})
     if target is not None and body.type == "initiative":
         raise invalid_request("A new initiative has no target", {"field": "target"})
+    org_system = None
     if target is not None:
-        group_id = await _target_group(ctx.db, principal, target)
-        await ctx.lock(LockKind.GROUP, group_id)
+        scope_kind, group_id, org_system = await _target_scope(ctx.db, principal, target)
+        if org_system is not None:  # D-048: an Org System owner asks the organization
+            await ctx.lock(LockKind.PRODUCTION, -org_system.organization_id)
+        else:
+            await ctx.lock(LockKind.GROUP, group_id)
         body.payload = {**body.payload, "target": target.model_dump()}
     else:
+        scope_kind = "group"
         employee = await ctx.db.get(Employee, principal.upn)
         if employee is None or employee.status != "active" or employee.group_id is None:
             raise _forbidden()
@@ -99,17 +117,26 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
         raise invalid_request("An initiative request needs a name", {"field": "payload.name"})
     if body.type == "throughput" and any(k in body.payload for k in _LIMIT_FIELDS):
         _limits_of(body.payload)
-    group = await ctx.db.get(Grp, group_id)
-    handler_role = (
-        OWNER_ROLE[await target_tier(ctx.db, directory, principal.upn)]
-        if body.type == "credits" and target is None
-        else HEAD
-    )
-    handler_scope = (
-        group.id if handler_role == HEAD else (group.department_id if handler_role == REP else None)
-    )
+    group = None if org_system else await ctx.db.get(Grp, group_id)
+    if org_system is not None:  # credits: the allocator; limits: the AI team (D-065)
+        handler_role, handler_scope = (
+            (ORG_ALLOCATOR, org_system.organization_id)
+            if body.type == "credits"
+            else (AI_TEAM, None)
+        )
+    else:
+        handler_role = (
+            OWNER_ROLE[await target_tier(ctx.db, directory, principal.upn)]
+            if body.type == "credits" and target is None
+            else HEAD
+        )
+        handler_scope = (
+            group.id
+            if handler_role == HEAD
+            else (group.department_id if handler_role == REP else None)
+        )
     req = Request(
-        type=body.type, scope_kind="group", scope_id=group_id,
+        type=body.type, scope_kind=scope_kind, scope_id=group_id,
         requester_upn=principal.upn, handler_role=handler_role, handler_scope=handler_scope,
         amount=body.amount, payload=body.payload,
     )  # fmt: skip
@@ -118,15 +145,22 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
     ctx.db.add(RequestEvent(request_id=req.id, actor_upn=principal.upn, action="submitted"))
     ctx.audit(
         "request", req.id, {}, {"type": req.type, "amount": req.amount}, "employee",
-        group_id=group.id, department_id=group.department_id,
+        **_scope_context(group),
     )  # fmt: skip
-    recipients = (
-        await notifications.heads_of(ctx.db, directory, group.id)
-        if handler_role == HEAD
-        else await notifications.reps_or_admins(
-            ctx.db, directory, group.department_id if handler_role == REP else None
+    if org_system is not None:
+        recipients = (
+            await notifications.allocators_or_admins(ctx.db, directory, org_system.organization_id)
+            if handler_role == ORG_ALLOCATOR
+            else await notifications.ai_team_or_admins(ctx.db, directory)
         )
-    )
+    else:
+        recipients = (
+            await notifications.heads_of(ctx.db, directory, group.id)
+            if handler_role == HEAD
+            else await notifications.reps_or_admins(
+                ctx.db, directory, group.department_id if handler_role == REP else None
+            )
+        )
     await notifications.notify(
         ctx.db, recipients - {principal.upn}, "request_submitted",
         "request", req.id, {"request_id": req.id, "type": req.type, "requester": principal.upn},
@@ -138,16 +172,26 @@ async def create(ctx: WriteContext, principal: Principal, directory: Directory, 
 _LIMIT_FIELDS = ("max_parallel", "rpm_limit", "model_tpm_limits")
 
 
-async def _target_group(db, principal: Principal, target) -> int:
-    """The section that handles a request about an initiative / internal system the caller owns."""
+def _scope_context(group) -> dict:
+    """Audit context of a request: an Org System request belongs to no section."""
+    return {} if group is None else {"group_id": group.id, "department_id": group.department_id}
+
+
+async def _target_scope(
+    db, principal: Principal, target
+) -> tuple[str, int, ProductionSystem | None]:
+    """Where a request about an initiative / system the caller owns is handled: (scope kind,
+    scope id, the Org System when the target is one)."""
     row = await db.get(Initiative if target.kind == "initiative" else ProductionSystem, target.id)
     if row is None or row.owner_upn != principal.upn or row.status != "active":
         raise _forbidden()
     if target.kind == "initiative":
-        return row.group_id
+        return "group", row.group_id, None
+    if row.funding == "organization":
+        return "system", row.id, row
     if row.funding != "department" or row.managing_group_id is None:
         raise invalid_request("This system's requests are not routed in WM yet")
-    return row.managing_group_id
+    return "group", row.managing_group_id, None
 
 
 def _limits_of(payload: dict) -> dict:
@@ -211,10 +255,15 @@ async def decide(
     role = await _handler_role(ctx.db, principal, req)
     if role is None:
         raise _forbidden()
-    scope_group = await ctx.db.get(Grp, req.scope_id)
-    if scope_group is not None:  # the shared money lock order: DEPARTMENT before GROUP
-        await ctx.lock(LockKind.DEPARTMENT, scope_group.department_id)
-    await ctx.lock(LockKind.GROUP, req.scope_id)
+    in_system = req.scope_kind == "system"  # an Org System request has no section
+    scope_group = None if in_system else await ctx.db.get(Grp, req.scope_id)
+    if in_system:
+        system = await ctx.db.get(ProductionSystem, req.scope_id)
+        await ctx.lock(LockKind.PRODUCTION, -system.organization_id)
+    else:
+        if scope_group is not None:  # the shared money lock order: DEPARTMENT before GROUP
+            await ctx.lock(LockKind.DEPARTMENT, scope_group.department_id)
+        await ctx.lock(LockKind.GROUP, req.scope_id)
     await ctx.db.refresh(req)
     if scope_group is not None:  # B1c: re-read under the locks; the cached row may be stale
         await ctx.db.refresh(scope_group)
@@ -226,7 +275,7 @@ async def decide(
     allowed = ("forward", "apply", "reject") if req.type == "throughput" else ("approve", "reject")
     if body.decision not in allowed:
         raise invalid_request("This decision does not fit the request type")
-    group = await ctx.db.get(Grp, req.scope_id)
+    group = scope_group
     before = {"status": req.status}
     forwarded_to = None
     if req.type == "throughput":
@@ -235,7 +284,9 @@ async def decide(
         amount = body.amount if body.amount is not None else req.amount
         if amount is None or amount <= 0:
             raise invalid_request("An approved amount is required", {"field": "amount"})
-        if req.type == "credits" and req.payload.get("target"):
+        if in_system:
+            req.status = await _apply_org_system_credits(ctx, principal, req, Decimal(amount))
+        elif req.type == "credits" and req.payload.get("target"):
             req.status = await _apply_target_credits(ctx, principal, req, group, Decimal(amount))
         elif req.type == "credits":
             await _apply_credits(ctx, principal, directory, req, group, Decimal(amount))
@@ -254,7 +305,7 @@ async def decide(
     req.updated_at = func.now()
     ctx.audit(
         "request", req.id, before, {"status": req.status, "amount": req.amount}, role,
-        group_id=group.id, department_id=group.department_id,
+        **_scope_context(group),
     )  # fmt: skip
     if forwarded_to is not None:
         await notifications.notify(
@@ -292,6 +343,15 @@ async def _apply_credits(
         group_id=group.id, department_id=group.department_id,
     )  # fmt: skip
     req.application_write_id = await ctx.enqueue("employee", employee.upn, "/team/member_update")
+
+
+async def _apply_org_system_credits(ctx, principal, req: Request, amount: Decimal) -> str:
+    """D-048: the organization's allocator (or an admin) raises the owner's Org System."""
+    system = await ctx.db.get(ProductionSystem, req.scope_id)
+    if system is None or system.owner_upn != req.requester_upn:
+        raise ApiError(409, "CONFLICT", "The requester no longer owns the target")
+    req.application_write_id = await org_systems.raise_budget(ctx, principal, system.id, amount)
+    return "pending_apply"
 
 
 async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount: Decimal) -> str:

@@ -15,7 +15,7 @@ from app.config import Settings
 from app.directory import Directory
 from app.errors import invalid_request
 from app.models import Notification, NotificationPref
-from app.permissions import ADMIN, AI_TEAM, HEAD, REP
+from app.permissions import ADMIN, AI_TEAM, HEAD, ORG_ALLOCATOR, REP
 from app.services.owners import holders
 from app.writes import plain
 
@@ -92,6 +92,13 @@ async def reps_or_admins(db, directory: Directory, department_id: int | None) ->
     if department_id is None:
         return upns_of(await holders(db, directory, ADMIN, "global", None))
     return upns_of(await holders(db, directory, REP, "department", department_id))
+
+
+async def allocators_or_admins(db, directory: Directory, organization_id: int) -> set[str]:
+    """The organization's allocators (Org System budget requests), or platform admins."""
+    return upns_of(
+        await holders(db, directory, ORG_ALLOCATOR, "organization", organization_id)
+    ) or await reps_or_admins(db, directory, None)
 
 
 async def ai_team_or_admins(db, directory: Directory) -> set[str]:

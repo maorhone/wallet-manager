@@ -169,3 +169,45 @@ async def test_r9_history_excludes_inserted_parent(login_wm, provisioned):
         assert new_id not in [g.id for g in past["groups"]]
         assert past["card"]["allocated"] == base  # not doubled by the inserted parent
         assert now["card"]["allocated"] == base
+
+
+async def _org_system(sf, owner=YAEL, budget=100):
+    from app.models import Organization, ProductionSystem
+
+    async with sf() as s:
+        (await s.get(Organization, 1)).systems_envelope = 100000
+        system = ProductionSystem(
+            funding="organization", organization_id=1, name="Org", budget=budget,
+            litellm_team_id="sys-r9", owner_upn=owner, status="active",
+        )  # fmt: skip
+        s.add(system)
+        await s.commit()
+        return system.id
+
+
+# review-p5-r8 major B1c (requests:148): an Org System owner requests budget and limit changes
+async def test_r9_org_system_owner_requests_credits_and_limits(login_wm, provisioned):
+    from app.models import ProductionSystem, Request
+    from tests.api.test_requests import send as rsend
+    from tests.api.test_requests import submit
+
+    sid = await _org_system(provisioned)
+    target = {"kind": "system", "id": sid}
+    yael, dani, admin = await login_wm("yael"), await login_wm("dani"), await login_wm("admin")
+    foreign = await rsend(
+        dani, "POST", "/requests",
+        {"type": "credits", "amount": 5, "payload": {"need": "x"}, "target": target},
+    )  # fmt: skip
+    assert foreign.status_code == 403, foreign.text
+    rid = await submit(yael, "credits", amount=50, target=target)
+    assert (await rsend(dani, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+            ).status_code == 403  # fmt: skip
+    got = await rsend(admin, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    assert got.status_code == 200, got.text
+    lid = await submit(yael, "throughput", target=target, payload={"need": "x", "max_parallel": 4})
+    done = await rsend(admin, "POST", f"/requests/{lid}/decide", {"decision": "apply"})
+    assert done.status_code == 200, done.text
+    async with provisioned() as s:
+        assert (await s.get(ProductionSystem, sid)).budget == 150
+        assert (await s.get(Request, rid)).status == "pending_apply"
+        assert (await s.get(Request, lid)).status == "applied"

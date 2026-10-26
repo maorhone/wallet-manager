@@ -97,7 +97,9 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         "kpis": {
             "total": w["total"], "allocated": w["allocated"], "used": used,
             "remaining": remaining,
-            "metered_value": await metered_value(db, "group", group_id, s["period"], settings.app_timezone),
+            "metered_value": await metered_value(
+                db, "group", group_id, s["period"], settings.app_timezone
+            ),
         },
         "bar": _bar(used, w["allocated"], w["total"], unused),
         "rows": rows,
