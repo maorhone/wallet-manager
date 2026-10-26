@@ -1036,6 +1036,8 @@ export interface OwnedSystem {
   name: string;
   budget: number;
   owner_upn: string | null;
+  funding?: 'department' | 'organization';
+  department_id?: number | null;
   used?: number; // system-level consumption with historical attribution
 }
 

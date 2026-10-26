@@ -89,10 +89,11 @@ async def move_key(
         raise ApiError(404, "NOT_FOUND", "Service key or Org System not found")
     role = can_manage_org_systems(principal, target.organization_id)
     # Authority comes from the target organization (checked against the source's below); take
-    # the source owner's lock too so a concurrent rotate/revoke cannot interleave.
+    # the source owner's lock too so a concurrent rotate/revoke cannot interleave. Lock order is
+    # organization -> department -> owner (r7 B3), like the envelope and split writes.
     seen = (key.owner_kind, key.owner_id)
-    await owner_lock(ctx, *seen)
     await ctx.lock(LockKind.PRODUCTION, -target.organization_id)
+    await owner_lock(ctx, *seen)
     await ctx.db.refresh(key)
     if (key.owner_kind, key.owner_id) != seen:
         raise invalid_request("Service key changed owner; retry", {"reason": "owner_changed"})

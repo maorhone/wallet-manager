@@ -50,3 +50,44 @@ async def test_r8_window_start_covers_hours_and_multi_month(provisioned):
             raise AssertionError("unreadable window must refuse")
         except SpendUnavailable:
             pass
+
+
+# review-p5-r7 major B2: an owner of a department-funded internal system finds it
+async def test_r8_my_systems_include_department_funded(login_wm, provisioned):
+    from tests.api.test_review_r7 import _owned
+
+    sid, _ = await _owned(provisioned)
+    mine = (await (await login_wm("yael")).get("/systems/mine")).json()["items"]
+    assert [(i["id"], i["funding"]) for i in mine] == [(sid, "department")]
+    assert (await (await login_wm("dani")).get("/systems/mine")).json()["items"] == []
+
+
+# review-p5-r7 major B3: key moves lock organization -> owner (like envelope/split writes)
+async def test_r8_move_key_locks_organization_before_owner(
+    login_wm, provisioned, litellm, prov_settings, monkeypatch
+):
+    from app.writes import WriteContext
+    from tests.api.test_org_systems import envelope, post, system
+
+    await envelope(provisioned)
+    admin = await login_wm("admin")
+    created = await post(admin, "/organizations/1/systems", system(budget=40000))
+    target = int(created.json()["entities"][0]["id"])
+    key = await post(
+        admin, "/service-keys",
+        {"owner_kind": "group", "owner_id": 1, "alias": "bot", "max_budget": 10,
+         "max_parallel": 2, "rpm_limit": 100, "models": ["test-model"]},
+    )  # fmt: skip
+    key_id = int(key.json()["entities"][0]["id"])
+    await drain(provisioned, litellm, prov_settings)
+    order = []
+    real = WriteContext.lock
+
+    async def lock(self, kind, id):
+        order.append(kind.name)
+        await real(self, kind, id)
+
+    monkeypatch.setattr(WriteContext, "lock", lock)
+    r = await post(admin, f"/service-keys/{key_id}/move", {"target_system_id": target})
+    assert r.status_code == 200, r.text
+    assert order.index("PRODUCTION") < order.index("GROUP"), order

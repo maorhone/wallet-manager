@@ -290,12 +290,11 @@ async def get_production(
 
 
 async def list_owned_systems(db: AsyncSession, principal: Principal, period: str) -> dict:
-    """Org Systems whose view-only owner is the caller (D-048/D-063)."""
+    """Systems (organization- or department-funded) whose owner is the caller (D-048/D-063)."""
     query = (
         select(ProductionSystem)
         .where(
             ProductionSystem.owner_upn == principal.upn,
-            ProductionSystem.funding == "organization",
             ProductionSystem.status == "active",
         )
         .order_by(ProductionSystem.id)
@@ -304,6 +303,7 @@ async def list_owned_systems(db: AsyncSession, principal: Principal, period: str
     return {
         "items": [
             {"id": s.id, "name": s.name, "budget": s.budget, "owner_upn": s.owner_upn,
+             "funding": s.funding, "department_id": s.department_id,
              "used": spend.used("system", s.id)}
             for s in await db.scalars(query)
         ]
