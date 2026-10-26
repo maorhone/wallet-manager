@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useBulkAllocation, useBulkPreview, type BudgetRow } from '../../api/queries';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
+import { apiPost } from '../../api/client';
+import type { WriteResponse } from '../../api/types';
 import { Drawer } from '../components/Drawer';
+import { WriteOutcome } from '../components/WriteOutcome';
 
 const s = he.v2.bulk;
 
@@ -46,8 +49,22 @@ export function BulkAllocation({
   const p = fresh && !preview.isPending ? preview.data : undefined;
   return (
     <Drawer opened onClose={onClose} title={s.title}>
-      {commit.isSuccess ? (
-        <p role="status">{s.done}</p>
+      {commit.isSuccess && commit.variables ? (
+        <WriteOutcome
+          result={commit.data}
+          done={s.done}
+          replay={() => {
+            const v = commit.variables;
+            return apiPost<WriteResponse>(
+              `/groups/${v.groupId ?? groupId}/bulk-allocation`,
+              v.body,
+              {
+                reason: v.reason,
+                idempotencyKey: v.key,
+              },
+            );
+          }}
+        />
       ) : (
         <form
           onSubmit={(e) => {

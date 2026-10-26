@@ -8,6 +8,8 @@ import {
 import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
+import type { WriteResponse } from '../../api/types';
+import { WriteOutcome } from '../components/WriteOutcome';
 import { KpiCard } from '../components/KpiCard';
 
 const s = he.v2.orgAlloc;
@@ -25,6 +27,10 @@ function Table({
 }) {
   const allocate = useOrgAllocate(orgId);
   const [edit, setEdit] = useState<Record<number, string>>({});
+  // Every saved write keeps showing whether LiteLLM enforces it yet (D-071).
+  const [outcomes, setOutcomes] = useState<
+    { name: string; result: WriteResponse; replay: () => Promise<WriteResponse> }[]
+  >([]);
   if (!rows.length) return <p className="v2-muted">{s.none}</p>;
   return (
     <>
@@ -69,12 +75,14 @@ function Table({
                       },
                       {
                         // Reconcile: after a persisted write the server value replaces the draft.
-                        onSuccess: () =>
+                        onSuccess: ({ result, replay }) => {
+                          setOutcomes((o) => [...o, { name: r.name, result, replay }]);
                           setEdit((d) =>
                             Object.fromEntries(
                               Object.entries(d).filter(([k]) => k !== String(r.id)),
                             ),
-                          ),
+                          );
+                        },
                       },
                     )
                   }
@@ -86,6 +94,12 @@ function Table({
           ))}
         </tbody>
       </table>
+      {outcomes.map((o) => (
+        <div key={o.result.request_id}>
+          <strong>{o.name}</strong>
+          <WriteOutcome result={o.result} replay={o.replay} done={he.v2.writeOutcome.applied} />
+        </div>
+      ))}
     </>
   );
 }

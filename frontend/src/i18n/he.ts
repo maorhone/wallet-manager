@@ -118,6 +118,11 @@ export const he = {
       create: 'יצירה',
       none: 'אין מערכות ארגוניות.',
     },
+    writeOutcome: {
+      applied: 'השינוי נשמר ונאכף ב-LiteLLM.',
+      pending: 'השינוי נשמר וממתין לאכיפה ב-LiteLLM.',
+      failed: 'השינוי נשמר אך לא נאכף ב-LiteLLM. פנו למנהל המערכת.',
+    },
     bulk: {
       title: 'הקצאה קבוצתית',
       amount: 'סכום אחיד לכל החברים',

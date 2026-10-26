@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Initiative from './Initiative';
 
+window.matchMedia ??= ((q: string) => ({
+  matches: false,
+  media: q,
+  addEventListener() {},
+  removeEventListener() {},
+})) as unknown as typeof window.matchMedia;
+
+let managed: Record<string, unknown> = { isPending: false, data: { systems: { rows: [] } } };
+const refetch = vi.fn();
 vi.mock('../../api/queries', () => ({
   useMyInitiatives: () => ({
     isPending: false,
@@ -36,12 +46,29 @@ vi.mock('../../api/queries', () => ({
       spend_taken_at: null,
     },
   }),
-  useOrgEnvelopes: () => ({ isPending: false, data: { systems: { rows: [] } } }),
+  useOrgEnvelopes: () => managed,
   useMoveKey: () => ({ mutate: vi.fn(), isPending: false, isSuccess: false }),
 }));
 
 describe('Initiative', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    managed = { isPending: false, data: { systems: { rows: [] } } };
+  });
+  // review-p5-r7 major F1: an unavailable managed inventory is not an empty one
+  it('shows an error with retry when the managed inventory fails to load', () => {
+    managed = { isPending: false, error: new Error('boom'), data: undefined, refetch };
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <Initiative canMove />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.queryByText('bot')).toBeNull();
+    fireEvent.click(screen.getByRole('button'));
+    expect(refetch).toHaveBeenCalled();
+  });
   it('shows budget, consumption, balance and the key alias read-only', () => {
     render(
       <MemoryRouter>

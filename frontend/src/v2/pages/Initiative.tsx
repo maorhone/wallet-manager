@@ -24,6 +24,9 @@ export default function Initiative({
     return <p role="status">{he.loading}</p>;
   if (list.error || !list.data) return <ErrorState error={list.error} onRetry={list.refetch} />;
   if (owned.error || !owned.data) return <ErrorState error={owned.error} onRetry={owned.refetch} />;
+  // An unavailable inventory is not an empty one: say so and offer a retry.
+  if (canMove && (managed.error || !managed.data))
+    return <ErrorState error={managed.error} onRetry={managed.refetch} />;
   // Initiatives and systems have independent ids: the identity is kind + id.
   const systems = new Map<
     number,

@@ -938,7 +938,7 @@ export const useBulkAllocation = (groupId: number) => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { body: BulkBody; reason: string; key: string; groupId?: number }) =>
-      apiPost(`/groups/${v.groupId ?? groupId}/bulk-allocation`, v.body, {
+      apiPost<WriteResponse>(`/groups/${v.groupId ?? groupId}/bulk-allocation`, v.body, {
         reason: v.reason,
         idempotencyKey: v.key,
       }),
@@ -1093,16 +1093,22 @@ export const useOrgAllocate = (orgId: number) => {
       budget: number;
       budgetPeriod?: string;
       reason: string;
-    }) =>
-      apiPut<WriteResponse>(
+    }) => {
+      const path =
         v.kind === 'department'
           ? `/organizations/${orgId}/departments/${v.id}/budget`
-          : `/organizations/${orgId}/systems/${v.id}/budget`,
+          : `/organizations/${orgId}/systems/${v.id}/budget`;
+      const body =
         v.kind === 'department'
           ? { budget: v.budget, budget_period: v.budgetPeriod ?? '1mo' }
-          : { budget: v.budget },
-        { reason: v.reason, idempotencyKey: crypto.randomUUID() },
-      ),
+          : { budget: v.budget };
+      const write = { reason: v.reason, idempotencyKey: crypto.randomUUID() };
+      // The key is kept so the same write can be replayed to read its synchronization state.
+      return apiPut<WriteResponse>(path, body, write).then((result) => ({
+        result,
+        replay: () => apiPut<WriteResponse>(path, body, write),
+      }));
+    },
     onSuccess: () => qc.invalidateQueries(),
   });
 };
