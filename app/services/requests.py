@@ -216,6 +216,8 @@ async def decide(
         await ctx.lock(LockKind.DEPARTMENT, scope_group.department_id)
     await ctx.lock(LockKind.GROUP, req.scope_id)
     await ctx.db.refresh(req)
+    if scope_group is not None:  # B1c: re-read under the locks; the cached row may be stale
+        await ctx.db.refresh(scope_group)
     role = await _handler_role(ctx.db, principal, req)
     if role is None:
         raise _forbidden()
