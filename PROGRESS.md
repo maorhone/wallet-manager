@@ -1104,3 +1104,13 @@ fix-review-p5-r6 OPEN-ITEMS lines (OPEN-ITEMS.md edit was denied as a sensitive 
 
 ## fix-review-p5-r6b (21 frontend majors)
 Groups: (A) requests: decide hook limits + polling pending_apply, stable idempotency keys (Personal, org create), optional numbers, no target on new initiative, submit errors, 1000-char limit, reset after success, target/name/limits shown to handlers; (B) navigation: allocators get Systems (+ org Systems inventory), org selector (?org=), inherited group/department drill-down + row links; (C) SystemDetail: system-level `used` from /systems/mine + envelopes, per-key move selector (active keys only); (D) budget screens: shared BudgetKpis (D-054), read-only gating on actions.edit_members, bulk multi-exceptions, transfer status polling; (E) Personal telemetry loading/unavailable/empty states. Done: 21/21 in code (see OPEN-ITEMS for conservative choices). Targeted run 1 green (vitest v2+api, 17 pytest). e2e not run.
+
+## fix-review-p5-r7 (4 blockers + 11 backend majors)
+Groups (shared root cause -> one fix):
+1. Money core: fresh spend reads the longest configured budget window (B1a2); aggregate destination write retires sibling destination writes so every published receipt settles (B1a1); transfers that would close a pending cycle are refused (`dependency_cycle`); retired key reservations backfilled for non-initiative keys, migration 0017 (B1b); request decisions refresh the group after the allocation locks (B1c).
+2. Live checks: over-allocation carve-out uses live LiteLLM team budgets (`reader.team_budgets`); targeted throughput decisions need limits and record them as `applied_limits`.
+3. Authz: internal-system owner reads keys; advertised key actions come from `can_manage_service_keys`.
+4. History: `views._parent_map` / `_internal_as_of` rebuild hierarchy and internal-system carve at the cutoff (roots, children, descendants, wallet card).
+5. Overview: child rows carry their subtree; `_bar` reconciles used + allocated_unused + unallocated = total; moved initiative keys keep usage up to the move period.
+6. Rate card: metered value uses the rate history of the consumption month.
+Tests: tests/api/test_review_r7.py (+ overallocation, rate card, schema migration).
