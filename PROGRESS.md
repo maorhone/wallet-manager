@@ -1088,3 +1088,6 @@ fix-review-p5-r3 OPEN-ITEMS lines (OPEN-ITEMS.md edit was denied as a sensitive 
 - NEEDS-MAOR not routed through app/services/transfers.py: members.set_caps, initiative/system budget edits, group split still write balances under their own DEPARTMENT/GROUP locks. Regression tests were written together with the fix, not shown failing first.
 fix-review-p5-r3 (25/10): done: 12 blockers (transfer lifecycle state + locks + settle, dept floor, bulk below-consumed, system reserve, group key limits, stable transfer key, change-request target); next: full run, then external re-review. Blockers: none known. e2e not run until the full run.
 Done: blocker 13 (kind:id transfer endpoints), preview-bound confirm (transfer+bulk), OrgAllocation keyed tabs/errors/period kept, approved-amount input, per-move idempotency key, systems workspace (GET /systems/mine), move pending/applied message, submit-request key reuse, `/` -> `/v2`. Next: full run. Blockers: none.
+
+## fix-review-p5-r5
+Done: 10 blockers via settled_budget rule + complete system commitments; tests/api/test_review_r5.py; BulkAllocation bound to group. Targeted + related suites green; full-suite run in phase-end mode is targeted-only.
