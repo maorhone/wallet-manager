@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.models import (
+    AuditLog,
     Department,
     Employee,
     Grp,
@@ -65,12 +66,16 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     for ini in await db.scalars(
         select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
     ):
-        # No initiative snapshot scope exists: sum its keys (revoked/rotated generations included).
-        key_ids = await db.scalars(
-            select(ServiceKey.id).where(
-                ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == ini.id
-            )
-        )
+        # No initiative snapshot scope exists: sum its keys (revoked/rotated generations
+        # included, and keys moved to a system for the periods up to the move, r6 B3).
+        key_ids = [
+            *await db.scalars(
+                select(ServiceKey.id).where(
+                    ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == ini.id
+                )
+            ),
+            *await _moved_key_ids(db, ini.id, s["period"]),
+        ]
         used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
         rows.append(
             {"kind": "initiative", "id": str(ini.id), "name": ini.name, "total": ini.budget,
@@ -90,6 +95,21 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         "rows": rows,
         "actions": s["actions"],
     }  # fmt: skip
+
+
+async def _moved_key_ids(db, initiative_id: int, period: str) -> list[int]:
+    """Keys moved out of the initiative whose move happened in ``period`` or later."""
+    ids = []
+    for a in await db.scalars(
+        select(AuditLog).where(
+            AuditLog.entity == "service_key",
+            AuditLog.before["owner_kind"].as_string() == "initiative",
+            AuditLog.before["owner_id"].as_string() == str(initiative_id),
+        )
+    ):
+        if a.after and a.after.get("owner_kind") == "system" and a.at.strftime("%Y-%m") >= period:
+            ids.append(int(a.entity_id))
+    return ids
 
 
 def _bar(used: Decimal, allocated: Decimal, total: Decimal) -> dict:

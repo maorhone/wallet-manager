@@ -278,3 +278,31 @@ async def test_r7_child_row_includes_descendants(login_wm, provisioned):
     r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
     row = next(x for x in r.json()["rows"] if x["id"] == str(bid))
     assert row["used"] == 7
+
+
+# review-p5-r6 major B3: moving an initiative key keeps its usage attributed to the initiative
+async def test_r7_moved_initiative_key_keeps_usage(login_wm, provisioned):
+    from app.models import SpendSnapshot
+
+    sid, iid = await _owned(provisioned)
+    period = datetime.now(UTC).strftime("%Y-%m")
+    async with provisioned() as s:
+        from app.models import ServiceKey
+
+        key = ServiceKey(owner_kind="system", owner_id=sid, max_budget=1, status="active")
+        s.add(key)
+        await s.flush()
+        await _audit(
+            s, "service_key", key.id, {"owner_kind": "initiative", "owner_id": iid},
+            {"owner_kind": "system", "owner_id": sid}, datetime.now(UTC),
+        )  # fmt: skip
+        s.add(
+            SpendSnapshot(
+                scope_kind="service_key", scope_id=str(key.id), period=period, model=None,
+                spend=9,
+            )
+        )
+        await s.commit()
+    r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
+    row = next(x for x in r.json()["rows"] if x["kind"] == "initiative" and x["id"] == str(iid))
+    assert row["used"] == 9
