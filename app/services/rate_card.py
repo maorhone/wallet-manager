@@ -1,6 +1,6 @@
 """Rate card (SoT D-049/D-054): metered usage value = tokens x rate per model, never a debit."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -50,43 +50,61 @@ async def set_rates(ctx: WriteContext, principal: Principal, body: RateCardIn) -
     return entities
 
 
-async def _rates_as_of(db, period: str) -> dict:
-    """Rates that applied at the end of ``period`` (D-049: priced by the consumption date).
+async def _rates_at(db, current: dict, at: datetime) -> dict:
+    """Rates in force at ``at`` (D-049: priced by the consumption date), from the audited history.
 
-    A past month reads the audited rate history, so a later price change never rewrites it.
-    The first price ever set also covers earlier months (the card is set up after usage began)."""
-    rates = {r.model: r for r in await db.scalars(select(RateCard))}
-    end = month_bounds(period[:7], UTC)[1]
-    if end > datetime.now(UTC):
-        return rates
+    The first price ever set also covers earlier usage (the card is set up after usage began)."""
     past = await values_as_of(
         db, "rate_card",
         {m: {"input_per_1m": r.input_per_1m, "output_per_1m": r.output_per_1m}
-         for m, r in rates.items()},
-        end,
+         for m, r in current.items()},
+        at,
     )  # fmt: skip
     return {m: SimpleNamespace(**v) for m, v in past.items()}
 
 
-async def metered_value(db, scope_kind: str, scope_id, period: str) -> Decimal | None:
-    """Value of the scope's tokens at the rate card; ``None`` if a consumed model has no rate."""
-    rows = await db.scalars(
-        select(SpendSnapshot).where(
-            SpendSnapshot.scope_kind == scope_kind,
-            SpendSnapshot.scope_id == str(scope_id),
-            SpendSnapshot.period == period,
-            SpendSnapshot.model.is_not(None),
-        )
-    )
-    rates = await _rates_as_of(db, period)
+def _value(rows, rates) -> Decimal | None:
+    """Tokens x rate; ``None`` when token usage has no model mapping or no rate (D-049)."""
     total = Decimal(0)
     for r in rows:
         if not (r.prompt_tokens or r.completion_tokens):
             continue
-        rate = rates.get(r.model)
+        rate = rates.get(r.model) if r.model is not None else None
         if rate is None:
             return None
         total += (
             r.prompt_tokens * rate.input_per_1m + r.completion_tokens * rate.output_per_1m
         ) / 1_000_000
+    return total
+
+
+async def metered_value(db, scope_kind: str, scope_id, period: str) -> Decimal | None:
+    """Value of the scope's tokens at the rate card; ``None`` if consumed tokens cannot be priced.
+
+    Each day is valued at the rates of that day, so a mid-month price change splits the month;
+    a month without day rows is valued at its month-end rates."""
+    rows = list(
+        await db.scalars(
+            select(SpendSnapshot).where(
+                SpendSnapshot.scope_kind == scope_kind,
+                SpendSnapshot.scope_id == str(scope_id),
+                SpendSnapshot.period.like(f"{period}%"),
+            )
+        )
+    )
+    current = {r.model: r for r in await db.scalars(select(RateCard))}
+    by_day: dict[str, list] = {}
+    for r in rows:
+        if len(r.period) > 7:
+            by_day.setdefault(r.period, []).append(r)
+    if not by_day:
+        end = month_bounds(period[:7], UTC)[1]
+        return _value([r for r in rows if r.period == period], await _rates_at(db, current, end))
+    total = Decimal(0)
+    for day, day_rows in by_day.items():
+        end = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC) + timedelta(days=1)
+        value = _value(day_rows, await _rates_at(db, current, end))
+        if value is None:
+            return None
+        total += value
     return total

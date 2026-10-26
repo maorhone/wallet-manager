@@ -231,3 +231,48 @@ async def test_r8_initiative_usage_stops_at_the_move(login_wm, provisioned):
     r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
     row = next(x for x in r.json()["rows"] if x["kind"] == "initiative" and x["id"] == str(iid))
     assert row["used"] == 9
+
+
+async def _tokens(s, day_or_month, model, prompt, scope="group", sid="1"):
+    from app.models import SpendSnapshot
+
+    s.add(SpendSnapshot(scope_kind=scope, scope_id=sid, period=day_or_month, model=model,
+                        spend=0, prompt_tokens=prompt, completion_tokens=0))  # fmt: skip
+
+
+# review-p5-r7 major B3: a mid-month price change values each side at its own rate
+async def test_r8_metered_value_uses_rate_at_consumption_date(provisioned):
+    from decimal import Decimal
+
+    from app.models import RateCard
+    from app.services.rate_card import metered_value
+
+    start = _months_ago(1)
+    month = start.strftime("%Y-%m")
+    async with provisioned() as s:
+        s.add(RateCard(model="gpt-4", input_per_1m=20, output_per_1m=0))
+        await _audit(s, "rate_card", "gpt-4", None, {"input_per_1m": 10, "output_per_1m": 0},
+                     start.replace(day=1))  # fmt: skip
+        await _audit(s, "rate_card", "gpt-4", {"input_per_1m": 10, "output_per_1m": 0},
+                     {"input_per_1m": 20, "output_per_1m": 0}, start.replace(day=16))  # fmt: skip
+        for day in ("10", "20"):
+            await _tokens(s, f"{month}-{day}", "gpt-4", 1_000_000)
+        await _tokens(s, month, "gpt-4", 2_000_000)
+        await s.commit()
+        assert await metered_value(s, "group", 1, month) == Decimal(30)
+
+
+# review-p5-r7 major B3: token usage with no model mapping has no verifiable value
+async def test_r8_metered_value_unavailable_for_unmapped_tokens(provisioned):
+    from app.models import RateCard
+    from app.services.rate_card import metered_value
+
+    month = _months_ago(1).strftime("%Y-%m")
+    async with provisioned() as s:
+        s.add(RateCard(model="gpt-4", input_per_1m=10, output_per_1m=0))
+        await _tokens(s, month, None, 500, sid="7")
+        await _tokens(s, month, None, 500, sid="8")
+        await _tokens(s, month, "gpt-4", 500, sid="8")
+        await s.commit()
+        assert await metered_value(s, "group", 7, month) is None
+        assert await metered_value(s, "group", 8, month) is None
