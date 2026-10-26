@@ -36,9 +36,7 @@ async def test_r7_transfer_reads_active_multi_month_window(login_wm, provisioned
 
 
 # review-p5-r6 blocker B1c: approval re-reads the group budget under the allocation locks
-async def test_r7_approval_refreshes_group_after_locks(
-    login_wm, provisioned, monkeypatch
-):
+async def test_r7_approval_refreshes_group_after_locks(login_wm, provisioned, monkeypatch):
     from app.models import Grp
     from app.writes import WriteContext
     from tests.api.test_requests import submit
@@ -88,8 +86,6 @@ async def test_r7_aggregate_destination_write_settles_siblings(
 async def test_r7_reciprocal_transfer_refused(login_wm, provisioned):
     head = await login_wm("dana")
     assert (await send(head, "POST", "/transfers", move(20))).status_code == 200
-    r = await send(
-        head, "POST", "/transfers", move(20, "yael@corp.example", "dani@corp.example")
-    )
+    r = await send(head, "POST", "/transfers", move(20, "yael@corp.example", "dani@corp.example"))
     assert r.status_code == 422, r.text
     assert r.json()["details"]["reason"] == "dependency_cycle"

@@ -9,7 +9,16 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Department, Employee, Grp, Organization, LitellmWrite, ProductionSystem, ServiceKey, SpendSnapshot
+from app.models import (
+    Department,
+    Employee,
+    Grp,
+    LitellmWrite,
+    Organization,
+    ProductionSystem,
+    ServiceKey,
+    SpendSnapshot,
+)
 
 log = logging.getLogger(__name__)
 
@@ -85,10 +94,12 @@ async def _window_start(db, now: datetime) -> datetime:
     shorter window is the safe direction).
     """
     periods = set()
-    for model in (Organization, Department):
-        cols = [model.budget_period] + ([Department.prod_budget_period] if model is Department else [])
-        for col in cols:
-            periods.update(await db.scalars(select(col)))
+    for col in (
+        Organization.budget_period,
+        Department.budget_period,
+        Department.prod_budget_period,
+    ):
+        periods.update(await db.scalars(select(col)))
     months, days = 1, 0
     for p in periods:
         m = re.fullmatch(r"(\d+)(s|m|h|d|mo)", p or "")
