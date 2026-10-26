@@ -21,11 +21,13 @@ from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
 from app.services.spend import SpendUnavailable
 from app.services.transfers import (
+    apply_holdback,
     compensate_failed_source,
     fence_release,
     held_by_incoming,
     lock_for_write,
     settle,
+    source_holdback,
 )
 
 _METHODS = {
@@ -163,6 +165,7 @@ async def drain(
                     body = _FROZEN[row.endpoint](**row.payload)
                 else:
                     body = await build(s, settings, row.entity, row.endpoint, row.entity_id)
+                    body = apply_holdback(body, await source_holdback(s, row))
                     row.payload = body.payload()
                 await _apply(client, s, row, body)
                 row.status, row.last_error = "applied", None

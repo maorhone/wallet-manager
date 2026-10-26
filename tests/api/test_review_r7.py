@@ -82,13 +82,20 @@ async def test_r7_aggregate_destination_write_settles_siblings(
     assert states == ["applied", "applied"]
 
 
-# review-p5-r6 major B1a1: reciprocal pending transfers would wait on each other forever
-async def test_r7_reciprocal_transfer_refused(login_wm, provisioned):
+# review-p5-r6 major B1a1: reciprocal pending transfers must not wait on each other forever
+async def test_r7_reciprocal_transfers_settle(login_wm, provisioned, litellm, prov_settings):
+    from app.models import Transfer
+    from app.outbox.worker import drain
+
     head = await login_wm("dana")
     assert (await send(head, "POST", "/transfers", move(20))).status_code == 200
-    r = await send(head, "POST", "/transfers", move(20, "yael@corp.example", "dani@corp.example"))
-    assert r.status_code == 422, r.text
-    assert r.json()["details"]["reason"] == "dependency_cycle"
+    back = move(20, "yael@corp.example", "dani@corp.example")
+    assert (await send(head, "POST", "/transfers", back)).status_code == 200
+    for _ in range(3):
+        await drain(provisioned, litellm, prov_settings)
+    async with provisioned() as s:
+        states = [t.state for t in await s.scalars(select(Transfer).order_by(Transfer.id))]
+    assert states == ["applied", "applied"]
 
 
 # review-p5-r6 major B1c: a targeted throughput decision needs and records the limits

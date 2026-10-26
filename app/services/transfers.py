@@ -23,7 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import all_, any_, exists, literal, or_, select, tuple_, update
+from sqlalchemy import all_, any_, exists, func, literal, or_, select, update
 
 from app.db import LockKind, lock_parent
 from app.errors import ApiError, invalid_request
@@ -220,11 +220,6 @@ async def _plan(
     target = await _side(ctx.db, spend, group, body.target)
     if (source.kind, source.id) == (target.kind, target.id):
         raise invalid_request("Source and target are the same", {"reason": "same_entity"})
-    if await _closes_cycle(ctx.db, group, source, target):
-        raise invalid_request(
-            "A pending transfer already moves credit back toward the source; wait for it to apply",
-            {"reason": "dependency_cycle"},
-        )
     for side in (source, target):  # unsettled incoming credit cannot move on, whatever the kind
         if side.kind != "system":  # system_committed already includes it
             side.committed += await pending_incoming(ctx.db, side.kind, side.id)
@@ -238,25 +233,6 @@ async def _plan(
             {"reason": "exceeds_unused", "unused": source.unused},
         )
     return group, role, source, target
-
-
-async def _closes_cycle(db, group: Grp, source: Side, target: Side) -> bool:
-    """B1a1: pending transfers hold a source's reduction while credit is incoming, so a loop of
-    pending transfers (A->B, B->A) would wait on itself forever. Refuse the closing edge."""
-    seen, frontier = set(), {(target.kind, target.id)}
-    while frontier:
-        seen |= frontier
-        edges = await db.execute(
-            select(Transfer.target_kind, Transfer.target_id).where(
-                Transfer.group_id == group.id,
-                Transfer.state == "pending",
-                tuple_(Transfer.source_kind, Transfer.source_id).in_(frontier),
-            )
-        )
-        frontier = {(k, i) for k, i in edges} - seen
-        if (source.kind, source.id) in frontier:
-            return True
-    return False
 
 
 async def preview(
@@ -488,6 +464,36 @@ async def _release_cancelled(db, settings, transfer: Transfer) -> None:
     )  # fmt: skip
 
 
+async def _is_source_write(db, row: LitellmWrite) -> bool:
+    q = select(Transfer.id).where(Transfer.first_write_id == row.id).limit(1)
+    return await db.scalar(q) is not None
+
+
+async def source_holdback(db, row: LitellmWrite) -> Decimal:
+    """B1a1: a source reduction never waits for incoming credit (that would let reciprocal
+    transfers wait on each other forever); instead its payload leaves the unsettled incoming
+    credit out, so nothing unsettled is published through it. Zero for any other write."""
+    if not await _is_source_write(db, row):
+        return ZERO
+    kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
+    return await db.scalar(
+        select(func.coalesce(func.sum(Transfer.amount), 0)).where(
+            Transfer.target_kind.in_(kinds),
+            Transfer.target_id == row.entity_id,
+            Transfer.state.in_(("pending", "failed")),
+        )
+    )
+
+
+def apply_holdback(body, hold: Decimal):
+    """Take ``hold`` out of the body's own budget field (member cap or team budget)."""
+    field = "max_budget_in_team" if hasattr(body, "max_budget_in_team") else "max_budget"
+    value = getattr(body, field, None)
+    if not hold or value is None:
+        return body
+    return body.model_copy(update={field: float(Decimal(str(value)) - hold)})
+
+
 async def held_by_incoming(db, row: LitellmWrite) -> bool:
     """A rebuilt write would publish credit whose source reduction is not applied yet (r3 B1).
 
@@ -495,6 +501,8 @@ async def held_by_incoming(db, row: LitellmWrite) -> bool:
     transfer is ``applied`` (source applied AND fence passed), so no older write can carry the
     incoming credit upstream past an unreadable or failed fence (r5 B1a1).
     """
+    if await _is_source_write(db, row):
+        return False  # its payload excludes unsettled incoming credit (source_holdback)
     kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
     # The write is the destination write of one of those transfers: it may follow its siblings'
     # source reductions (no circular wait between receipts), the fence covers their credit.

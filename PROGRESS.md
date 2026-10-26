@@ -1107,7 +1107,7 @@ Groups: (A) requests: decide hook limits + polling pending_apply, stable idempot
 
 ## fix-review-p5-r7 (4 blockers + 11 backend majors)
 Groups (shared root cause -> one fix):
-1. Money core: fresh spend reads the longest configured budget window (B1a2); aggregate destination write retires sibling destination writes so every published receipt settles (B1a1); transfers that would close a pending cycle are refused (`dependency_cycle`); retired key reservations backfilled for non-initiative keys, migration 0017 (B1b); request decisions refresh the group after the allocation locks (B1c).
+1. Money core: fresh spend reads the longest configured budget window (B1a2); aggregate destination write retires sibling destination writes so every published receipt settles (B1a1); transfers that would close a pending cycle are no longer deadlock (source reductions are never held by incoming credit; their payload excludes it); retired key reservations backfilled for non-initiative keys, migration 0017 (B1b); request decisions refresh the group after the allocation locks (B1c).
 2. Live checks: over-allocation carve-out uses live LiteLLM team budgets (`reader.team_budgets`); targeted throughput decisions need limits and record them as `applied_limits`.
 3. Authz: internal-system owner reads keys; advertised key actions come from `can_manage_service_keys`.
 4. History: `views._parent_map` / `_internal_as_of` rebuild hierarchy and internal-system carve at the cutoff (roots, children, descendants, wallet card).
