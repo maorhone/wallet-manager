@@ -193,6 +193,13 @@ class LiteLLMReader:
             for r in await self._rows(_ORG_ALLOCATIONS)
         ]
 
+    async def team_budgets(self) -> dict[str, Decimal]:
+        """Live ``max_budget`` per team id (teams without a budget count as zero)."""
+        return {
+            r[0]: _dec(r[1])
+            for r in await self._rows('SELECT team_id, max_budget FROM "LiteLLM_TeamTable"')
+        }
+
     async def overallocated_teams(self) -> list[OverallocatedTeam]:
         return [
             OverallocatedTeam(r[0], r[1], _dec(r[2]), _dec(r[3]))

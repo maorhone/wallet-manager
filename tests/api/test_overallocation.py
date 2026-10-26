@@ -77,3 +77,20 @@ async def test_scope_filtering(login_wm, provisioned):
     assert seen == {"admin": {1, 2}, "rep": {1}, "viewer": {1}}
     for who in ("dana", "pmo"):
         assert (await (await login_wm(who)).get("/reports/overallocation")).status_code == 403
+
+
+# review-p5-r6 major B1b: the nested-group adjustment uses live budgets, not WM's
+async def test_r7_live_child_budget_not_wm_value(login_wm, provisioned, litellm):
+    async with provisioned() as s:
+        s.add(
+            Grp(
+                litellm_team_id="A1-ghost", department_id=1, name="ghost", base_budget=100000,
+                default_member_cap=0, status="active", parent_group_id=1,
+            )
+        )  # fmt: skip
+        await s.commit()
+    await litellm.team_update(TeamUpdate(team_id="A2", max_budget=340000))  # live sum 960000
+    [f] = await _report(await login_wm("admin"))
+    assert (f["source"], f["level"], f["allocated"], f["total"]) == (
+        "litellm", "department", 960000, 950000
+    )  # fmt: skip

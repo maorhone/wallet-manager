@@ -44,6 +44,7 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
         return []
     try:
         orgs, teams = await reader.org_allocations(), await reader.overallocated_teams()
+        live_budget = await reader.team_budgets()
     except Exception:
         log.warning("over-allocation check: LiteLLM database unreachable; WM checks only")
         return []
@@ -53,7 +54,9 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
     parents = {g.id for g in groups}
     for g in groups:
         if g.parent_group_id in parents and g.status != "archived":
-            carved[g.department_id] += g.base_budget  # D-055: child teams are carved from a parent
+            # D-055: child teams are carved from a parent. WM only names the hierarchy; the
+            # amount is the child's live LiteLLM budget (a drifted WM value must not mask it).
+            carved[g.department_id] += live_budget.get(g.litellm_team_id, ZERO)
     out = []
     for o in orgs:
         d = by_org.get(o.organization_id)
