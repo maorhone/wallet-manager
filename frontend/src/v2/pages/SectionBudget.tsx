@@ -5,6 +5,7 @@ import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
 import { AttentionList, type AttentionItem } from '../components/AttentionList';
+import { BlockSummary } from '../components/BlockSummary';
 import { DistributionBar } from '../components/DistributionBar';
 import { BudgetKpis } from '../components/BudgetKpis';
 import { BulkAllocation } from './BulkAllocation';
@@ -58,7 +59,13 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
         assignedUnused={bar.allocated_unused}
         unallocated={bar.unallocated}
       />
+      <p>
+        {s.periodCompare}: <bdi dir="ltr">{overview.data.previous_period.period}</bdi>{' '}
+        {credits(overview.data.previous_period.used)} → <bdi dir="ltr">{period}</bdi>{' '}
+        {credits(kpis.used)}
+      </p>
       <AttentionList items={items} />
+      <BlockSummary scope="group" id={groupId} period={period} />
       <section className="v2-card">
         <h2>{s.rows}</h2>
         {canWrite && (

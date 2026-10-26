@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Department from './Department';
 
 window.matchMedia ??= ((q: string) => ({
@@ -19,7 +19,7 @@ vi.mock('../../api/queries', () => ({
     data: {
       period: '2026-10',
       department: 'D',
-      kpis: { total: 1000, allocated: 600, used: 100, remaining: 900 },
+      kpis: { total: 1000, allocated: 600, used: 100, remaining: 900, metered_value: 42 },
       bar: { used: 100, allocated_unused: 500, unallocated: 400, total: 1000 },
       previous_period: { period: '2026-09', used: 50 },
       sections: [
@@ -40,10 +40,19 @@ vi.mock('../../api/queries', () => ({
       actions: { edit_hierarchy: true },
     },
   }),
+  useBlockSummary: () => ({
+    isPending: false,
+    data: {
+      by_reason: [{ reason: 'SERVICE_ERROR', sub: null, count: 3 }],
+      by_consumer: [],
+      truncated: false,
+    },
+  }),
   useHierarchyChange: () => ({ mutate, reset: vi.fn() }),
 }));
 
 describe('Department', () => {
+  afterEach(cleanup);
   it('compares sections, keeps org systems separate and adds a group above', () => {
     render(
       <MantineProvider>
@@ -64,5 +73,41 @@ describe('Department', () => {
     expect(screen.getByText('פנימית')).toBeTruthy();
     expect(screen.getByText('ארגונית')).toBeTruthy();
     expect(screen.getByText('מערכות ארגוניות אינן נכללות בסכומי המחלקה.')).toBeTruthy();
+  });
+
+  // review-p5-r10 major F1: metered usage and block reasons are shown to the department head
+  it('shows the metered value and the scoped block summary', () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <Department departmentId="1" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText(/שווי שימוש מחושב/)).toBeTruthy();
+    expect(screen.getByText('תקלת שירות')).toBeTruthy();
+  });
+
+  // review-p5-r10 major F1: an edited resubmission after a lost response gets a new key
+  it('reuses the key for an unchanged retry and renews it when the name was edited', () => {
+    mutate.mockClear();
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <Department departmentId="1" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'הוסף קבוצה מעל: מדור א' }));
+    const name = screen.getByLabelText('שם הקבוצה החדשה');
+    fireEvent.change(name, { target: { value: 'א' } });
+    fireEvent.change(screen.getByLabelText('סיבת השינוי'), { target: { value: 'ארגון' } });
+    fireEvent.submit(name.closest('form')!);
+    fireEvent.submit(name.closest('form')!);
+    fireEvent.change(name, { target: { value: 'ב' } });
+    fireEvent.submit(name.closest('form')!);
+    const keys = mutate.mock.calls.map((c) => c[0].key);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
   });
 });

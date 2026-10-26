@@ -64,3 +64,19 @@ async def test_r11_metered_value_unavailable_for_unpriced_descendant(login_wm, p
         await s.commit()
     body = (await (await login_wm("dana")).get("/budget/overview?scope=group:1")).json()
     assert body["kpis"]["metered_value"] is None
+
+
+# review-p5-r10 major F1: the section overview carries the previous period for D-058
+async def test_r11_section_overview_has_previous_period(login_wm, provisioned):
+    from app.services.overview import _previous
+
+    last = _previous(PERIOD)
+    async with provisioned() as s:
+        child = await _child(s)
+        for sid, spend in (("1", 7), (str(child.id), 5)):
+            s.add(SpendSnapshot(scope_kind="group", scope_id=sid, period=last, model=None,
+                                spend=spend))  # fmt: skip
+        await s.commit()
+    body = (await (await login_wm("dana")).get("/budget/overview?scope=group:1")).json()
+    assert body["previous_period"]["period"] == last
+    assert Decimal(str(body["previous_period"]["used"])) == 12

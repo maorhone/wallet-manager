@@ -1,13 +1,11 @@
 """Section budget overview and Action Center (5.17, WF-01): read-only, built on group_summary."""
 
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
 from app.config import Settings
 from app.models import (
-    AuditLog,
     Department,
     Employee,
     Grp,
@@ -15,7 +13,6 @@ from app.models import (
     Policy,
     ProductionSystem,
     Request,
-    ServiceKey,
 )
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import requests as requests_service
@@ -94,11 +91,20 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     unused = None  # a past period has no live allocations to read: the allocated-minus-used rule
     if at is None:
         committed = await group_committed(
-            db, spend, group, with_shares=True, initiative_spent=ini_used,
+            db,
+            spend,
+            group,
+            with_shares=True,
+            initiative_spent=ini_used,
             tz=settings.app_timezone,
         )
         unused = max(committed - own_used - (used - own_used), Decimal(0))
     remaining = w["total"] - used
+    before = await Spend.load(db, _previous(s["period"]))
+    prev_used = sum(
+        (before.used("group", i) for i in [group_id, *await views._descendants(db, group_id, at)]),
+        Decimal(0),
+    )
     return {
         "period": s["period"], "reset_date": s["reset_date"], "spend_taken_at": s["spend_taken_at"],
         "group": s["group"],
@@ -110,6 +116,8 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
             ),
         },
         "bar": _bar(used, w["allocated"], w["total"], unused),
+        # D-058: the section head's period comparison (same subtree as ``used``, r10 F1)
+        "previous_period": {"period": _previous(s["period"]), "used": prev_used},
         "rows": rows,
         "actions": s["actions"],
     }  # fmt: skip

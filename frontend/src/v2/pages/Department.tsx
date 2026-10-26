@@ -4,6 +4,7 @@ import { useDepartmentOverview, type DepartmentSystem } from '../../api/queries'
 import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
+import { BlockSummary } from '../components/BlockSummary';
 import { DistributionBar } from '../components/DistributionBar';
 import { BudgetKpis } from '../components/BudgetKpis';
 import { HierarchyEditor } from './HierarchyEditor';
@@ -43,11 +44,18 @@ export default function Department({ departmentId }: { departmentId: string }) {
   return (
     <>
       <BudgetKpis labels={s} total={d.kpis.total} bar={d.bar} used={d.kpis.used} />
+      <p className="v2-muted">
+        {s.metered}:{' '}
+        <bdi dir="ltr">
+          {d.kpis.metered_value == null ? he.v2.unavailable : credits(d.kpis.metered_value)}
+        </bdi>
+      </p>
       <DistributionBar
         used={d.bar.used}
         assignedUnused={d.bar.allocated_unused}
         unallocated={d.bar.unallocated}
       />
+      <BlockSummary scope="department" id={departmentId} period={d.period} />
       <div role="tablist">
         <button role="tab" aria-selected={tab === 'budget'} onClick={() => setTab('budget')}>
           {s.tabBudget}

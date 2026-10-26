@@ -674,6 +674,26 @@ export const useConcurrencyPeaks = (scope: UsageScope, id: string, period: strin
     refetchInterval: 15000,
   });
 
+export interface BlockSummaryData {
+  by_reason: { reason: string; sub: string | null; count: number }[];
+  by_consumer: { reason: string; consumer: string | null; count: number }[];
+  truncated: boolean;
+}
+
+/** D-064: aggregate block reasons of a manager's own scope (the authorized report). */
+export const useBlockSummary = (scope: 'group' | 'department', id: string, period: string) =>
+  useQuery({
+    queryKey: ['reports', 'blocks', scope, id, period],
+    queryFn: () => {
+      const [year, month] = period.split('-').map(Number);
+      const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return apiFetch<BlockSummaryData>(
+        `/reports/blocks?${new URLSearchParams({ scope, id, from: `${period}-01`, to })}`,
+      );
+    },
+    enabled: period !== '' && id !== '',
+  });
+
 export const useBlockedReport = (scope: UsageScope, id: string, period: string) =>
   useQuery({
     queryKey: ['reports', 'blocked', scope, id, period],
@@ -850,6 +870,7 @@ export interface BudgetOverview {
     metered_value: number | null;
   };
   bar: { used: number; allocated_unused: number; unallocated: number; total: number };
+  previous_period: { period: string; used: number };
   rows: BudgetRow[];
   actions: { edit_members: boolean };
 }
@@ -968,7 +989,13 @@ export interface DepartmentSystem {
 export interface DepartmentOverview {
   period: string;
   department: string;
-  kpis: { total: number; allocated: number; used: number; remaining: number };
+  kpis: {
+    total: number;
+    allocated: number;
+    used: number;
+    remaining: number;
+    metered_value: number | null;
+  };
   bar: { used: number; allocated_unused: number; unallocated: number; total: number };
   previous_period: { period: string; used: number };
   sections: {

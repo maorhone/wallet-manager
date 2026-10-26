@@ -139,9 +139,7 @@ async def group_committed(
     # passes its already computed values.
     spent = initiative_spent
     if spent is None:
-        spent = {
-            i: await initiative_used(db, spend, i, spend.period, tz) for i in initiatives
-        }
+        spent = {i: await initiative_used(db, spend, i, spend.period, tz) for i in initiatives}
     for key in await db.scalars(
         select(ServiceKey).where(
             ServiceKey.status.in_(("active", "pending")),

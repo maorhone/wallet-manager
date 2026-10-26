@@ -20,10 +20,19 @@ vi.mock('../../api/queries', () => ({
       period: '2026-10',
       kpis: { total: 250000, allocated: 45000, used: 1000, remaining: 249000, metered_value: null },
       bar: { used: 1000, allocated_unused: 44000, unallocated: 205000, total: 250000 },
+      previous_period: { period: '2026-09', used: 700 },
       rows: [
         { kind: 'employee', id: 'a@corp.example', name: 'Avi', total: 15000, used: 0, percent: 0 },
       ],
       actions: { edit_members: flags.edit },
+    },
+  }),
+  useBlockSummary: () => ({
+    isPending: false,
+    data: {
+      by_reason: [{ reason: 'RATE_LIMIT', sub: 'concurrency', count: 2 }],
+      by_consumer: [],
+      truncated: false,
     },
   }),
   useAttention: () => ({
@@ -66,5 +75,19 @@ describe('SectionBudget', () => {
     expect(screen.queryByRole('button', { name: 'העברה' })).toBeNull();
     expect(screen.getAllByText('טרם הוקצה').length).toBeGreaterThan(0);
     expect(screen.getAllByText('הוקצה ולא נוצל').length).toBeGreaterThan(0);
+  });
+
+  // review-p5-r10 major F1: D-058 period comparison and D-064 block reasons for section heads
+  it('shows the previous period and the scoped block summary', () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <SectionBudget groupId="1" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText(/השוואת תקופות/)).toBeTruthy();
+    expect(screen.getByText('2026-09')).toBeTruthy();
+    expect(screen.getByText('מגבלת קצב או מקביליות')).toBeTruthy();
   });
 });

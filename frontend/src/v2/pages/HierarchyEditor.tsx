@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useHierarchyChange, type DepartmentOverview } from '../../api/queries';
 import { he } from '../../i18n/he';
 import { Drawer } from '../components/Drawer';
@@ -21,7 +21,9 @@ export function HierarchyEditor({
   const [name, setName] = useState('');
   const [parent, setParent] = useState('');
   const [reason, setReason] = useState('');
-  const [key, setKey] = useState(() => crypto.randomUUID());
+  // The key belongs to the submitted operation: a retry of the same one replays, an edited one
+  // (the server replays by key alone) gets a fresh key (r10 F1).
+  const sent = useRef<{ sig: string; key: string } | null>(null);
   const change = useHierarchyChange();
   const render = (parentId: number | null) => {
     const kids = tree.filter((n) => n.parent_group_id === parentId);
@@ -56,7 +58,7 @@ export function HierarchyEditor({
     setName('');
     setParent('');
     setReason('');
-    setKey(crypto.randomUUID());
+    sent.current = null;
     change.reset();
   };
   const submit = () => {
@@ -69,7 +71,9 @@ export function HierarchyEditor({
         : target.mode === 'above'
           ? { kind: 'above' as const, groupId: n.id, name }
           : { kind: 'move' as const, groupId: n.id, parentId };
-    change.mutate({ change: c, reason, key });
+    const sig = JSON.stringify([c, reason]);
+    if (sent.current?.sig !== sig) sent.current = { sig, key: crypto.randomUUID() };
+    change.mutate({ change: c, reason, key: sent.current.key });
   };
   return (
     <section className="v2-card">
