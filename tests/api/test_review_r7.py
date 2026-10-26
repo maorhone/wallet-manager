@@ -89,3 +89,35 @@ async def test_r7_reciprocal_transfer_refused(login_wm, provisioned):
     r = await send(head, "POST", "/transfers", move(20, "yael@corp.example", "dani@corp.example"))
     assert r.status_code == 422, r.text
     assert r.json()["details"]["reason"] == "dependency_cycle"
+
+
+# review-p5-r6 major B1c: a targeted throughput decision needs and records the limits
+async def test_r7_targeted_throughput_requires_and_records_limits(login_wm, provisioned):
+    from app.models import Initiative, Request
+    from tests.api.test_requests import submit
+
+    async with provisioned() as s:
+        row = Initiative(
+            name="P", owner_upn="yael@corp.example", group_id=1, department_id=1, budget=10,
+            created_by="dana@corp.example",
+        )  # fmt: skip
+        s.add(row)
+        await s.commit()
+        iid = row.id
+    rid = await submit(
+        await login_wm("yael"), "throughput", target={"kind": "initiative", "id": iid}
+    )
+    for who in ("dana", "rep"):
+        r = await send(
+            await login_wm(who), "POST", f"/requests/{rid}/decide", {"decision": "forward"}
+        )
+        assert r.status_code == 200, r.text
+    ai = await login_wm("aiteam")
+    path = f"/requests/{rid}/decide"
+    empty = await send(ai, "POST", path, {"decision": "apply"})
+    assert empty.status_code == 422, empty.text
+    done = await send(ai, "POST", path, {"decision": "apply", "max_parallel": 7})
+    assert done.status_code == 200, done.text
+    async with provisioned() as s:
+        req = await s.get(Request, rid)
+        assert (req.status, req.payload["applied_limits"]) == ("applied", {"max_parallel": 7})

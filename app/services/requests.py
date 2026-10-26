@@ -366,11 +366,13 @@ async def _decide_throughput(ctx, directory, req: Request, group: Grp, role, bod
         req.status = "rejected"
         return None
     supplied = _limits_of(req.payload) | _limits_of(body.model_dump())
-    if req.payload.get("target"):  # initiatives/systems carry no WM-managed limits: the AI team
-        req.status = "applied"  # sets them in LiteLLM; the decision is recorded on the request
-        return None
     if not supplied:  # D-045: a narrative-only request needs the AI team's technical values
         raise invalid_request("Name the limits to apply", {"field": "max_parallel"})
+    if req.payload.get("target"):  # initiatives/systems carry no WM-managed limits: the AI team
+        # sets them in LiteLLM; the values it confirms are recorded on the request (B1c).
+        req.payload = {**req.payload, "applied_limits": supplied}
+        req.status = "applied"
+        return None
     employee = await ctx.db.get(Employee, req.requester_upn)
     if employee is None or employee.status != "active" or employee.group_id != group.id:
         raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
