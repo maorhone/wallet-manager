@@ -450,6 +450,7 @@ async def _source_overspent(db, reader, transfer: Transfer, now: datetime) -> bo
     row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
     total = getattr(row, {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget"))
     spend = await fresh_spend(db, reader, now)  # SpendUnavailable propagates: caller holds
+    total -= await unsettled_incoming(db, [kind], ident)  # pending credit never masks spend
     return spend.used(kind, ident) > total
 
 
@@ -476,10 +477,15 @@ async def source_holdback(db, row: LitellmWrite) -> Decimal:
     if not await _is_source_write(db, row):
         return ZERO
     kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
+    return await unsettled_incoming(db, kinds, row.entity_id)
+
+
+async def unsettled_incoming(db, kinds, ident) -> Decimal:
+    """Incoming credit of a target whose transfer is not settled: never spendable (r7 B1a1)."""
     return await db.scalar(
         select(func.coalesce(func.sum(Transfer.amount), 0)).where(
             Transfer.target_kind.in_(kinds),
-            Transfer.target_id == row.entity_id,
+            Transfer.target_id == ident,
             Transfer.state.in_(("pending", "failed")),
         )
     )

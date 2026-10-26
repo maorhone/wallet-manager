@@ -100,7 +100,9 @@ async def _window_start(db, now: datetime) -> datetime:
         Department.prod_budget_period,
     ):
         periods.update(await db.scalars(select(col)))
-    months, days = 1, 0
+    months, longest = 1, timedelta()
+    unit_span = {"s": timedelta(seconds=1), "m": timedelta(minutes=1), "h": timedelta(hours=1),
+                 "d": timedelta(days=1), "mo": timedelta(days=31)}  # fmt: skip
     for p in periods:
         m = re.fullmatch(r"(\d+)(s|m|h|d|mo)", p or "")
         if m is None:
@@ -108,12 +110,11 @@ async def _window_start(db, now: datetime) -> datetime:
         n, unit = int(m[1]), m[2]
         if unit == "mo":
             months = max(months, n)
-        elif unit == "d":
-            days = max(days, n)
+        longest = max(longest, n * unit_span[unit])  # a window may begin mid-month (r7 B1a2)
     year, month = now.year, now.month - (months - 1)
     year, month = year + (month - 1) // 12, (month - 1) % 12 + 1
     start = datetime(year, month, 1, tzinfo=now.tzinfo).astimezone(UTC)
-    return min(start, (now - timedelta(days=days)).astimezone(UTC))
+    return min(start, (now - longest).astimezone(UTC))
 
 
 async def fresh_spend(db, reader, now: datetime) -> "Spend":
