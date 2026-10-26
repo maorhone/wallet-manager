@@ -142,3 +142,30 @@ async def test_r9_rates_use_local_days_and_refuse_same_day_changes(provisioned):
         await _tokens(s, "2026-06-16", "gpt-4", 1_000_000)
         await s.commit()
         assert await metered_value(s, "group", 1, "2026-06", "Asia/Jerusalem") is None
+
+
+# review-p5-r8 major B3 (views:145): a parent inserted later is not part of the past wallet
+async def test_r9_history_excludes_inserted_parent(login_wm, provisioned):
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.models import Grp
+    from app.services.spend import Spend
+    from app.services.views import _dept
+    from tests.api.test_org_systems import post
+
+    admin = await login_wm("admin")
+    th = {"near": Decimal("0.8"), "full": Decimal(1)}
+    async with provisioned() as s:
+        dept = await s.get(Department, 1)
+        base = (await _dept(s, dept, Spend([], "2026-10"), None, th))["card"]["allocated"]
+    r = await post(admin, "/groups/1/insert-parent", {"name": "Mid", "litellm_team_id": "r9-mid"})
+    assert r.status_code == 200, r.text
+    async with provisioned() as s:
+        new_id = await s.scalar(select(Grp.id).where(Grp.litellm_team_id == "r9-mid"))
+        dept = await s.get(Department, 1)
+        past = await _dept(s, dept, Spend([], "2026-10"), datetime.now(UTC) - timedelta(days=1), th)
+        now = await _dept(s, dept, Spend([], "2026-10"), datetime.now(UTC) + timedelta(days=1), th)
+        assert new_id not in [g.id for g in past["groups"]]
+        assert past["card"]["allocated"] == base  # not doubled by the inserted parent
+        assert now["card"]["allocated"] == base

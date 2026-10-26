@@ -119,6 +119,7 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     )
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
     parents = await _parent_map(db, dept.id, at)
+    groups = [g for g in groups if g.id in parents]
     internal_ids = await db.scalars(
         select(ProductionSystem.id).where(
             ProductionSystem.department_id == dept.id,
@@ -148,6 +149,18 @@ async def _parent_map(db, department_id: int, at) -> dict[int, int | None]:
     parents = {int(k): v["parent_group_id"] for k, v in past.items()}
     if at is None:
         return parents
+    created = await db.execute(  # a group that did not exist yet is not in the past tree (r8 B3)
+        select(AuditLog.entity_id)
+        .where(
+            AuditLog.entity == "group",
+            AuditLog.entity_id.in_([str(g.id) for g in groups]),
+            AuditLog.after.has_key("litellm_team_id"),
+        )
+        .group_by(AuditLog.entity_id)
+        .having(func.min(AuditLog.at) > at)
+    )
+    for (gid,) in created:
+        parents.pop(int(gid), None)
     # Parent insertion is audited once, on the new parent; it also moved the child (r7 B3).
     inserted = await db.scalars(
         select(AuditLog)
