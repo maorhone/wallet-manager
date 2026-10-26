@@ -168,7 +168,8 @@ async def check_group_tree(
         return err
     for parent in live:
         kids = sum((bases[g.id] for g in live if g.parent_group_id == parent.id), Decimal(0))
-        if (  # leaf groups too: a cut may never release pending incoming or committed funding
+        # leaf groups too when cut: a cut may never release pending incoming or committed funding
+        if (kids or bases[parent.id] < parent.base_budget) and (
             err := check_sum(
                 kids + await group_own_allocated(db, parent),
                 await settled_budget(db, parent, bases[parent.id]),
