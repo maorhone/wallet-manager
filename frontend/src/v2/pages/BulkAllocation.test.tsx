@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BulkAllocation } from './BulkAllocation';
 
 window.matchMedia ??= ((q: string) => ({
@@ -26,6 +26,7 @@ vi.mock('../../api/queries', () => ({
 }));
 
 describe('BulkAllocation', () => {
+  afterEach(cleanup);
   it('previews a uniform amount with one override and shows remaining', () => {
     render(
       <MantineProvider>
