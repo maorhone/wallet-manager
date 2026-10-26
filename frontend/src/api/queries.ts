@@ -873,8 +873,9 @@ export interface TransferPreview {
   total_unchanged: boolean;
 }
 
-export const useBudgetOverview = (groupId: string) =>
+export const useBudgetOverview = (groupId: string, enabled = true) =>
   useQuery({
+    enabled,
     queryKey: ['budget-overview', groupId],
     queryFn: () => apiFetch<BudgetOverview>(`/budget/overview?scope=group:${groupId}`),
   });
@@ -974,8 +975,9 @@ export interface DepartmentOverview {
   actions: { edit_hierarchy: boolean };
 }
 
-export const useDepartmentOverview = (departmentId: string) =>
+export const useDepartmentOverview = (departmentId: string, enabled = true) =>
   useQuery({
+    enabled,
     queryKey: ['budget-overview', 'department', departmentId],
     queryFn: () =>
       apiFetch<DepartmentOverview>(`/budget/overview?scope=department:${departmentId}`),
@@ -1018,6 +1020,7 @@ export interface InitiativeView {
   period_start: string | null;
   period_end: string | null;
   budget: number;
+  used: number; // attributed to the period, incl. keys since moved away
   status: string;
   tech_status: 'connected' | 'pending' | 'not_connected';
 }
@@ -1066,6 +1069,7 @@ export type OrgEnvelopeRow = {
 };
 export type OrgEnvelopes = {
   organization: { id: number; name: string };
+  initiatives: OrgEnvelopeRow[];
   departments: { envelope: number; allocated: number; rows: OrgEnvelopeRow[] };
   systems: { envelope: number; allocated: number; rows: OrgEnvelopeRow[] };
 };

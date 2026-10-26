@@ -6,6 +6,7 @@ import { he } from '../../i18n/he';
 import { SystemDetail } from './SystemDetail';
 
 const s = he.v2.initPage;
+type Tech = keyof typeof s.tech;
 
 export default function Initiative({
   canMove,
@@ -30,16 +31,25 @@ export default function Initiative({
   >();
   for (const i of managed.data?.systems.rows ?? []) systems.set(i.id, i);
   for (const i of owned.data.items) systems.set(i.id, { ...i, owner: i.owner_upn ?? undefined });
+  // Allocators also manage initiatives they do not own; the owner list adds the tech status.
+  const initiatives = new Map<
+    number,
+    { id: number; name: string; budget: number; owner?: string; used?: number; tech?: Tech }
+  >();
+  for (const i of managed.data?.initiatives ?? [])
+    initiatives.set(i.id, { ...i, owner: i.owner_upn ?? undefined });
+  for (const i of list.data.items)
+    initiatives.set(i.id, { ...i, owner: i.owner_upn, tech: i.tech_status });
   const items = [
-    ...list.data.items.map((i) => ({
+    ...[...initiatives.values()].map((i) => ({
       ref: `initiative:${i.id}`,
       kind: 'initiative' as const,
       id: i.id,
       name: i.name,
       budget: i.budget,
-      owner: i.owner_upn,
-      used: undefined,
-      tech: i.tech_status,
+      owner: i.owner,
+      used: i.used,
+      tech: i.tech,
     })),
     ...[...systems.values()].map((i) => ({
       ref: `system:${i.id}`,

@@ -1114,3 +1114,11 @@ Groups (shared root cause -> one fix):
 5. Overview: child rows carry their subtree; `_bar` reconciles used + allocated_unused + unallocated = total; moved initiative keys keep usage up to the move period.
 6. Rate card: metered value uses the rate history of the consumption month.
 Tests: tests/api/test_review_r7.py (+ overallocation, rate card, schema migration).
+
+## fix-review-p5-r7b (7 frontend majors; 0 blockers)
+Groups (shared root cause):
+- A initiative data: server-side `used` (shared `overview.initiative_used`, keys moved away stay attributed) on `/initiatives*`, plus `initiatives` in `/organizations/{id}/envelopes` for allocators (owner-independent). Initiative.tsx merges both. (SystemDetail:31, Initiative:17)
+- B move form: idempotency key bound to (key, destination) payload; outcome rendered outside the active-key conditional and followed on the destination system's key sync status. (SystemDetail:91, :86)
+- C Personal: a failed refresh wins over cached data (`tele`), service pill too. (Personal:28)
+- D navigation: remembered inherited routes restored; Shell `DrillGuard` falls back only on 403/404; sidebar keeps `?org=`; OrgSelector also on Systems. (navigation:74, Shell:140)
+Tests: tests/api/test_initiatives.py (+2), vitest SystemDetail/Shell/Personal/navigation. e2e not run (phase-end mode N/A, full run at the end).

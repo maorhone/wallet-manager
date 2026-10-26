@@ -7,13 +7,13 @@ from sqlalchemy import select
 from app.config import Settings
 from app.db import LockKind
 from app.errors import ApiError
-from app.models import Department, Organization, ProductionSystem
+from app.models import Department, Initiative, Organization, ProductionSystem
 from app.permissions import Principal, can_manage_org_systems, can_manage_platform
 from app.schemas.departments import DepartmentBudgetIn
 from app.schemas.org_systems import EnvelopesIn
 from app.schemas.production import ProductionSystemPatch
 from app.services import departments, views
-from app.services.overview import _previous
+from app.services.overview import _previous, initiative_used
 from app.services.production import spend_for_budget_change, system_committed
 from app.services.spend import Spend
 from app.services.validation import check_sum
@@ -49,8 +49,25 @@ async def get_envelopes(db, principal, settings: Settings, organization_id: int)
         await db.scalars(select(Department).where(Department.organization_id == organization_id))
     )
     systems = await _systems(db, organization_id)
+    # Credential-move sources: every active initiative of the organization, whoever owns it.
+    initiatives = list(
+        await db.scalars(
+            select(Initiative)
+            .where(
+                Initiative.status == "active",
+                Initiative.department_id.in_([d.id for d in depts]),
+            )
+            .order_by(Initiative.id)
+        )
+    )
+    initiative_rows = [
+        {"id": i.id, "name": i.name, "budget": i.budget, "owner_upn": i.owner_upn,
+         "used": await initiative_used(db, current, i.id, period)}
+        for i in initiatives
+    ]  # fmt: skip
     return {
         "organization": {"id": org.id, "name": org.name, "budget_period": org.budget_period},
+        "initiatives": initiative_rows,
         "departments": {
             "envelope": org.departments_envelope,
             "allocated": sum((d.budget for d in depts), Decimal(0)),

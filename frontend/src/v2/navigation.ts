@@ -71,7 +71,12 @@ export function areasFor(me: Me): Area[] {
 export function rememberedArea(me: Me, areas: Area[]): string {
   try {
     const stored = localStorage.getItem(areaStorageKey(me.upn));
-    return areas.find((a) => a.path === stored)?.path ?? areas[0].path;
+    // An inherited group/department is not in /me; the server decides (see Shell's DrillGuard).
+    return (
+      areas.find((a) => a.path === stored)?.path ??
+      (stored ? drillArea(stored)?.path : undefined) ??
+      areas[0].path
+    );
   } catch {
     return areas[0].path;
   }

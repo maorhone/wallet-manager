@@ -203,3 +203,23 @@ async def test_failed_rotation_keeps_ambiguous_generation_reserved(login_wm, pro
     # A timeout may hide upstream success; a fresh attempt must not replenish credit.
     blocked = await send(head, "POST", "/service-keys", body)
     assert blocked.status_code == 422, blocked.text
+
+
+async def test_admin_envelopes_list_initiatives_of_other_owners(login_wm):
+    # review-p5-r6 major (F1 Initiative.tsx:17): the source list is not owner-filtered.
+    head = await login_wm("dana")
+    r = await send(head, "POST", f"/groups/{G1}/initiatives", initiative())
+    iid = int(r.json()["entities"][0]["id"])
+    admin = await login_wm("admin")
+    assert (await admin.get("/initiatives")).json()["items"] == []
+    rows = (await admin.get("/organizations/1/envelopes")).json()["initiatives"]
+    assert [i["id"] for i in rows] == [iid]
+    assert rows[0]["used"] == 0 and rows[0]["owner_upn"]
+
+
+async def test_initiative_view_carries_attributed_used(login_wm):
+    # review-p5-r6 major (F1 SystemDetail.tsx:31): consumption comes from the server.
+    head = await login_wm("dana")
+    r = await send(head, "POST", f"/groups/{G1}/initiatives", initiative())
+    iid = int(r.json()["entities"][0]["id"])
+    assert (await head.get(f"/initiatives/{iid}")).json()["used"] == 0

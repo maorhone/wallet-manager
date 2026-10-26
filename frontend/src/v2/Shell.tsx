@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { useMe } from '../api/queries';
+import { useBudgetOverview, useDepartmentOverview, useMe } from '../api/queries';
+import { ApiError } from '../api/client';
 import { apiPost } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { he } from '../i18n/he';
@@ -68,6 +69,34 @@ function OrgSelector({
   );
 }
 
+/** Access to an inherited route is the server's call: only a denial sends the user back. */
+function DrillGuard({
+  kind,
+  id,
+  fallback,
+  upn,
+  children,
+}: {
+  kind: 'group' | 'department';
+  id: string;
+  fallback: string;
+  upn: string;
+  children: ReactNode;
+}) {
+  const group = useBudgetOverview(id, kind === 'group');
+  const department = useDepartmentOverview(id, kind === 'department');
+  const err = (kind === 'group' ? group : department).error;
+  if (err instanceof ApiError && (err.status === 403 || err.status === 404)) {
+    try {
+      localStorage.removeItem(areaStorageKey(upn));
+    } catch {
+      /* Storage is optional. */
+    }
+    return <Navigate to={fallback} replace />;
+  }
+  return <>{children}</>;
+}
+
 export function Shell() {
   const { data: me, error, isPending, refetch } = useMe();
   const { pathname } = useLocation();
@@ -111,7 +140,7 @@ export function Shell() {
           {areas.map((area) => (
             <Link
               key={area.path}
-              to={area.path}
+              to={{ pathname: area.path, search: params.get('org') ? `?org=${orgId}` : '' }}
               aria-current={current.path === area.path ? 'page' : undefined}
             >
               {area.label}
@@ -137,7 +166,17 @@ export function Shell() {
           ) : current.path === '/v2/personal' ? (
             <Personal />
           ) : current.path === '/v2/systems' ? (
-            <Initiative canMove={isAllocator(me)} organizationId={orgId} />
+            <>
+              {isAllocator(me) && (
+                <OrgSelector
+                  orgs={orgs}
+                  value={orgId}
+                  canOpenAny={isAdmin(me)}
+                  onChange={(id) => setParams({ org: String(id) })}
+                />
+              )}
+              <Initiative canMove={isAllocator(me)} organizationId={orgId} />
+            </>
           ) : current.path === '/v2/organization' ? (
             <>
               <OrgSelector
@@ -156,9 +195,25 @@ export function Shell() {
           ) : current.path === '/v2/requests' ? (
             <Requests />
           ) : current.path.startsWith('/v2/group/') ? (
-            <SectionBudget key={current.path} groupId={current.path.split('/')[3]} />
+            <DrillGuard
+              key={current.path}
+              kind="group"
+              id={current.path.split('/')[3]}
+              fallback={areas[0].path}
+              upn={me.upn}
+            >
+              <SectionBudget groupId={current.path.split('/')[3]} />
+            </DrillGuard>
           ) : current.path.startsWith('/v2/department/') ? (
-            <Department key={current.path} departmentId={current.path.split('/')[3]} />
+            <DrillGuard
+              key={current.path}
+              kind="department"
+              id={current.path.split('/')[3]}
+              fallback={areas[0].path}
+              upn={me.upn}
+            >
+              <Department departmentId={current.path.split('/')[3]} />
+            </DrillGuard>
           ) : (
             <p className="v2-muted">{he.v2.pending}</p>
           )}

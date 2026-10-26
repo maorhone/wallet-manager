@@ -23,8 +23,14 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
   const move = useMoveKey();
   const [target, setTarget] = useState('');
   const [chosen, setChosen] = useState('');
-  // One key per move: retries replay, a later distinct move gets a fresh key.
-  const [rowKey, setRowKey] = useState(() => crypto.randomUUID());
+  // The idempotency key belongs to one submitted payload: a retry of the same move replays,
+  // any other key/destination gets its own, so a lost response never swallows a different move.
+  const [attempt, setAttempt] = useState<{ keyId: number; target: number; idem: string } | null>(
+    null,
+  );
+  const [moved, setMoved] = useState<{ keyId: number; target: number; applied: boolean } | null>(
+    null,
+  );
   if (keys.isPending) return <p role="status">{he.loading}</p>;
   if (keys.error || !keys.data) return <ErrorState error={keys.error} onRetry={keys.refetch} />;
   const items = keys.data.items;
@@ -87,9 +93,23 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            const body = { keyId: keyId as number, target: Number(target) };
+            const same = attempt?.keyId === body.keyId && attempt.target === body.target;
+            const next = { ...body, idem: same ? attempt.idem : crypto.randomUUID() };
+            setAttempt(next);
+            setMoved(null);
             move.mutate(
-              { keyId: keyId as number, targetSystemId: Number(target), key: rowKey },
-              { onSuccess: () => setRowKey(crypto.randomUUID()) },
+              { keyId: next.keyId, targetSystemId: next.target, key: next.idem },
+              {
+                onSuccess: (data) => {
+                  setAttempt(null);
+                  setMoved({
+                    keyId: next.keyId,
+                    target: next.target,
+                    applied: data?.status === 'applied',
+                  });
+                },
+              },
             );
           }}
         >
@@ -116,12 +136,30 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
           <button type="submit" disabled={move.isPending}>
             {s.moveKey}
           </button>
-          {move.isSuccess && (
-            <p role="status">{move.data?.status === 'applied' ? s.moved : s.movePending}</p>
-          )}
           {move.isError && <p role="alert">{(move.error as Error).message}</p>}
         </form>
       )}
+      {moved && <MoveFeedback {...moved} />}
     </section>
+  );
+}
+
+/** Outcome of the last move; it survives the source losing its last key and follows the credential. */
+function MoveFeedback({
+  keyId,
+  target,
+  applied,
+}: {
+  keyId: number;
+  target: number;
+  applied: boolean;
+}) {
+  const dest = useServiceKeys('system', target);
+  const synced = dest.data?.items.find((k) => k.id === keyId && k.status === 'active');
+  const state = applied ? 'applied' : (synced?.sync_status ?? 'pending');
+  return (
+    <p role="status">
+      {state === 'applied' ? s.moved : state === 'failed' ? he.sync.failed : s.movePending}
+    </p>
   );
 }

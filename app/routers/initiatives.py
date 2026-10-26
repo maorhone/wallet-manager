@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
 from app.schemas.initiatives import InitiativeIn
@@ -14,15 +14,15 @@ async def create(group_id: int, body: InitiativeIn, ctx: Write, principal: Curre
 
 
 @router.get("/groups/{group_id}/initiatives")
-async def list_for_group(group_id: int, principal: CurrentPrincipal, db: Db):
-    return await initiatives.list_for_group(db, principal, group_id)
+async def list_for_group(group_id: int, principal: CurrentPrincipal, db: Db, request: Request):
+    return await initiatives.list_for_group(db, principal, group_id, request.app.state.settings)
 
 
 @router.get("/initiatives")
-async def list_mine(principal: CurrentPrincipal, db: Db):
-    return await initiatives.list_mine(db, principal)
+async def list_mine(principal: CurrentPrincipal, db: Db, request: Request):
+    return await initiatives.list_mine(db, principal, request.app.state.settings)
 
 
 @router.get("/initiatives/{initiative_id}")
-async def get(initiative_id: int, principal: CurrentPrincipal, db: Db):
-    return await initiatives.get(db, principal, initiative_id)
+async def get(initiative_id: int, principal: CurrentPrincipal, db: Db, request: Request):
+    return await initiatives.get(db, principal, initiative_id, request.app.state.settings)

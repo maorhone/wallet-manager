@@ -66,17 +66,7 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     for ini in await db.scalars(
         select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
     ):
-        # No initiative snapshot scope exists: sum its keys (revoked/rotated generations
-        # included, and keys moved to a system for the periods up to the move, r6 B3).
-        key_ids = [
-            *await db.scalars(
-                select(ServiceKey.id).where(
-                    ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == ini.id
-                )
-            ),
-            *await _moved_key_ids(db, ini.id, s["period"]),
-        ]
-        used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
+        used = await initiative_used(db, spend, ini.id, s["period"])
         rows.append(
             {"kind": "initiative", "id": str(ini.id), "name": ini.name, "total": ini.budget,
              "used": used, "percent": _pct(used, ini.budget), "state": None}
@@ -95,6 +85,20 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         "rows": rows,
         "actions": s["actions"],
     }  # fmt: skip
+
+
+async def initiative_used(db, spend: Spend, initiative_id: int, period: str) -> Decimal:
+    """No initiative snapshot scope exists: sum its keys (revoked/rotated generations included,
+    and keys moved to a system for the periods up to the move, r6 B3)."""
+    key_ids = [
+        *await db.scalars(
+            select(ServiceKey.id).where(
+                ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
+            )
+        ),
+        *await _moved_key_ids(db, initiative_id, period),
+    ]
+    return sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
 
 
 async def _moved_key_ids(db, initiative_id: int, period: str) -> list[int]:

@@ -49,7 +49,8 @@ it('falls back after actual permission removal and never trusts external paths',
   };
   localStorage.setItem(areaStorageKey(me.upn), '/v2/group/7');
   expect(rememberedArea(me, areasFor(me))).toBe('/v2/group/7');
-  expect(rememberedArea(employee, areasFor(employee))).toBe('/v2/personal');
+  // r7b: a stored inherited route is restored; only a server denial falls back (Shell.test.tsx).
+  expect(rememberedArea(employee, areasFor(employee))).toBe('/v2/group/7');
   localStorage.setItem(areaStorageKey(me.upn), 'https://corp.example');
   expect(rememberedArea(me, areasFor(me))).toBe('/v2/personal');
 });
@@ -76,4 +77,10 @@ it('accepts inherited group and department routes but nothing else', () => {
   expect(drillArea('/v2/group/12')?.path).toBe('/v2/group/12');
   expect(drillArea('/v2/department/3')?.path).toBe('/v2/department/3');
   expect(drillArea('/v2/group/x')).toBeUndefined();
+});
+
+// review-p5-r6 major (F1 navigation.ts:74): an inherited group/department is restored
+it('restores a remembered inherited route that /me does not list', () => {
+  localStorage.setItem(areaStorageKey(employee.upn), '/v2/group/12');
+  expect(rememberedArea(employee, areasFor(employee))).toBe('/v2/group/12');
 });

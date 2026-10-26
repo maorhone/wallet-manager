@@ -23,9 +23,12 @@ function lastDay(period: string): string {
   return `${period}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
 }
 
-/** Telemetry must never read as "nothing happened" while it is loading or unreadable (D-062). */
+/**
+ * Telemetry must never read as "nothing happened" while it is loading or unreadable (D-062).
+ * A failed refresh wins over the data TanStack Query keeps from an earlier fetch (stale).
+ */
 const tele = (q: { data?: unknown; error: unknown; isFetching: boolean }) =>
-  q.data !== undefined ? 'ok' : q.error || !q.isFetching ? 'unavailable' : 'loading';
+  q.error ? 'unavailable' : q.data !== undefined ? 'ok' : !q.isFetching ? 'unavailable' : 'loading';
 
 function RequestForm({ kind, onDone }: { kind: RequestKind; onDone: () => void }) {
   const [need, setNeed] = useState('');
@@ -103,10 +106,11 @@ export default function Personal() {
     return <ErrorState error={wallet.error} onRetry={wallet.refetch} />;
   const w = wallet.data.wallet;
   const byModel = new Map<string, number>();
-  for (const r of usage.data ?? []) byModel.set(r.model, (byModel.get(r.model) ?? 0) + r.spend);
-  const block = status.data?.last_blocks[0];
+  for (const r of tele(usage) === 'ok' ? (usage.data ?? []) : [])
+    byModel.set(r.model, (byModel.get(r.model) ?? 0) + r.spend);
+  const block = tele(status) === 'ok' ? status.data?.last_blocks[0] : undefined;
   const explained = block ? explainBlock(block) : null;
-  const overall = service.data?.state ?? 'unknown';
+  const overall = (tele(service) === 'ok' && service.data?.state) || 'unknown';
   const limits = status.data?.limits ?? wallet.data.limits;
 
   return (
@@ -166,7 +170,7 @@ export default function Personal() {
           tags.data?.series.length === 0 && <p className="v2-muted">{p.noUsage}</p>
         )}
         <ul>
-          {tags.data?.series.map((r) => (
+          {(tele(tags) === 'ok' ? tags.data?.series : [])?.map((r) => (
             <li key={`${r.bucket}${r.key}`}>
               <bdi dir="ltr">{r.key}</bdi>:{' '}
               {r.spend === null ? he.v2.unavailable : credits(r.spend)}

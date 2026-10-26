@@ -3,6 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.config import Settings
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
 from app.models import Employee, Grp, Initiative, ServiceKey
@@ -13,7 +14,10 @@ from app.permissions import (
     can_view_group,
     group_roles_of,
 )
+from app.services.overview import initiative_used
+from app.services.spend import Spend
 from app.services.validation import check_sum, group_allocated, settled_budget
+from app.services.views import period_ctx
 
 
 async def create(ctx, principal: Principal, group_id: int, body) -> list[dict]:
@@ -65,7 +69,9 @@ def tech_status(keys: list[ServiceKey]) -> str:
     return "pending" if "pending" in statuses else "not_connected"
 
 
-async def _view(db, initiatives: list[Initiative]) -> list[dict]:
+async def _view(db, initiatives: list[Initiative], settings: Settings) -> list[dict]:
+    period = period_ctx(settings, None)["period"]
+    spend = await Spend.load(db, period)
     keys = list(
         await db.scalars(
             select(ServiceKey).where(
@@ -83,6 +89,7 @@ async def _view(db, initiatives: list[Initiative]) -> list[dict]:
             "period_start": i.period_start,
             "period_end": i.period_end,
             "budget": i.budget,
+            "used": await initiative_used(db, spend, i.id, period),
             "status": i.status,
             "tech_status": tech_status([k for k in keys if k.owner_id == i.id]),
         }
@@ -90,7 +97,7 @@ async def _view(db, initiatives: list[Initiative]) -> list[dict]:
     ]
 
 
-async def list_for_group(db, principal: Principal, group_id: int) -> dict:
+async def list_for_group(db, principal: Principal, group_id: int, settings: Settings) -> dict:
     """Anyone who may view the section sees all its initiatives; an owner sees only theirs."""
     try:
         await can_view_group(db, principal, group_id)
@@ -103,18 +110,18 @@ async def list_for_group(db, principal: Principal, group_id: int) -> dict:
     items = list(await db.scalars(query))
     if only_owner and not items:
         raise ApiError(404, "NOT_FOUND", "Entity not found")
-    return {"items": await _view(db, items)}
+    return {"items": await _view(db, items, settings)}
 
 
-async def list_mine(db, principal: Principal) -> dict:
+async def list_mine(db, principal: Principal, settings: Settings) -> dict:
     query = select(Initiative).where(Initiative.owner_upn == principal.upn).order_by(Initiative.id)
-    return {"items": await _view(db, list(await db.scalars(query)))}
+    return {"items": await _view(db, list(await db.scalars(query)), settings)}
 
 
-async def get(db, principal: Principal, initiative_id: int) -> dict:
+async def get(db, principal: Principal, initiative_id: int, settings: Settings) -> dict:
     initiative = await db.get(Initiative, initiative_id)
     if initiative is None:
         raise ApiError(404, "NOT_FOUND", "Initiative not found")
     if initiative.owner_upn != principal.upn:
         await can_view_group(db, principal, initiative.group_id)
-    return (await _view(db, [initiative]))[0]
+    return (await _view(db, [initiative], settings))[0]
