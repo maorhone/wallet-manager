@@ -211,6 +211,9 @@ async def decide(
     role = await _handler_role(ctx.db, principal, req)
     if role is None:
         raise _forbidden()
+    scope_group = await ctx.db.get(Grp, req.scope_id)
+    if scope_group is not None:  # the shared money lock order: DEPARTMENT before GROUP
+        await ctx.lock(LockKind.DEPARTMENT, scope_group.department_id)
     await ctx.lock(LockKind.GROUP, req.scope_id)
     await ctx.db.refresh(req)
     role = await _handler_role(ctx.db, principal, req)

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from app.auth.session import CurrentPrincipal, Db
 from app.errors import invalid_request
-from app.models import Department, Employee, Grp, Initiative, SpendSnapshot
+from app.models import Department, Employee, Grp, Initiative, ProductionSystem, SpendSnapshot
 from app.schemas.me import MeOut, NamedRef, RoleOut, ScopeOut
 from app.services import blocks, views
 
@@ -62,10 +62,16 @@ async def my_status(request: Request, principal: CurrentPrincipal, db: Db):
     state = request.app.state
     now = state.clock.now()
     w = await views.me_wallet(db, state.directory, state.settings, principal, None, now)
-    rows = await state.litellm_reader.failed_requests(
-        now - timedelta(days=7), now + timedelta(minutes=1), users=[principal.upn], limit=10
-    )
+    rows, blocks_available = [], state.litellm_reader is not None
+    if blocks_available:
+        try:
+            rows = await state.litellm_reader.failed_requests(
+                now - timedelta(days=7), now + timedelta(minutes=1), users=[principal.upn], limit=10
+            )
+        except Exception:  # telemetry down: keep the wallet and limits (D-060)
+            blocks_available = False
     return {
+        "blocks_available": blocks_available,
         "wallet": {"state": w["wallet"]["state"], "remaining": w["wallet"]["effective_remaining"]},
         "limits": w["limits"],
         "last_blocks": [blocks.describe(r) for r in rows],
@@ -98,6 +104,12 @@ async def me(request: Request, principal: CurrentPrincipal, db: Db):
             scopes.append(ScopeOut(kind=b.scope_kind, id=b.scope_id, name=name, role=b.role))
     if await db.scalar(select(Initiative.id).where(Initiative.owner_upn == principal.upn).limit(1)):
         roles.append(RoleOut(role="initiative_owner", scope_kind="self"))
+    if await db.scalar(
+        select(ProductionSystem.id)
+        .where(ProductionSystem.owner_upn == principal.upn, ProductionSystem.status == "active")
+        .limit(1)
+    ):
+        roles.append(RoleOut(role="system_owner", scope_kind="self"))
 
     now = datetime.now(ZoneInfo(settings.app_timezone))
     return MeOut(

@@ -12,7 +12,7 @@ from app.clock import Clock
 from app.config import Settings
 from app.db import LockKind
 from app.errors import ApiError, invalid_request
-from app.models import Department, Grp, ProductionSystem, ServiceKey
+from app.models import Department, Employee, Grp, ProductionSystem, ServiceKey
 from app.permissions import (
     ADMIN,
     HEAD,
@@ -81,6 +81,14 @@ async def set_production_org(
     return [{"entity": "production_org", "id": department_id, "values": after}]
 
 
+async def _check_owner(db, upn: str | None) -> None:
+    """D-048: the owner is an existing, active employee (the one who may file targeted requests)."""
+    if upn is not None:
+        owner = await db.get(Employee, upn)
+        if owner is None or owner.status == "left":
+            raise invalid_request("Owner is not an active employee", {"field": "owner_upn"})
+
+
 async def create_production_system(
     ctx: WriteContext, principal: Principal, department_id: int, body: ProductionSystemIn
 ) -> list[dict]:
@@ -105,9 +113,10 @@ async def create_production_system(
             raise invalid_request("Managing group is not in this department")
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
+    await _check_owner(ctx.db, body.owner_upn)
     system = ProductionSystem(
         department_id=department_id, name=body.name, budget=body.budget, status="active",
-        managing_group_id=body.managing_group_id,
+        managing_group_id=body.managing_group_id, owner_upn=body.owner_upn,
     )  # fmt: skip
     ctx.db.add(system)
     await ctx.db.flush()
@@ -198,7 +207,10 @@ async def update_system_budget(
     if err := check_sum(committed, body.budget):
         raise err
     before, system.budget = {"budget": system.budget}, body.budget
-    after = {"budget": system.budget}
+    if body.owner_upn is not None:
+        await _check_owner(ctx.db, body.owner_upn)
+        before["owner_upn"], system.owner_upn = system.owner_upn, body.owner_upn
+    after = {"budget": system.budget, "owner_upn": system.owner_upn}
     ctx.audit("production_system", system.id, before, after, role, department_id=department_id)
     await _sync_production_budget(ctx, dept, others + body.budget)
     await ctx.enqueue("production_system", system.id, "/team/update")

@@ -256,6 +256,11 @@ async def change(ctx, principal, client, key_id, action):
 
 async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
     viewed = await can_view_service_keys(db, principal, owner_kind, owner_id)
+    if owner_kind == "initiative" and viewed == "owner":
+        # ownership is a read shortcut: management follows the section role (a head who owns it)
+        initiative = await db.get(Initiative, owner_id)
+        if principal.has("group_head", "group", initiative.group_id):
+            viewed = "group_head"
     manage = (
         principal.is_admin
         or (owner_kind == "group" and principal.has("group_head", "group", owner_id))

@@ -12,7 +12,9 @@ class ProductionSystemIn(BaseModel):
     name: str
     budget: Money
     managing_group_id: int | None = None
+    owner_upn: str | None = None
 
 
 class ProductionSystemPatch(BaseModel):
     budget: Money
+    owner_upn: str | None = None
