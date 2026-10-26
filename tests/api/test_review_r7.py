@@ -314,6 +314,12 @@ async def test_r7_moved_initiative_key_keeps_usage(login_wm, provisioned):
                 spend=9,
             )
         )
+        s.add(  # the part spent under the group's team (r8 B3: attribution by team, not by day)
+            SpendSnapshot(
+                scope_kind="service_key_group", scope_id=str(key.id), period=period, model=None,
+                spend=9,
+            )
+        )
         s.add(  # spent on the move day (the snapshot also keeps one row per day)
             SpendSnapshot(
                 scope_kind="service_key", scope_id=str(key.id),
