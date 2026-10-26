@@ -30,10 +30,24 @@ export default function Initiative({
   // Initiatives and systems have independent ids: the identity is kind + id.
   const systems = new Map<
     number,
-    { id: number; name: string; budget: number; owner?: string; used?: number }
+    {
+      id: number;
+      name: string;
+      budget: number;
+      owner?: string;
+      used?: number;
+      funding: 'department' | 'organization';
+    }
   >();
-  for (const i of managed.data?.systems.rows ?? []) systems.set(i.id, i);
-  for (const i of owned.data.items) systems.set(i.id, { ...i, owner: i.owner_upn ?? undefined });
+  // The managed inventory lists Org Systems only; /systems/mine says how each owned one is funded.
+  for (const i of managed.data?.systems.rows ?? [])
+    systems.set(i.id, { ...i, funding: 'organization' });
+  for (const i of owned.data.items)
+    systems.set(i.id, {
+      ...i,
+      owner: i.owner_upn ?? undefined,
+      funding: i.funding ?? 'organization',
+    });
   // Allocators also manage initiatives they do not own; the owner list adds the tech status.
   const initiatives = new Map<
     number,
@@ -53,6 +67,7 @@ export default function Initiative({
       owner: i.owner,
       used: i.used,
       tech: i.tech,
+      funding: undefined,
     })),
     ...[...systems.values()].map((i) => ({
       ref: `system:${i.id}`,
@@ -63,6 +78,7 @@ export default function Initiative({
       owner: i.owner,
       used: i.used,
       tech: undefined,
+      funding: i.funding,
     })),
   ];
   if (!items.length) return <p className="v2-muted">{s.none}</p>;
@@ -71,16 +87,28 @@ export default function Initiative({
     <>
       <p className="v2-muted">{s.readOnly}</p>
       <nav aria-label={s.title}>
-        {items.map((i) => (
-          <button
-            key={i.ref}
-            type="button"
-            aria-pressed={i.ref === current.ref}
-            onClick={() => setOpen(i.ref)}
-          >
-            {i.name}
-          </button>
-        ))}
+        {[
+          [s.groupInitiatives, (i: (typeof items)[number]) => i.kind === 'initiative'],
+          [s.groupInternal, (i: (typeof items)[number]) => i.funding === 'department'],
+          [s.groupOrg, (i: (typeof items)[number]) => i.funding === 'organization'],
+        ].map(([title, pick]) => {
+          const group = items.filter(pick as (i: (typeof items)[number]) => boolean);
+          return group.length ? (
+            <div key={title as string} role="group" aria-label={title as string}>
+              <h2>{title as string}</h2>
+              {group.map((i) => (
+                <button
+                  key={i.ref}
+                  type="button"
+                  aria-pressed={i.ref === current.ref}
+                  onClick={() => setOpen(i.ref)}
+                >
+                  {i.name}
+                </button>
+              ))}
+            </div>
+          ) : null;
+        })}
       </nav>
       <SystemDetail
         key={current.ref}
@@ -90,6 +118,7 @@ export default function Initiative({
           name: current.name,
           budget: current.budget,
           owner: current.owner,
+          funding: current.funding,
           used: current.used,
           tech: current.tech,
         }}

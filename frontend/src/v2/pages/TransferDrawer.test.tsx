@@ -13,13 +13,20 @@ window.matchMedia ??= ((q: string) => ({
 
 const previewMutate = vi.fn();
 const transferMutate = vi.fn();
+let outcome: { success: boolean; status?: { status: string; state: string } } = {
+  success: false,
+};
 vi.mock('../../api/queries', () => ({
   useTransferPreview: () => ({
     mutate: previewMutate,
     data: { source: { total: 100, after: 90 }, target: { total: 0, after: 10 } },
   }),
-  useTransfer: () => ({ mutate: transferMutate }),
-  useTransferStatus: () => ({ data: undefined }),
+  useTransfer: () => ({
+    mutate: transferMutate,
+    isSuccess: outcome.success,
+    data: { entities: [{ entity: 'transfer', id: 5 }] },
+  }),
+  useTransferStatus: () => ({ data: outcome.status }),
 }));
 
 const rows = [
@@ -43,7 +50,10 @@ function renderDrawer() {
 }
 
 describe('TransferDrawer', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    outcome = { success: false };
+  });
   afterEach(cleanup);
 
   // review-p5 blocker 13: a group and an initiative may share a numeric id
@@ -92,5 +102,17 @@ describe('TransferDrawer', () => {
     }
     expect(keys[0]).toBeTruthy();
     expect(keys[1]).toBe(keys[0]);
+  });
+
+  // review-p5-r9 major F1: only a confirmed compensation says the transfer was canceled
+  it('does not claim a reversal for a failed transfer that was not compensated', () => {
+    outcome = { success: true, status: { status: 'failed', state: 'failed' } };
+    renderDrawer();
+    expect(screen.queryByText(/וההעברה בוטלה/)).toBeNull();
+    expect(screen.getByRole('status').textContent).toMatch(/לא אושר ששוחזרו/);
+    cleanup();
+    outcome = { success: true, status: { status: 'failed', state: 'compensated' } };
+    renderDrawer();
+    expect(screen.getByRole('status').textContent).toMatch(/וההעברה בוטלה/);
   });
 });

@@ -96,6 +96,7 @@ export const he = {
       applyPending: 'היישום בשער ממתין.',
       applyDone: 'היישום בשער הושלם.',
       applyFailed: 'היישום בשער נכשל וההעברה בוטלה.',
+      applyFailedUnresolved: 'היישום בשער נכשל. לא אושר ששוחזרו היתרות, יש לבדוק אותן לפני המשך.',
     },
     orgAlloc: {
       deptEnvelope: 'מעטפת מחלקות',
@@ -205,6 +206,12 @@ export const he = {
       moved: 'המפתח הועבר.',
       movePending: 'ההעברה נרשמה וממתינה לסנכרון עם השער.',
       systemsNone: 'אין יוזמות או מערכות להצגה.',
+      groupInitiatives: 'יוזמות',
+      groupInternal: 'מערכות פנימיות',
+      groupOrg: 'מערכות ארגוניות',
+      funding: 'מקור מימון',
+      fundingDepartment: 'ממומן ממעטפת המחלקה',
+      fundingOrganization: 'ממומן ממעטפת הארגון',
     },
     deptPage: {
       kpiTotal: 'תקציב המחלקה',

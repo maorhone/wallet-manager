@@ -902,14 +902,26 @@ export const useTransfer = () => {
 };
 
 /** D-071: a transfer's application state, refreshed until it reaches done or failed. */
-export const useTransferStatus = (id: number | null) =>
-  useQuery({
+export const useTransferStatus = (id: number | null) => {
+  const qc = useQueryClient();
+  return useQuery({
     queryKey: ['transfers', id],
-    queryFn: () =>
-      apiFetch<{ id: number; status: 'done' | 'pending_apply' | 'failed' }>(`/transfers/${id}`),
+    queryFn: async () => {
+      const t = await apiFetch<{
+        id: number;
+        status: 'done' | 'pending_apply' | 'failed';
+        state?: string;
+      }>(`/transfers/${id}`);
+      // Compensation changes the balances the creation already refreshed: once the transfer is
+      // terminal, budget, allocation and attention data are read again.
+      if (t.status !== 'pending_apply')
+        void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'transfers' });
+      return t;
+    },
     enabled: id !== null,
     refetchInterval: (q) => (q.state.data?.status === 'pending_apply' ? 3000 : false),
   });
+};
 
 export interface BulkBody {
   all: boolean;

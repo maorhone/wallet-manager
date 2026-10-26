@@ -59,7 +59,9 @@ export function TransferDrawer({
         <p role="status">
           {s.done}{' '}
           {applied.data?.status === 'failed'
-            ? s.applyFailed
+            ? applied.data.state === 'compensated'
+              ? s.applyFailed
+              : s.applyFailedUnresolved
             : applied.data?.status === 'pending_apply'
               ? s.applyPending
               : applied.data?.status === 'done'

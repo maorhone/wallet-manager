@@ -356,7 +356,8 @@ async def get(db, principal: Principal, transfer_id: int) -> dict:
         "id": transfer.id, "group_id": transfer.group_id, "amount": transfer.amount,
         "source": {"kind": transfer.source_kind, "id": transfer.source_id},
         "target": {"kind": transfer.target_kind, "id": transfer.target_id},
-        "status": await transfer_status(db, transfer), "created_by": transfer.created_by,
+        "status": await transfer_status(db, transfer), "state": transfer.state,
+        "created_by": transfer.created_by,
         "created_at": transfer.created_at,
     }  # fmt: skip
 

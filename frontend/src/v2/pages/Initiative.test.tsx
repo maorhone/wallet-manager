@@ -35,7 +35,24 @@ vi.mock('../../api/queries', () => ({
   }),
   useMySystems: () => ({
     isPending: false,
-    data: { items: [{ id: 7, name: 'Org sys', budget: 500, owner_upn: 'dani@corp.example' }] },
+    data: {
+      items: [
+        {
+          id: 7,
+          name: 'Org sys',
+          budget: 500,
+          owner_upn: 'dani@corp.example',
+          funding: 'organization',
+        },
+        {
+          id: 8,
+          name: 'Int sys',
+          budget: 300,
+          owner_upn: 'dani@corp.example',
+          funding: 'department',
+        },
+      ],
+    },
   }),
   useServiceKeys: () => ({
     isPending: false,
@@ -111,5 +128,21 @@ describe('Initiative', () => {
       '7',
       'Pilot',
     ]);
+  });
+  // review-p5-r9 major F1: Internal and Organization Systems are grouped and labeled by funding
+  it('groups systems by funding source and labels each', () => {
+    render(
+      <MemoryRouter>
+        <Initiative canMove={false} />
+      </MemoryRouter>,
+    );
+    const internal = screen.getByRole('group', { name: 'מערכות פנימיות' });
+    const org = screen.getByRole('group', { name: 'מערכות ארגוניות' });
+    expect(internal.textContent).toContain('Int sys');
+    expect(org.textContent).toContain('Org sys');
+    fireEvent.click(screen.getByRole('button', { name: 'Int sys' }));
+    expect(screen.getByText('ממומן ממעטפת המחלקה')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Org sys' }));
+    expect(screen.getByText('ממומן ממעטפת הארגון')).toBeTruthy();
   });
 });

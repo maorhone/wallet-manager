@@ -14,6 +14,7 @@ export interface DetailSubject {
   /** Subject-level consumption (historical attribution); the key sum is only a fallback. */
   used?: number;
   owner?: string;
+  funding?: 'department' | 'organization';
   tech?: keyof typeof s.tech;
 }
 
@@ -52,6 +53,14 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
             <dt>{s.owner}</dt>
             <dd>
               <bdi dir="ltr">{subject.owner}</bdi>
+            </dd>
+          </>
+        )}
+        {subject.funding && (
+          <>
+            <dt>{s.funding}</dt>
+            <dd>
+              {subject.funding === 'organization' ? s.fundingOrganization : s.fundingDepartment}
             </dd>
           </>
         )}
