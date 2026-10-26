@@ -22,6 +22,7 @@ from app.services import requests as requests_service
 from app.services import views
 from app.services.history import values_as_of
 from app.services.rate_card import metered_value
+from app.services.service_keys import _moved_keys, initiative_used  # noqa: F401
 from app.services.spend import Spend
 from app.services.transfers import group_committed
 
@@ -93,7 +94,8 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     unused = None  # a past period has no live allocations to read: the allocated-minus-used rule
     if at is None:
         committed = await group_committed(
-            db, spend, group, with_shares=True, initiative_spent=ini_used
+            db, spend, group, with_shares=True, initiative_spent=ini_used,
+            tz=settings.app_timezone,
         )
         unused = max(committed - own_used - (used - own_used), Decimal(0))
     remaining = w["total"] - used
@@ -103,55 +105,14 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         "kpis": {
             "total": w["total"], "allocated": w["allocated"], "used": used,
             "remaining": remaining,
-            "metered_value": await metered_value(
-                db, "group", group_id, s["period"], settings.app_timezone
+            "metered_value": await _subtree_metered_value(
+                db, group_id, at, s["period"], settings.app_timezone
             ),
         },
         "bar": _bar(used, w["allocated"], w["total"], unused),
         "rows": rows,
         "actions": s["actions"],
     }  # fmt: skip
-
-
-async def initiative_used(
-    db, spend: Spend, initiative_id: int, period: str, tz: str = "UTC"
-) -> Decimal:
-    """No initiative snapshot scope exists: sum its keys (revoked/rotated generations included,
-    and keys moved to a system for the periods up to the move, r6 B3)."""
-    key_ids = await db.scalars(
-        select(ServiceKey.id).where(
-            ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
-        )
-    )
-    used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
-    for key_id, this_period in await _moved_keys(db, initiative_id, period, tz):
-        if not this_period:
-            used += spend.used("service_key", key_id)
-            continue
-        # Moved in this period: only what the key spent under its group's team counts; the
-        # move day is split by the spend log's team, not by calendar day (r8 B3).
-        used += spend.used("service_key_group", key_id)
-    return used
-
-
-async def _moved_keys(
-    db, initiative_id: int, period: str, tz: str = "UTC"
-) -> list[tuple[int, bool]]:
-    """Keys moved out of the initiative in ``period`` or later: (id, moved within ``period``).
-    Months are those of ``tz`` (APP_TIMEZONE), like the snapshot periods (r9 B3)."""
-    out = []
-    zone = ZoneInfo(tz)
-    for a in await db.scalars(
-        select(AuditLog).where(
-            AuditLog.entity == "service_key",
-            AuditLog.before["owner_kind"].as_string() == "initiative",
-            AuditLog.before["owner_id"].as_string() == str(initiative_id),
-        )
-    ):
-        month = a.at.astimezone(zone).strftime("%Y-%m")
-        if a.after and a.after.get("owner_kind") == "system" and month >= period:
-            out.append((int(a.entity_id), month == period))
-    return out
 
 
 def _bar(used: Decimal, allocated: Decimal, total: Decimal, unused: Decimal | None = None) -> dict:
@@ -216,6 +177,18 @@ async def attention(db, principal, settings: Settings, scope: str, raw_period: s
 def _previous(period: str) -> str:
     year, month = map(int, period.split("-"))
     return f"{year - (month == 1)}-{(month - 2) % 12 + 1:02d}"
+
+
+async def _subtree_metered_value(db, group_id: int, at, period: str, tz: str) -> Decimal | None:
+    """D-049: tokens x rate over the group and its descendants, the scope ``used`` covers (r10 B3);
+    ``None`` if any group cannot be priced."""
+    total = Decimal(0)
+    for gid in [group_id, *await views._descendants(db, group_id, at)]:
+        value = await metered_value(db, "group", gid, period, tz)
+        if value is None:
+            return None
+        total += value
+    return total
 
 
 async def _dept_metered_value(db, dept_id: int, period: str, tz: str) -> Decimal | None:

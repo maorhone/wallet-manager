@@ -52,7 +52,7 @@ from app.schemas.transfers import EndpointIn, TransferIn
 from app.services import notifications
 from app.services.personal_values import authorize
 from app.services.production import system_committed
-from app.services.service_keys import initiative_committed
+from app.services.service_keys import initiative_committed, initiative_used
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
 from app.services.validation import check_sum, group_allocated, pending_incoming, settled_budget
 from app.writes import WriteContext, plain
@@ -101,7 +101,7 @@ async def lock_scope(db, group: Grp, endpoints) -> None:
 
 
 async def group_committed(
-    db, spend: Spend, group: Grp, with_shares: bool = False, initiative_spent=None
+    db, spend: Spend, group: Grp, with_shares: bool = False, initiative_spent=None, tz: str = "UTC"
 ) -> Decimal:
     """Consumption plus what is still allocated and unspent; spent credit is counted once.
 
@@ -135,16 +135,13 @@ async def group_committed(
     }
     # An initiative's consumption comes from ALL its keys, revoked ones included: it is in the
     # group's own spend already, so it must not stay counted as unspent funding (r9 B1a1).
-    # The overview passes ``initiative_spent`` (also covering keys moved to a system, r9 B3).
+    # ``initiative_used`` also covers keys moved to a system (r9 B3, r10 B1a1); the overview
+    # passes its already computed values.
     spent = initiative_spent
     if spent is None:
-        spent = {}
-        for key in await db.scalars(
-            select(ServiceKey).where(
-                ServiceKey.owner_kind == "initiative", ServiceKey.owner_id.in_(list(initiatives))
-            )
-        ):
-            spent[key.owner_id] = spent.get(key.owner_id, ZERO) + spend.used("service_key", key.id)
+        spent = {
+            i: await initiative_used(db, spend, i, spend.period, tz) for i in initiatives
+        }
     for key in await db.scalars(
         select(ServiceKey).where(
             ServiceKey.status.in_(("active", "pending")),
@@ -159,7 +156,7 @@ async def group_committed(
     return committed
 
 
-async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
+async def _side(db, spend: Spend, group: Grp, ep: EndpointIn, tz: str = "UTC") -> Side:
     """Load one end, which must belong to ``group``; anything else is invisible (404)."""
     if ep.kind == "employee":
         row = await db.get(Employee, ep.id)
@@ -182,7 +179,7 @@ async def _side(db, spend: Spend, group: Grp, ep: EndpointIn) -> Side:
         row = await db.get(Grp, row_id)
         if row is None or row.parent_group_id != group.id or row.status == "archived":
             raise _not_found()
-        committed = await group_committed(db, spend, row)
+        committed = await group_committed(db, spend, row, tz=tz)
         return Side("group", ep.id, row.name, row.base_budget, committed, row)
     row = await db.get(ProductionSystem, row_id)
     if (
@@ -238,8 +235,8 @@ async def _plan(
         raise ApiError(
             503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
         ) from None
-    source = await _side(ctx.db, spend, group, body.source)
-    target = await _side(ctx.db, spend, group, body.target)
+    source = await _side(ctx.db, spend, group, body.source, ctx.settings.app_timezone)
+    target = await _side(ctx.db, spend, group, body.target, ctx.settings.app_timezone)
     if (source.kind, source.id) == (target.kind, target.id):
         raise invalid_request("Source and target are the same", {"reason": "same_entity"})
     for side in (source, target):  # unsettled incoming credit cannot move on, whatever the kind

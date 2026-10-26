@@ -293,3 +293,44 @@ async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
         ],
         "spend_taken_at": spend.taken_at,
     }
+
+
+async def initiative_used(
+    db, spend: Spend, initiative_id: int, period: str, tz: str = "UTC"
+) -> Decimal:
+    """No initiative snapshot scope exists: sum its keys (revoked/rotated generations included,
+    and keys moved to a system for the periods up to the move, r6 B3)."""
+    key_ids = await db.scalars(
+        select(ServiceKey.id).where(
+            ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
+        )
+    )
+    used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
+    for key_id, this_period in await _moved_keys(db, initiative_id, period, tz):
+        if not this_period:
+            used += spend.used("service_key", key_id)
+            continue
+        # Moved in this period: only what the key spent under its group's team counts; the
+        # move day is split by the spend log's team, not by calendar day (r8 B3).
+        used += spend.used("service_key_group", key_id)
+    return used
+
+
+async def _moved_keys(
+    db, initiative_id: int, period: str, tz: str = "UTC"
+) -> list[tuple[int, bool]]:
+    """Keys moved out of the initiative in ``period`` or later: (id, moved within ``period``).
+    Months are those of ``tz`` (APP_TIMEZONE), like the snapshot periods (r9 B3)."""
+    out = []
+    zone = ZoneInfo(tz)
+    for a in await db.scalars(
+        select(AuditLog).where(
+            AuditLog.entity == "service_key",
+            AuditLog.before["owner_kind"].as_string() == "initiative",
+            AuditLog.before["owner_id"].as_string() == str(initiative_id),
+        )
+    ):
+        month = a.at.astimezone(zone).strftime("%Y-%m")
+        if a.after and a.after.get("owner_kind") == "system" and month >= period:
+            out.append((int(a.entity_id), month == period))
+    return out
