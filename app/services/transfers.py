@@ -23,11 +23,12 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import all_, any_, literal, select, update
+from sqlalchemy import all_, any_, exists, literal, or_, select, update
 
 from app.db import LockKind, lock_parent
 from app.errors import ApiError, invalid_request
 from app.models import (
+    AuditLog,
     Employee,
     Grp,
     Initiative,
@@ -52,7 +53,7 @@ from app.services.production import system_committed
 from app.services.service_keys import initiative_committed
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
 from app.services.validation import check_sum, group_allocated, pending_incoming, settled_budget
-from app.writes import WriteContext
+from app.writes import WriteContext, plain
 
 ZERO = Decimal(0)
 _ENTITY = {"employee": "employee", "group": "group", "system": "production_system"}
@@ -307,15 +308,21 @@ async def create(
 
 
 async def transfer_status(db, transfer: Transfer) -> str:
-    """done | pending_apply | failed, from the outbox rows the transfer queued (D-071)."""
-    if not transfer.write_ids:
-        return "done"
+    """done | pending_apply | failed: the lifecycle state first, then the queued writes (D-071).
+
+    ``applied`` needs the source reduction applied AND the fence passed; a compensated or failed
+    transfer never reads as done, and an unsettled one (late-spend fence unreadable) stays pending.
+    """
+    if transfer.state in ("compensated", "failed"):
+        return "failed"
     statuses = set(
-        await db.scalars(select(LitellmWrite.status).where(LitellmWrite.id.in_(transfer.write_ids)))
+        await db.scalars(
+            select(LitellmWrite.status).where(LitellmWrite.id.in_(transfer.write_ids or []))
+        )
     )
     if "failed" in statuses:
         return "failed"
-    return "pending_apply" if "pending" in statuses else "done"
+    return "pending_apply" if transfer.state == "pending" else "done"
 
 
 async def get(db, principal: Principal, transfer_id: int) -> dict:
@@ -371,28 +378,48 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
         field = {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget")
         rows.append((row, field, getattr(row, field) + delta))
     claim = update(Transfer).where(Transfer.id == transfer.id, Transfer.state == "pending")
-    if any(new < 0 for _, _, new in rows) or await _overallocates_parent(db, rows, parents):
+    if any(new < 0 for _, _, new in rows) or await _overallocates_parent(
+        db, transfer, rows, parents
+    ):
         # the target gave the credit away, or returning it would overfill the source's current
         # parent: no balance change, the transfer stays failed for an operator (never silent)
         await db.execute(claim.values(state="failed"))
         return False
     if await db.scalar(claim.values(state="compensated").returning(Transfer.id)) is None:
         return False
-    for row, field, new in rows:
+    before, after = {}, {}
+    for (kind, ident), (row, field, new) in zip(ends, rows, strict=True):
+        before[f"{kind}:{ident}"], after[f"{kind}:{ident}"] = getattr(row, field), new
         setattr(row, field, new)
+    db.add(
+        AuditLog(
+            actor_upn="system:compensation",
+            actor_role="system",
+            entity="transfer_compensation",
+            entity_id=str(transfer.id),
+            before=plain(before),
+            after=plain({**after, "transfer_id": transfer.id, "group_id": transfer.group_id}),
+            reason=reason,
+            request_id=f"transfer:{transfer.id}:compensation",
+        )
+    )
     for w in held:
         w.status, w.last_error = "failed", reason
     return True
 
 
-async def _overallocates_parent(db, rows, parents) -> bool:
-    """Net effect of the restore on each current parent (both ends may share one)."""
+async def _overallocates_parent(db, transfer, rows, parents) -> bool:
+    """Net effect of the restore on each current parent: both ends, whatever their kind."""
     net: dict[int, Decimal] = {}
     for row, field, new in rows:
         if isinstance(row, Grp):
             pid = parents.get(str(row.id))
-            if pid is not None:
-                net[pid] = net.get(pid, ZERO) + new - getattr(row, field)
+        elif isinstance(row, Employee | Initiative):
+            pid = row.group_id
+        else:
+            continue  # internal systems are carved from the department, not a group
+        if pid is not None:
+            net[pid] = net.get(pid, ZERO) + new - getattr(row, field)
     for pid, delta in net.items():
         if delta <= 0:
             continue
@@ -445,19 +472,57 @@ async def held_by_incoming(db, row: LitellmWrite) -> bool:
     incoming credit upstream past an unreadable or failed fence (r5 B1a1).
     """
     kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
-    return (
-        await db.scalar(
-            select(Transfer.id)
-            .where(
-                Transfer.target_kind.in_(kinds),
-                Transfer.target_id == row.entity_id,
-                Transfer.state.in_(("pending", "failed")),
-                literal(row.id) != all_(Transfer.write_ids),
-            )
-            .limit(1)
+    # The write is the destination write of one of those transfers: it may follow its siblings'
+    # source reductions (no circular wait between receipts), the fence covers their credit.
+    own = await db.scalar(
+        select(Transfer.id).where(
+            literal(row.id) == any_(Transfer.write_ids),
+            or_(Transfer.first_write_id.is_(None), Transfer.first_write_id != row.id),
         )
-        is not None
     )
+    q = select(Transfer.id).where(
+        Transfer.target_kind.in_(kinds),
+        Transfer.target_id == row.entity_id,
+        Transfer.state.in_(("pending", "failed")),
+        literal(row.id) != all_(Transfer.write_ids),
+    )
+    if own is not None:
+        q = q.where(
+            Transfer.id != own,
+            or_(
+                Transfer.state == "failed",
+                exists().where(
+                    LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status != "applied"
+                ),
+            ),
+        )
+    return await db.scalar(q.limit(1)) is not None
+
+
+async def lock_for_write(db, row: LitellmWrite) -> None:
+    """Take the money locks a transfer to ``row``'s entity takes, in the same order (r5 B1a1/B3).
+
+    The worker holds them from the incoming-credit check until its commit, so a transfer cannot
+    commit between the check and the payload rebuild. Call BEFORE locking the outbox row.
+    """
+    if row.entity == "employee":
+        gid = await db.scalar(select(Employee.group_id).where(Employee.upn == row.entity_id))
+        ends = [("employee", row.entity_id)]
+    elif row.entity == "group" and row.entity_id.isdigit():
+        gid = await db.scalar(select(Grp.parent_group_id).where(Grp.id == int(row.entity_id)))
+        ends = [("group", row.entity_id)]
+    elif row.entity == "production_system" and row.entity_id.isdigit():
+        gid = await db.scalar(
+            select(ProductionSystem.managing_group_id).where(
+                ProductionSystem.id == int(row.entity_id)
+            )
+        )
+        ends = [("system", row.entity_id)]
+    else:
+        return
+    group = await db.get(Grp, gid) if gid is not None else None
+    if group is not None:
+        await lock_scope(db, group, ends)
 
 
 async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime) -> bool:
@@ -473,11 +538,26 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
     transfer = await _transfer_of_source(db, write.depends_on)
     if transfer is None or write.id not in (transfer.write_ids or [])[1:]:
         return True
-    if not await _source_overspent(db, reader, transfer, now):
-        return True
-    if transfer.state == "pending":
-        await _release_cancelled(db, settings, transfer)
-    return False
+    ok = True
+    # The rebuilt payload carries every unsettled receipt of this target whose source already
+    # applied, so each of those sources is fenced here too (aggregate fence, r5).
+    siblings = await db.scalars(
+        select(Transfer).where(
+            Transfer.target_kind == transfer.target_kind,
+            Transfer.target_id == transfer.target_id,
+            Transfer.state == "pending",
+            Transfer.id != transfer.id,
+            exists().where(
+                LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status == "applied"
+            ),
+        )
+    )
+    for other in [transfer, *siblings]:
+        if await _source_overspent(db, reader, other, now):
+            ok = False
+            if other.state == "pending":
+                await _release_cancelled(db, settings, other)
+    return ok
 
 
 async def settle(db, settings, reader, now: datetime, write_id: int | None = None) -> None:

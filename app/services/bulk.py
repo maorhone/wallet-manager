@@ -1,8 +1,6 @@
 """D-066/D-075: bulk allocation replaces each chosen member's base cap."""
 
-from datetime import datetime
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
@@ -14,8 +12,7 @@ from app.permissions import Principal, can_write_members, target_tier
 from app.schemas.groups import BulkAllocationIn, MemberCapIn
 from app.services import members
 from app.services.personal_values import authorize
-from app.services.spend import SpendUnavailable, fresh_spend
-from app.services.validation import group_allocated, pending_incoming, settled_budget
+from app.services.validation import group_allocated, settled_budget
 from app.writes import WriteContext
 
 
@@ -94,25 +91,4 @@ async def commit(
 ) -> list[dict]:
     rows = await _caps(ctx.db, principal, directory, group_id, body)
     await ctx.lock(LockKind.GROUP, group_id)
-    current = await members._members(ctx.db, group_id)
-    cuts = [r for r in rows if r.upn in current and r.base_cap < current[r.upn].base_cap]
-    if cuts:  # consumed credit is never returned to the pool (D-043/D-069): refuse, no clamping
-        zone = ZoneInfo(ctx.settings.app_timezone)
-        try:
-            now = (clock.now() if clock else datetime.now(zone)).astimezone(zone)
-            spend = await fresh_spend(ctx.db, reader, now)
-        except SpendUnavailable:
-            raise ApiError(
-                503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
-            ) from None
-        floors = {
-            r.upn: spend.used("employee", r.upn) + await pending_incoming(ctx.db, "employee", r.upn)
-            for r in cuts
-        }  # consumed credit plus unsettled incoming reservation
-        low = sorted(r.upn for r in cuts if r.base_cap < floors[r.upn])
-        if low:
-            raise invalid_request(
-                "A new cap cannot be below what the member already used",
-                {"reason": "below_consumed", "upns": low},
-            )
-    return await members.set_caps(ctx, principal, directory, group_id, rows)
+    return await members.set_caps(ctx, principal, directory, group_id, rows, reader, clock)

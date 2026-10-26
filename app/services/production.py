@@ -145,11 +145,11 @@ async def system_committed(db, spend: Spend, system: ProductionSystem) -> Decima
     A key that was ever rotated reserves its full cap (and the retired generations theirs):
     per-key spend merges all generations, so it cannot lower the current credential's reserve.
     """
+    # Every status: a revoked key's upstream delete may be pending and a failed generation may
+    # hide a created credential, so their reservations (and retired generations) stay committed.
     keys = await db.scalars(
         select(ServiceKey).where(
-            ServiceKey.owner_kind == "system",
-            ServiceKey.owner_id == system.id,
-            ServiceKey.status.in_(("active", "pending")),
+            ServiceKey.owner_kind == "system", ServiceKey.owner_id == system.id
         )
     )
     reserved = ZERO

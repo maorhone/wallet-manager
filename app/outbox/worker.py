@@ -20,7 +20,13 @@ from app.litellm_client import (
 from app.models import Employee, LitellmWrite, Request
 from app.outbox.desired import DesiredUnavailable, build
 from app.services.spend import SpendUnavailable
-from app.services.transfers import compensate_failed_source, fence_release, held_by_incoming, settle
+from app.services.transfers import (
+    compensate_failed_source,
+    fence_release,
+    held_by_incoming,
+    lock_for_write,
+    settle,
+)
 
 _METHODS = {
     "/organization/update": "organization_update",
@@ -121,7 +127,11 @@ async def drain(
         async with sf() as s:
             # The seed CLI can overlap the live worker. Hold the row through apply + commit
             # so another drain rechecks its committed status before calling LiteLLM.
-            row = await s.get(LitellmWrite, row_id, with_for_update=True)
+            peek = await s.get(LitellmWrite, row_id)
+            if peek is None or peek.status != "pending":
+                continue
+            await lock_for_write(s, peek)  # money locks first (module docstring of transfers)
+            row = await s.get(LitellmWrite, row_id, with_for_update=True, populate_existing=True)
             if row is None or row.status != "pending":
                 continue
             if (

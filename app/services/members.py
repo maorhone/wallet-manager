@@ -1,11 +1,13 @@
 import asyncio
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
 from app.db import LockKind
 from app.directory import Directory
-from app.errors import invalid_request, scope_forbidden, self_allocation_forbidden
+from app.errors import ApiError, invalid_request, scope_forbidden, self_allocation_forbidden
 from app.models import Employee, EmployeeModelCap, GroupModelPot, Grp, Policy
 from app.permissions import (
     ADMIN,
@@ -17,11 +19,13 @@ from app.permissions import (
 )
 from app.schemas.groups import MemberCapIn, MemberDefaultsIn, MemberLimitsIn
 from app.services.personal_values import authorize, authorize_rows
+from app.services.spend import SpendUnavailable, fresh_spend
 from app.services.validation import (
     check_limit,
     check_model_sums,
     check_sum,
     group_allocated,
+    pending_incoming,
     settled_budget,
 )
 from app.writes import WriteContext
@@ -42,19 +46,50 @@ async def _target(ctx: WriteContext, directory: Directory, group: Grp, upn: str)
     return employee, await target_tier(ctx.db, directory, upn)
 
 
+async def _check_cut_floors(ctx, reader, clock, current, rows) -> None:
+    cuts = [r for r in rows if r.upn in current and r.base_cap < current[r.upn].base_cap]
+    if not cuts:
+        return
+    zone = ZoneInfo(ctx.settings.app_timezone)
+    try:
+        now = (clock.now() if clock else datetime.now(zone)).astimezone(zone)
+        spend = await fresh_spend(ctx.db, reader, now)
+    except SpendUnavailable:
+        raise ApiError(
+            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
+        ) from None
+    floors = {
+        r.upn: spend.used("employee", r.upn) + await pending_incoming(ctx.db, "employee", r.upn)
+        for r in cuts
+    }  # consumed credit plus unsettled incoming reservation
+    low = sorted(r.upn for r in cuts if r.base_cap < floors[r.upn])
+    if low:
+        raise invalid_request(
+            "A new cap cannot be below what the member already used",
+            {"reason": "below_consumed", "upns": low},
+        )
+
+
 async def set_caps(
     ctx: WriteContext,
     principal: Principal,
     directory: Directory,
     group_id: int,
     body: list[MemberCapIn],
+    reader=None,
+    clock=None,
 ) -> list[dict]:
-    """FR-G1: bulk base caps in one transaction; Σ caps <= base budget × over-allocation factor."""
+    """FR-G1: bulk base caps in one transaction; Σ caps <= base budget × over-allocation factor.
+
+    ONE mutation path (bulk and direct endpoints): a cut may not go below the member's consumed
+    credit plus unsettled incoming credit (D-043/D-069).
+    """
     await can_write_members(ctx.db, principal, group_id)
     group = await ctx.db.get(Grp, group_id)
     if len({r.upn for r in body}) != len(body):
         raise invalid_request("Duplicate upn in request")
     await ctx.lock(LockKind.GROUP, group_id)
+    await ctx.db.refresh(group)  # loaded before the lock: a transfer may have changed the budget
     members = await _members(ctx.db, group_id)
 
     targets = []
@@ -71,6 +106,7 @@ async def set_caps(
         (e.base_cap for e in members.values()), Decimal(0)
     )
     changed = [r.upn for r in body if members[r.upn].base_cap != r.base_cap]
+    await _check_cut_floors(ctx, reader, clock, members, body)
     rows = [{"upn": u, "code": "PARENT_OVERALLOCATED"} for u in changed]
     if err := check_sum(total, await settled_budget(ctx.db, group), group.overalloc_factor, rows):
         raise err

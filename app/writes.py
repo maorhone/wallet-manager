@@ -125,9 +125,18 @@ async def sync_status(db: AsyncSession, entity: str, ids: list[str]) -> dict[str
         for transfer in await db.scalars(
             select(Transfer).where(Transfer.id.in_([int(i) for i in ids]))
         ):
-            for status in await db.scalars(
-                select(LitellmWrite.status).where(LitellmWrite.id.in_(transfer.write_ids))
-            ):
+            statuses = list(
+                await db.scalars(
+                    select(LitellmWrite.status).where(LitellmWrite.id.in_(transfer.write_ids))
+                )
+            )
+            # the lifecycle state wins: compensated/failed never read as applied, an unsettled
+            # transfer (fence not passed) stays pending although its writes are applied
+            if transfer.state in ("compensated", "failed"):
+                statuses.append("failed")
+            elif transfer.state == "pending":
+                statuses.append("pending")
+            for status in statuses:
                 if _RANK[status] > _RANK[out[str(transfer.id)]]:
                     out[str(transfer.id)] = status
     return out

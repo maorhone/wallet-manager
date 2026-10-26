@@ -80,7 +80,10 @@ async def put_member_defaults(
 async def put_member_caps(
     group_id: int, body: list[MemberCapIn], ctx: Write, principal: CurrentPrincipal, req: Request
 ):
-    entities = await members.set_caps(ctx, principal, req.app.state.directory, group_id, body)
+    entities = await members.set_caps(
+        ctx, principal, req.app.state.directory, group_id, body,
+        req.app.state.litellm_reader, req.app.state.clock,
+    )  # fmt: skip
     return await write_response(ctx, entities)
 
 
