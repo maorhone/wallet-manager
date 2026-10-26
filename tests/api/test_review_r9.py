@@ -113,7 +113,9 @@ async def test_r9_overview_counts_grant_shares_as_allocated(login_wm, provisione
     async with provisioned() as s:
         for e in await s.scalars(select(Employee).where(Employee.group_id == A1)):
             e.base_cap = 0
-        grant = Grant(group_id=A1, department_id=1, amount=100, returned=0, status="active", model=None)
+        grant = Grant(
+            group_id=A1, department_id=1, amount=100, returned=0, status="active", model=None
+        )
         s.add(grant)
         await s.flush()
         s.add(GrantShare(grant_id=grant.id, upn=DANI, amount=100, status="active"))
