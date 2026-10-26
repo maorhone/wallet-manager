@@ -12,6 +12,7 @@ from app.config import Settings
 from app.directory import Directory
 from app.errors import ApiError, invalid_request
 from app.models import (
+    AuditLog,
     Department,
     DepartmentModelAllowance,
     Employee,
@@ -144,7 +145,40 @@ async def _parent_map(db, department_id: int, at) -> dict[int, int | None]:
     groups = list(await db.scalars(select(Grp).where(Grp.department_id == department_id)))
     live = {str(g.id): {"parent_group_id": g.parent_group_id} for g in groups}
     past = await values_as_of(db, "group", live, at)
-    return {int(k): v["parent_group_id"] for k, v in past.items()}
+    parents = {int(k): v["parent_group_id"] for k, v in past.items()}
+    if at is None:
+        return parents
+    # Parent insertion is audited once, on the new parent; it also moved the child (r7 B3).
+    inserted = await db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.entity == "group",
+            AuditLog.entity_id.in_([str(g.id) for g in groups]),
+            AuditLog.after.has_key("child_id"),
+        )
+        .order_by(AuditLog.at, AuditLog.id)
+    )
+    for a in inserted:
+        child = int(a.after["child_id"])
+        if child not in parents:
+            continue
+        own_later = await db.scalar(
+            select(AuditLog.id)
+            .where(
+                AuditLog.entity == "group",
+                AuditLog.entity_id == str(child),
+                AuditLog.at > a.at,
+                AuditLog.at <= at,
+                AuditLog.after.has_key("parent_group_id"),
+            )
+            .limit(1)
+        )
+        if own_later is None:
+            moved = a.at <= at
+            parents[child] = (
+                a.after["child_parent_group_id"] if moved else a.before["child_parent_group_id"]
+            )
+    return parents
 
 
 async def _internal_as_of(db, department_id: int, at) -> Decimal:

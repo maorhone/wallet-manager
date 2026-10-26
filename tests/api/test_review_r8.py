@@ -106,3 +106,75 @@ async def test_r8_live_parent_below_live_children(login_wm, provisioned, litellm
     await litellm.team_update(TeamUpdate(team_id="A2", max_budget=5000000))
     found = [f for f in await _report(await login_wm("admin")) if f["level"] == "group"]
     assert [(f["source"], f["entity_id"]) for f in found] == [("litellm", 1)]
+
+
+async def _audit(s, entity, entity_id, before, after, at):
+    from app.models import AuditLog
+
+    s.add(
+        AuditLog(
+            actor_upn="x", actor_role="platform_admin", entity=entity, entity_id=str(entity_id),
+            before=before, after=after, at=at, request_id=f"r8-{entity}-{entity_id}-{at}",
+        )
+    )  # fmt: skip
+
+
+def _months_ago(n):
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(day=15, hour=12, minute=0, second=0, microsecond=0)
+    month = now.month - n
+    return now.replace(year=now.year + (month - 1) // 12, month=(month - 1) % 12 + 1)
+
+
+# review-p5-r7 major B3: a historical overview row uses the child's budget of that period
+async def test_r8_overview_child_total_is_historical(login_wm, provisioned):
+    from app.models import Grp, SpendSnapshot
+
+    last = _months_ago(1)
+    async with provisioned() as s:
+        child = Grp(
+            litellm_team_id="r8-kid", department_id=1, name="Kid", base_budget=60,
+            default_member_cap=0, status="active", parent_group_id=1,
+        )  # fmt: skip
+        s.add(child)
+        await s.flush()
+        await _audit(s, "group", child.id, {}, {"parent_group_id": 1, "base_budget": 30},
+                     _months_ago(2))  # fmt: skip
+        await _audit(s, "group", child.id, {"base_budget": 30}, {"base_budget": 60},
+                     _months_ago(0))  # fmt: skip
+        s.add(
+            SpendSnapshot(
+                scope_kind="group",
+                scope_id=str(child.id),
+                period=last.strftime("%Y-%m"),
+                model=None,
+                spend=30,
+            )
+        )
+        await s.commit()
+        cid = child.id
+    r = await (await login_wm("dana")).get(
+        f"/budget/overview?scope=group:1&period={last.strftime('%Y-%m')}"
+    )
+    row = next(x for x in r.json()["rows"] if x["id"] == str(cid))
+    assert (row["total"], row["percent"]) == (30, 1.0)
+
+
+# review-p5-r7 major B3: history follows a parent insertion (audited on the new parent only)
+async def test_r8_history_follows_parent_insertion(login_wm, provisioned):
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import Grp
+    from app.services.views import _parent_map
+    from tests.api.test_org_systems import post
+
+    admin = await login_wm("admin")
+    r = await post(admin, "/groups/1/insert-parent", {"name": "Mid", "litellm_team_id": "r8-mid"})
+    assert r.status_code == 200, r.text
+    async with provisioned() as s:
+        new_id = await s.scalar(select(Grp.id).where(Grp.litellm_team_id == "r8-mid"))
+        now = datetime.now(UTC)
+        before = await _parent_map(s, 1, now - timedelta(days=1))
+        after = await _parent_map(s, 1, now + timedelta(days=1))
+        assert (before[1], after[1]) == (None, new_id)

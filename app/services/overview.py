@@ -19,6 +19,7 @@ from app.models import (
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import requests as requests_service
 from app.services import views
+from app.services.history import values_as_of
 from app.services.rate_card import metered_value
 from app.services.spend import Spend
 
@@ -51,17 +52,26 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         ]  # fmt: skip
     at = views.period_ctx(settings, raw_period)["at"]
     parents = await views._parent_map(db, group.department_id, at)
-    for child in await db.scalars(
-        select(Grp).where(
-            Grp.id.in_([g for g, p in parents.items() if p == group_id]), Grp.status != "archived"
+    kids = list(
+        await db.scalars(
+            select(Grp).where(
+                Grp.id.in_([g for g, p in parents.items() if p == group_id]),
+                Grp.status != "archived",
+            )
         )
-    ):
+    )
+    # Totals are the child's budget at the same cutoff as its membership (r7 B3).
+    budgets = await values_as_of(
+        db, "group", {str(c.id): {"base_budget": c.base_budget} for c in kids}, at
+    )
+    for child in kids:
+        total = budgets[str(child.id)]["base_budget"]
         # A child's row carries its whole subtree, like the headline (D-055, r6 B3).
         subtree = [child.id, *await views._descendants(db, child.id, at)]
         used = sum((spend.used("group", i) for i in subtree), Decimal(0))
         rows.append(
-            {"kind": "group", "id": str(child.id), "name": child.name, "total": child.base_budget,
-             "used": used, "percent": _pct(used, child.base_budget), "state": None}
+            {"kind": "group", "id": str(child.id), "name": child.name, "total": total,
+             "used": used, "percent": _pct(used, total), "state": None}
         )  # fmt: skip
     for ini in await db.scalars(
         select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
