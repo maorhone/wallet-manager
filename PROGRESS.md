@@ -1091,3 +1091,12 @@ Done: blocker 13 (kind:id transfer endpoints), preview-bound confirm (transfer+b
 
 ## fix-review-p5-r5
 Done: 10 blockers via settled_budget rule + complete system commitments; tests/api/test_review_r5.py; BulkAllocation bound to group. Targeted + related suites green; full-suite run in phase-end mode is targeted-only.
+
+## fix-review-p5-r6
+Groups: (1) complete system commitments, (2) transfer money locks vs worker + sibling receipts, (3) cut floors (leaf, member caps, split), (4) transfer lifecycle/audit, (5) ownership and /me, (6) lock order. Done: 8/8 blockers + 10 majors (see OPEN-ITEMS); tests tests/api/test_review_r6*.py. Next: remaining 8 backend majors (OPEN-ITEMS NEEDS-MAOR), then r6b. Targeted runs green.
+fix-review-p5-r6 OPEN-ITEMS lines (OPEN-ITEMS.md edit was denied as a sensitive file; copy these in):
+- [x] r6: 8/8 blockers; majors fixed: two receipts to one target, compensation nets employee/initiative, status from Transfer.state, compensation audit row, owner_upn assignment, /me system_owner, /me/status without telemetry, head+owner key actions, request lock order DEPARTMENT->GROUP, block_reasons `truncated` flag.
+- NEEDS-MAOR not fixed in r6 (later round): requests.py:364 targeted throughput closes without LiteLLM write (needs decision on verified application); overallocation.py:60 live child budgets; views.py:130/132 historical hierarchy + internal systems at cutoff; overview.py:54 subtree consumption in child rows; overview.py:83 distribution bar after revocation; reports.py:426 full-window block_reasons (only a truncated flag added, SQL aggregate needed); rate_card.py:58 versioned rates; org_systems.py:159 usage attribution after key move (needs ownership history).
+- NEEDS-REVIEW (Maor): a transfer's destination write waits only for sibling receipts whose source write is unapplied; fence re-checks every sibling with an applied source.
+- NEEDS-REVIEW (Maor): leaf-group cut floor applies only when the base is reduced (seed data has over-allocated leaves).
+- NEEDS-REVIEW (Maor): the worker now takes DEPARTMENT/GROUP advisory locks BEFORE its outbox row lock (matches _undo), so transfer creation serializes with payload building.

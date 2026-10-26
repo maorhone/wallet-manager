@@ -430,4 +430,5 @@ async def block_reasons(db, principal, settings, reader, kind, id_, start, end):
         users=[scope.entity.upn] if kind == "employee" else None,
     )
     by_reason, by_consumer = blocks.aggregate(rows)
-    return {"by_reason": by_reason, "by_consumer": by_consumer}
+    # the reader caps one read at 5000 rows (newest first): say so instead of implying a total
+    return {"by_reason": by_reason, "by_consumer": by_consumer, "truncated": len(rows) >= 5000}
