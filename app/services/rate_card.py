@@ -1,6 +1,8 @@
 """Rate card (SoT D-049/D-054): metered usage value = tokens x rate per model, never a debit."""
 
+from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -8,6 +10,8 @@ from app.errors import invalid_request
 from app.models import RateCard, SpendSnapshot
 from app.permissions import Principal, can_manage_platform
 from app.schemas.platform import RateCardIn
+from app.services.history import values_as_of
+from app.services.spend import month_bounds
 from app.writes import WriteContext
 
 
@@ -39,10 +43,29 @@ async def set_rates(ctx: WriteContext, principal: Principal, body: RateCardIn) -
             ctx.db.add(row)
         row.input_per_1m, row.output_per_1m = item.input_per_1m, item.output_per_1m
         row.currency = item.currency
+        row.effective_from = datetime.now(UTC)
         after = _view(row)
         ctx.audit("rate_card", item.model, before, after, role)
         entities.append({"entity": "rate_card", "id": item.model, "values": after})
     return entities
+
+
+async def _rates_as_of(db, period: str) -> dict:
+    """Rates that applied at the end of ``period`` (D-049: priced by the consumption date).
+
+    A past month reads the audited rate history, so a later price change never rewrites it.
+    The first price ever set also covers earlier months (the card is set up after usage began)."""
+    rates = {r.model: r for r in await db.scalars(select(RateCard))}
+    end = month_bounds(period[:7], UTC)[1]
+    if end > datetime.now(UTC):
+        return rates
+    past = await values_as_of(
+        db, "rate_card",
+        {m: {"input_per_1m": r.input_per_1m, "output_per_1m": r.output_per_1m}
+         for m, r in rates.items()},
+        end,
+    )  # fmt: skip
+    return {m: SimpleNamespace(**v) for m, v in past.items()}
 
 
 async def metered_value(db, scope_kind: str, scope_id, period: str) -> Decimal | None:
@@ -55,7 +78,7 @@ async def metered_value(db, scope_kind: str, scope_id, period: str) -> Decimal |
             SpendSnapshot.model.is_not(None),
         )
     )
-    rates = {r.model: r for r in await db.scalars(select(RateCard))}
+    rates = await _rates_as_of(db, period)
     total = Decimal(0)
     for r in rows:
         if not (r.prompt_tokens or r.completion_tokens):

@@ -4,9 +4,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.litellm_client import LiteLLMReader
+from app.models import AuditLog
 from app.services.rate_card import metered_value
 from app.services.spend import take_snapshot
 
@@ -58,3 +59,23 @@ async def test_missing_rate_returns_null(login, put, seeded, fake_app, fake_engi
 async def test_rate_card_admin_only(login, put, provisioned):
     head = await login("dana")
     assert (await put(head, "/rate-card", RATES)).status_code == 403
+
+
+# review-p5-r6 major B3: a later price change does not reprice a past month
+async def test_r7_price_change_keeps_past_period_value(
+    login, put, seeded, fake_app, fake_engine, ro_engine
+):
+    admin = await login("admin")
+    await put(admin, "/rate-card", RATES)
+    await _log(fake_engine, 1, "gpt-4", 1_000_000, 0)
+    await take_snapshot(seeded, LiteLLMReader(ro_engine), NOW)
+    async with seeded() as s:
+        assert await metered_value(s, "group", 1, "2026-06") == Decimal(10)
+        for a in await s.scalars(select(AuditLog)):
+            if a.entity == "rate_card":
+                a.at = datetime(2026, 5, 1, tzinfo=UTC)  # the original price predates June
+        await s.commit()
+    new = {"rates": [{"model": "gpt-4", "input_per_1m": "99", "output_per_1m": "30"}]}
+    await put(admin, "/rate-card", new)  # priced on the real "now", after June
+    async with seeded() as s:
+        assert await metered_value(s, "group", 1, "2026-06") == Decimal(10)
