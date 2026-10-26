@@ -81,3 +81,42 @@ async def test_r9_window_start_subtracts_in_utc(provisioned):
         (await s.get(Department, 1)).budget_period = "1440h"
         await s.commit()
         assert await _window_start(s, now) == datetime(2026, 2, 4, 9, tzinfo=UTC)
+
+
+# review-p5-r8 major B3 (overview:129): the move day is split by the spend log's team
+def test_r9_key_spend_splits_by_team_on_the_move_day():
+    from datetime import date
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.services.spend import _aggregate
+
+    def row(team, spend):
+        return SimpleNamespace(
+            team_id=team, user=None, api_key="k1", day=date(2026, 10, 10), spend=Decimal(spend),
+            model_group=None, prompt_tokens=0, completion_tokens=0,
+        )  # fmt: skip
+
+    group = SimpleNamespace(id=1, department_id=1)
+    maps = ({"A1": group}, {"S1": SimpleNamespace(id=7)}, {"k1": 5}, {})
+    totals, _ = _aggregate([row("A1", 10), row("S1", 30)], "2026-10", maps)
+    assert totals[("service_key", "5", "2026-10", None)] == 40
+    assert totals[("service_key_group", "5", "2026-10", None)] == 10  # only the group-team part
+    assert totals[("system", "7", "2026-10", None)] == 30
+
+
+# review-p5-r8 major B3 (overview:92): an unspent grant share is allocated, not available
+async def test_r9_overview_counts_grant_shares_as_allocated(login_wm, provisioned):
+    from app.models import Grant, GrantShare
+    from tests.api.test_transfers import A1
+
+    async with provisioned() as s:
+        for e in await s.scalars(select(Employee).where(Employee.group_id == A1)):
+            e.base_cap = 0
+        grant = Grant(group_id=A1, department_id=1, amount=100, returned=0, status="active", model=None)
+        s.add(grant)
+        await s.flush()
+        s.add(GrantShare(grant_id=grant.id, upn=DANI, amount=100, status="active"))
+        await s.commit()
+    bar = (await (await login_wm("dana")).get("/budget/overview?scope=group:1")).json()["bar"]
+    assert bar["allocated_unused"] >= 100

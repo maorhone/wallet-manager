@@ -15,7 +15,6 @@ from app.models import (
     ProductionSystem,
     Request,
     ServiceKey,
-    SpendSnapshot,
 )
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import requests as requests_service
@@ -89,7 +88,7 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     own_used = spend.used("group", group_id)
     unused = None  # a past period has no live allocations to read: the allocated-minus-used rule
     if at is None:
-        committed = await group_committed(db, spend, group)
+        committed = await group_committed(db, spend, group, with_shares=True)
         unused = max(committed - own_used - (used - own_used), Decimal(0))
     remaining = w["total"] - used
     return {
@@ -115,27 +114,18 @@ async def initiative_used(db, spend: Spend, initiative_id: int, period: str) -> 
         )
     )
     used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
-    for key_id, day in await _moved_keys(db, initiative_id, period):
-        if day is None:
+    for key_id, this_period in await _moved_keys(db, initiative_id, period):
+        if not this_period:
             used += spend.used("service_key", key_id)
             continue
-        # Moved in this period: only the days up to the move day belong to the initiative (r7 B3).
-        rows = await db.scalars(
-            select(SpendSnapshot).where(
-                SpendSnapshot.scope_kind == "service_key",
-                SpendSnapshot.scope_id == str(key_id),
-                SpendSnapshot.model.is_(None),
-                SpendSnapshot.period.like(f"{period}-%"),
-                SpendSnapshot.period <= day,
-            )
-        )
-        used += sum((r.spend for r in rows), Decimal(0))
+        # Moved in this period: only what the key spent under its group's team counts; the
+        # move day is split by the spend log's team, not by calendar day (r8 B3).
+        used += spend.used("service_key_group", key_id)
     return used
 
 
-async def _moved_keys(db, initiative_id: int, period: str) -> list[tuple[int, str | None]]:
-    """Keys moved out of the initiative in ``period`` or later: (id, move day when it is this
-    period, so that only earlier days count; None when the move came after the period)."""
+async def _moved_keys(db, initiative_id: int, period: str) -> list[tuple[int, bool]]:
+    """Keys moved out of the initiative in ``period`` or later: (id, moved within ``period``)."""
     out = []
     for a in await db.scalars(
         select(AuditLog).where(
@@ -145,8 +135,7 @@ async def _moved_keys(db, initiative_id: int, period: str) -> list[tuple[int, st
         )
     ):
         if a.after and a.after.get("owner_kind") == "system" and a.at.strftime("%Y-%m") >= period:
-            same = a.at.strftime("%Y-%m") == period
-            out.append((int(a.entity_id), a.at.strftime("%Y-%m-%d") if same else None))
+            out.append((int(a.entity_id), a.at.strftime("%Y-%m") == period))
     return out
 
 

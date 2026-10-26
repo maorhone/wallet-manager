@@ -30,6 +30,8 @@ from app.errors import ApiError, invalid_request
 from app.models import (
     AuditLog,
     Employee,
+    Grant,
+    GrantShare,
     Grp,
     Initiative,
     LitellmWrite,
@@ -98,20 +100,30 @@ async def lock_scope(db, group: Grp, endpoints) -> None:
         await lock_parent(db, LockKind.GROUP, gid)
 
 
-async def group_committed(db, spend: Spend, group: Grp) -> Decimal:
+async def group_committed(db, spend: Spend, group: Grp, with_shares: bool = False) -> Decimal:
     """Consumption plus what is still allocated and unspent; spent credit is counted once.
 
     Employee and key spend is part of the group team's own spend, so only the unspent rest of
     each allocation is added. A child group has its own team: its whole carve (or its spend,
-    if larger) stays reserved in the parent.
+    if larger) stays reserved in the parent. ``with_shares`` adds each employee's active grant
+    shares to their allocation (the overview's "allocated and unused"; a transfer moves base
+    credit only, so its floors leave them out).
     """
     committed = spend.used("group", group.id)
+    shares: dict[str, Decimal] = {}
+    if with_shares:
+        for upn, amount in await db.execute(
+            select(GrantShare.upn, GrantShare.amount)
+            .join(Grant, Grant.id == GrantShare.grant_id)
+            .where(GrantShare.status == "active", Grant.group_id == group.id)
+        ):
+            shares[upn] = shares.get(upn, ZERO) + amount
     for cap, upn in await db.execute(
         select(Employee.base_cap, Employee.upn).where(
             Employee.group_id == group.id, Employee.status != "left"
         )
     ):
-        committed += max(cap - spend.used("employee", upn), ZERO)
+        committed += max(cap + shares.get(upn, ZERO) - spend.used("employee", upn), ZERO)
     for child in await db.scalars(
         select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
     ):

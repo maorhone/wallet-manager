@@ -73,6 +73,8 @@ def _aggregate(rows, period: str, maps: tuple):
             scopes = [("system", str(system.id))] if system is not None else []
         if r.api_key in keys:
             scopes.append(("service_key", str(keys[r.api_key])))
+            if group is not None:  # the part spent while the key belonged to a group's team
+                scopes.append(("service_key_group", str(keys[r.api_key])))
         for kind, scope_id in scopes:
             day = r.day.isoformat()
             # Reader buckets in APP_TIMEZONE, including the local month boundary.

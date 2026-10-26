@@ -224,8 +224,8 @@ async def test_r8_initiative_usage_stops_at_the_move(login_wm, provisioned):
         await s.flush()
         await _audit(s, "service_key", key.id, {"owner_kind": "initiative", "owner_id": iid},
                      {"owner_kind": "system", "owner_id": sid}, now.replace(day=10))  # fmt: skip
-        for period, spend in ((month, 39), (f"{month}-09", 9), (f"{month}-11", 30)):
-            s.add(SpendSnapshot(scope_kind="service_key", scope_id=str(key.id), period=period,
+        for kind, period, spend in (("service_key", month, 39), ("service_key_group", month, 9)):
+            s.add(SpendSnapshot(scope_kind=kind, scope_id=str(key.id), period=period,
                                 model=None, spend=spend))  # fmt: skip
         await s.commit()
     r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
