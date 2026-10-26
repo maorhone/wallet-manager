@@ -26,6 +26,7 @@ from app.services.validation import (
     group_allocated,
     key_allocated,
     pending_incoming,
+    settled_budget,
 )
 from app.writes import sync_status, write_response
 
@@ -175,7 +176,11 @@ async def create(ctx, principal, client, body):
         entity = "group"
     elif body.owner_kind == "group":
         allocated = await group_allocated(ctx.db, owner)
-        err = check_sum(allocated + body.max_budget, owner.base_budget, owner.overalloc_factor)
+        err = check_sum(
+            allocated + body.max_budget,
+            await settled_budget(ctx.db, owner),
+            owner.overalloc_factor,
+        )
         entity = "group"
     else:
         allocated = await key_allocated(ctx.db, "system", owner.id)

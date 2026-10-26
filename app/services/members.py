@@ -17,7 +17,13 @@ from app.permissions import (
 )
 from app.schemas.groups import MemberCapIn, MemberDefaultsIn, MemberLimitsIn
 from app.services.personal_values import authorize, authorize_rows
-from app.services.validation import check_limit, check_model_sums, check_sum, group_allocated
+from app.services.validation import (
+    check_limit,
+    check_model_sums,
+    check_sum,
+    group_allocated,
+    settled_budget,
+)
 from app.writes import WriteContext
 
 
@@ -66,7 +72,7 @@ async def set_caps(
     )
     changed = [r.upn for r in body if members[r.upn].base_cap != r.base_cap]
     rows = [{"upn": u, "code": "PARENT_OVERALLOCATED"} for u in changed]
-    if err := check_sum(total, group.base_budget, group.overalloc_factor, rows):
+    if err := check_sum(total, await settled_budget(ctx.db, group), group.overalloc_factor, rows):
         raise err
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 

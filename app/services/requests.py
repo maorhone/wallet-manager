@@ -23,7 +23,7 @@ from app.schemas.initiatives import InitiativeIn
 from app.schemas.production import ProductionSystemPatch
 from app.services import initiatives, members, notifications, production
 from app.services.personal_values import OWNER_ROLE, authorize
-from app.services.validation import check_sum, group_allocated
+from app.services.validation import check_sum, group_allocated, settled_budget
 from app.writes import WriteContext
 
 TYPES = ("credits", "initiative", "throughput")
@@ -276,7 +276,9 @@ async def _apply_credits(
         raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
     role = authorize(principal, employee, group, await target_tier(ctx.db, directory, employee.upn))
     allocated = await group_allocated(ctx.db, group)
-    if err := check_sum(allocated + amount, group.base_budget, group.overalloc_factor):
+    if err := check_sum(
+        allocated + amount, await settled_budget(ctx.db, group), group.overalloc_factor
+    ):
         raise err
     before = {"base_cap": employee.base_cap}
     employee.base_cap += amount
@@ -298,7 +300,9 @@ async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount
         if row.status != "active" or row.group_id != group.id:
             raise ApiError(409, "CONFLICT", "The target is no longer active in this section")
         allocated = await group_allocated(ctx.db, group)
-        if err := check_sum(allocated + amount, group.base_budget, group.overalloc_factor):
+        if err := check_sum(
+            allocated + amount, await settled_budget(ctx.db, group), group.overalloc_factor
+        ):
             raise err
         before, row.budget = {"budget": row.budget}, row.budget + amount
         ctx.audit(

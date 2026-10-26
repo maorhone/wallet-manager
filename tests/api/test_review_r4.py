@@ -8,7 +8,12 @@ from app.models import Grp, LitellmWrite, ProductionSystem, ServiceKey, Transfer
 from app.outbox.enqueue import enqueue
 from app.outbox.worker import drain
 from app.services.transfers import held_by_incoming
-from app.services.validation import group_allocated, key_allocated, pending_incoming
+from app.services.validation import (
+    group_allocated,
+    key_allocated,
+    pending_incoming,
+    settled_budget,
+)
 from tests.api.test_org_systems import envelope, post, system
 from tests.api.test_review_money import DANI, YAEL, _child, _initiative
 from tests.api.test_transfers import A1, move, send
@@ -47,7 +52,7 @@ async def test_r4_group_allocation_excludes_pending_incoming(login_wm, provision
         assert grp.base_budget == 200
         assert await pending_incoming(s, "group", child) == 100
         # headroom stays at what it was before the receipt: the new 100 is not allocatable
-        assert grp.base_budget - await group_allocated(s, grp) == 200 - before - 100
+        assert await settled_budget(s, grp) - await group_allocated(s, grp) == 100 - before
 
 
 # review-p5-r3 blocker 1 (transfers:369): compensation never over-allocates the new parent
@@ -87,7 +92,8 @@ async def test_r4_group_key_check_counts_pending_incoming(login_wm, provisioned)
     await send(head, "POST", "/transfers", move(100, DANI, str(child), ("employee", "group")))
     async with provisioned() as s:
         group = await s.get(Grp, A1)  # the source side shrank, the child's pending is its own
-        assert free is not None and await group_allocated(s, await s.get(Grp, child)) >= 200
+        kid = await s.get(Grp, child)
+        assert free is not None and await settled_budget(s, kid) == 100
 
 
 # review-p5-r3 blocker 3 (service_keys:237): a system counts retired generations and pending in

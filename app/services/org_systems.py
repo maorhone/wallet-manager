@@ -136,12 +136,12 @@ async def move_key(
         raise err
     before = {**values(key), "owner_kind": key.owner_kind, "owner_id": key.owner_id}
     source_commitment = None
-    if key.owner_kind == "initiative":
+    if key.owner_kind in ("initiative", "system"):
         # Moving the credential cannot release its source grant: its current and
         # retired generations may already have spent (or still be in flight).
         # Keep their reservation under the same section lock, in this transaction.
         tombstone = ServiceKey(
-            owner_kind="initiative", owner_id=key.owner_id,
+            owner_kind=key.owner_kind, owner_id=key.owner_id,
             max_budget=key.max_budget, retired_budget=key.retired_budget,
             status="revoked", created_by=principal.upn,
         )  # fmt: skip
@@ -149,7 +149,9 @@ async def move_key(
         await ctx.db.flush()
         source_commitment = {
             "id": tombstone.id,
-            "initiative_id": tombstone.owner_id,
+            "owner_kind": tombstone.owner_kind,
+            "owner_id": tombstone.owner_id,
+            "initiative_id": tombstone.owner_id if tombstone.owner_kind == "initiative" else None,
             "max_budget": tombstone.max_budget,
             "retired_budget": tombstone.retired_budget,
         }

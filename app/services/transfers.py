@@ -24,7 +24,6 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import all_, any_, literal, select, update
-from sqlalchemy.orm import aliased
 
 from app.db import LockKind, lock_parent
 from app.errors import ApiError, invalid_request
@@ -52,7 +51,7 @@ from app.services.personal_values import authorize
 from app.services.production import system_committed
 from app.services.service_keys import initiative_committed
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
-from app.services.validation import check_sum, group_allocated, pending_incoming
+from app.services.validation import check_sum, group_allocated, pending_incoming, settled_budget
 from app.writes import WriteContext
 
 ZERO = Decimal(0)
@@ -221,7 +220,8 @@ async def _plan(
     if (source.kind, source.id) == (target.kind, target.id):
         raise invalid_request("Source and target are the same", {"reason": "same_entity"})
     for side in (source, target):  # unsettled incoming credit cannot move on, whatever the kind
-        side.committed += await pending_incoming(ctx.db, side.kind, side.id)
+        if side.kind != "system":  # system_committed already includes it
+            side.committed += await pending_incoming(ctx.db, side.kind, side.id)
     for side in (source, target):  # DR9 / FR-G5: the personal-value rules apply to both ends
         if side.kind == "employee":
             tier = await target_tier(ctx.db, directory, side.id)
@@ -398,7 +398,9 @@ async def _overallocates_parent(db, rows, parents) -> bool:
             continue
         parent = await db.get(Grp, pid, populate_existing=True)
         if check_sum(
-            await group_allocated(db, parent) + delta, parent.base_budget, parent.overalloc_factor
+            await group_allocated(db, parent) + delta,
+            await settled_budget(db, parent),
+            parent.overalloc_factor,
         ):
             return True
     return False
@@ -438,20 +440,18 @@ async def _release_cancelled(db, settings, transfer: Transfer) -> None:
 async def held_by_incoming(db, row: LitellmWrite) -> bool:
     """A rebuilt write would publish credit whose source reduction is not applied yet (r3 B1).
 
-    Any write of a transfer's target entity waits until that transfer's source write applied,
-    so an older write cannot carry the incoming credit upstream first.
+    Any write of a transfer's target entity (other than the transfer's own) waits until the
+    transfer is ``applied`` (source applied AND fence passed), so no older write can carry the
+    incoming credit upstream past an unreadable or failed fence (r5 B1a1).
     """
     kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
-    source = aliased(LitellmWrite)
     return (
         await db.scalar(
             select(Transfer.id)
-            .join(source, source.id == Transfer.first_write_id)
             .where(
                 Transfer.target_kind.in_(kinds),
                 Transfer.target_id == row.entity_id,
                 Transfer.state.in_(("pending", "failed")),
-                source.status != "applied",
                 literal(row.id) != all_(Transfer.write_ids),
             )
             .limit(1)

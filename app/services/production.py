@@ -23,7 +23,7 @@ from app.permissions import (
 )
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn, ProductionSystemPatch
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
-from app.services.validation import check_sum, internal_allocated
+from app.services.validation import check_sum, internal_allocated, pending_incoming
 from app.services.views import period_ctx
 from app.writes import WriteContext, sync_status
 
@@ -159,7 +159,9 @@ async def system_committed(db, spend: Spend, system: ProductionSystem) -> Decima
             reserved += cap + key.retired_budget
         else:
             reserved += max(cap - spend.used("service_key", key.id), ZERO)
-    return spend.used("system", system.id) + reserved
+    return (
+        spend.used("system", system.id) + reserved + await pending_incoming(db, "system", system.id)
+    )
 
 
 async def update_system_budget(

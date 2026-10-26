@@ -59,6 +59,10 @@ async def pending_incoming(db, kind: str, ident) -> Decimal:
     A transfer's target budget grows at once, but the credit is not spendable, allocatable or
     key-reservable until the transfer is ``applied`` (source reduction applied, fence passed).
     Available balance = budget - commitments - this; every allocation check counts it as committed.
+
+    ONE RULE (review-p5-r5): unsettled credit is excluded from the BASE before any over-allocation
+    factor is applied: capacity = (budget - pending_incoming) * factor (``settled_budget``), and a
+    reduction may never go below committed funding + pending_incoming. Never add it to allocations.
     """
     from sqlalchemy import func, select
 
@@ -82,23 +86,23 @@ async def key_allocated(db, owner_kind: str, owner_id: int) -> Decimal:
 
     from app.models import ServiceKey
 
-    total = await db.scalar(
+    if owner_kind == "system":
+        # Complete system commitment: every key ever issued (revoked/failed too, an upstream
+        # delete may be pending or a timeout may hide a created key) plus retired generations.
+        return await db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(func.coalesce(ServiceKey.max_budget, 0) + ServiceKey.retired_budget), 0
+                )
+            ).where(ServiceKey.owner_kind == "system", ServiceKey.owner_id == owner_id)
+        ) + await pending_incoming(db, "system", owner_id)
+    return await db.scalar(
         select(func.coalesce(func.sum(ServiceKey.max_budget), 0)).where(
             ServiceKey.owner_kind == owner_kind,
             ServiceKey.owner_id == owner_id,
             ServiceKey.status.in_(("active", "pending")),
         )
     )
-    if owner_kind != "system":
-        return total
-    retired = await db.scalar(
-        select(func.coalesce(func.sum(ServiceKey.retired_budget), 0)).where(
-            ServiceKey.owner_kind == "system",
-            ServiceKey.owner_id == owner_id,
-            ServiceKey.status.in_(("active", "pending")),
-        )
-    )
-    return total + retired + await pending_incoming(db, "system", owner_id)
 
 
 async def group_own_allocated(db, group) -> Decimal:
@@ -114,11 +118,13 @@ async def group_own_allocated(db, group) -> Decimal:
         )
     )
     initiatives = await initiative_allocated(db, group.id)
-    return (
-        members
-        + initiatives
-        + await key_allocated(db, "group", group.id)
-        + await pending_incoming(db, "group", group.id)
+    return members + initiatives + await key_allocated(db, "group", group.id)
+
+
+async def settled_budget(db, group, base: Decimal | None = None) -> Decimal:
+    """Group base minus unsettled incoming credit: the only part the factor may multiply."""
+    return (group.base_budget if base is None else base) - await pending_incoming(
+        db, "group", group.id
     )
 
 
@@ -165,7 +171,7 @@ async def check_group_tree(
         if kids and (
             err := check_sum(
                 kids + await group_own_allocated(db, parent),
-                bases[parent.id],
+                await settled_budget(db, parent, bases[parent.id]),
                 parent.overalloc_factor,
                 rows,
             )

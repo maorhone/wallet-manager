@@ -68,7 +68,8 @@ def _aggregate(rows, period: str, maps: tuple):
             # Reader buckets in APP_TIMEZONE, including the local month boundary.
             for p in (period, day) if day.startswith(period) else (period,):
                 totals[(kind, scope_id, p, None)] += r.spend
-                totals[(kind, scope_id, p, r.model_group)] += r.spend
+                if r.model_group is not None:
+                    totals[(kind, scope_id, p, r.model_group)] += r.spend
                 tok = tokens[(kind, scope_id, p, r.model_group)]
                 tok[0] += r.prompt_tokens
                 tok[1] += r.completion_tokens

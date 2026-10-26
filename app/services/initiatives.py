@@ -13,7 +13,7 @@ from app.permissions import (
     can_view_group,
     group_roles_of,
 )
-from app.services.validation import check_sum, group_allocated
+from app.services.validation import check_sum, group_allocated, settled_budget
 
 
 async def create(ctx, principal: Principal, group_id: int, body) -> list[dict]:
@@ -35,7 +35,9 @@ async def create(ctx, principal: Principal, group_id: int, body) -> list[dict]:
     if body.period_start and body.period_end and body.period_end < body.period_start:
         raise invalid_request("period_end is before period_start")
     allocated = await group_allocated(ctx.db, group)
-    if err := check_sum(allocated + body.budget, group.base_budget, group.overalloc_factor):
+    if err := check_sum(
+        allocated + body.budget, await settled_budget(ctx.db, group), group.overalloc_factor
+    ):
         raise err
     initiative = Initiative(
         **body.model_dump(),
