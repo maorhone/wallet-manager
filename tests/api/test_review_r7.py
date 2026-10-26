@@ -140,7 +140,9 @@ async def _owned(provisioned):
         s.add_all(
             [
                 ServiceKey(owner_kind="system", owner_id=system.id, max_budget=1, status="active"),
-                ServiceKey(owner_kind="initiative", owner_id=init.id, max_budget=1, status="active"),
+                ServiceKey(
+                    owner_kind="initiative", owner_id=init.id, max_budget=1, status="active"
+                ),
             ]
         )
         await s.commit()
@@ -298,7 +300,10 @@ async def test_r7_moved_initiative_key_keeps_usage(login_wm, provisioned):
         )  # fmt: skip
         s.add(
             SpendSnapshot(
-                scope_kind="service_key", scope_id=str(key.id), period=period, model=None,
+                scope_kind="service_key",
+                scope_id=str(key.id),
+                period=period,
+                model=None,
                 spend=9,
             )
         )
