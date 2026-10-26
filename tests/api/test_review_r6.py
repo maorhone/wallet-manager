@@ -13,7 +13,7 @@ from app.services.production import system_committed
 from app.services.spend import Spend
 from app.services.transfers import lock_scope, transfer_status
 from app.services.validation import group_allocated
-from tests.api.test_review_money import DANA, DANI, YAEL, _child, _initiative
+from tests.api.test_review_money import DANI, YAEL, _child, _initiative
 from tests.api.test_transfers import A1, move, send
 
 
@@ -120,7 +120,7 @@ async def test_r6_worker_serializes_with_transfer_creation(
 async def test_r6_two_transfers_to_one_target_settle(login_wm, provisioned, litellm, prov_settings):
     head = await login_wm("dana")
     assert (await send(head, "POST", "/transfers", move(50))).status_code == 200
-    assert (await send(head, "POST", "/transfers", move(50, DANA, YAEL))).status_code == 200
+    assert (await send(head, "POST", "/transfers", move(50))).status_code == 200
     for _ in range(4):
         await drain(provisioned, litellm, prov_settings)
     async with provisioned() as s:
