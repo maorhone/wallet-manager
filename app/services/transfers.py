@@ -441,8 +441,23 @@ async def compensate_failed_source(db, write: LitellmWrite) -> None:
     A destination without a write (an initiative) is restored as well.
     """
     transfer = await _transfer_of_source(db, write.id)
-    if transfer is not None:
-        await _undo(db, transfer, f"cancelled: source write {write.id} failed")
+    if transfer is None or not await _undo(
+        db, transfer, f"cancelled: source write {write.id} failed"
+    ):
+        return
+    # an earlier write of the same source may have published this reduction as part of its
+    # rebuilt aggregate payload: queue a repair that republishes the restored balance (r8 B1a1)
+    key = f"transfer:{transfer.id}:restore-source"
+    if await db.scalar(select(LitellmWrite.id).where(LitellmWrite.idempotency_key == key)) is None:
+        db.add(
+            LitellmWrite(
+                entity=write.entity,
+                entity_id=write.entity_id,
+                endpoint=write.endpoint,
+                payload=write.payload,
+                idempotency_key=key,
+            )  # fmt: skip
+        )
 
 
 async def _source_overspent(db, reader, transfer: Transfer, now: datetime) -> bool:
@@ -458,6 +473,8 @@ async def _release_cancelled(db, settings, transfer: Transfer) -> None:
     await _undo(
         db, transfer, f"cancelled: source spent the released credit (transfer {transfer.id})"
     )
+    if transfer.first_write_id is None:
+        return  # no source write: nothing upstream to restore
     source_write = await db.get(LitellmWrite, transfer.first_write_id)
     await enqueue(
         db, settings, source_write.entity, source_write.entity_id, source_write.endpoint,
@@ -571,22 +588,32 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
     Fails closed: an unreadable spend holds the write. Returns True when it may be applied.
     Destinations without a write (initiatives) get the same check in ``settle``.
     """
-    if write.depends_on is None or reader is None:
+    if reader is None:
         return True
-    transfer = await _transfer_of_source(db, write.depends_on)
-    if transfer is None or write.id not in (transfer.write_ids or [])[1:]:
+    # the write's own transfer, whether or not it has a source write (an initiative-origin
+    # receipt has none, so a dependency check would let it bypass an unreadable sibling fence)
+    transfer = await db.scalar(
+        select(Transfer).where(
+            literal(write.id) == any_(Transfer.write_ids),
+            or_(Transfer.first_write_id.is_(None), Transfer.first_write_id != write.id),
+        )
+    )
+    if transfer is None:
         return True
     ok = True
     # The rebuilt payload carries every unsettled receipt of this target whose source already
-    # applied, so each of those sources is fenced here too (aggregate fence, r5).
+    # applied (or that has no source write), so each of those sources is fenced here too.
     siblings = await db.scalars(
         select(Transfer).where(
             Transfer.target_kind == transfer.target_kind,
             Transfer.target_id == transfer.target_id,
             Transfer.state == "pending",
             Transfer.id != transfer.id,
-            exists().where(
-                LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status == "applied"
+            or_(
+                Transfer.first_write_id.is_(None),
+                exists().where(
+                    LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status == "applied"
+                ),
             ),
         )
     )

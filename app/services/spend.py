@@ -114,7 +114,7 @@ async def _window_start(db, now: datetime) -> datetime:
     year, month = now.year, now.month - (months - 1)
     year, month = year + (month - 1) // 12, (month - 1) % 12 + 1
     start = datetime(year, month, 1, tzinfo=now.tzinfo).astimezone(UTC)
-    return min(start, (now - longest).astimezone(UTC))
+    return min(start, now.astimezone(UTC) - longest)  # elapsed time, not wall clock (DST)
 
 
 async def fresh_spend(db, reader, now: datetime) -> "Spend":
