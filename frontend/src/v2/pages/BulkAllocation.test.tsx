@@ -51,4 +51,29 @@ describe('BulkAllocation', () => {
     });
     expect(screen.getByText(/נשאר להקצאה/)).toBeTruthy();
   });
+
+  // review-p5-r4 blocker F1: a preview made for group 1 never confirms against group 2
+  it('drops the preview when the group changes', () => {
+    const rows = [
+      {
+        kind: 'employee' as const,
+        id: 'a@corp.example',
+        name: 'Avi',
+        total: 1,
+        used: 0,
+        percent: 0,
+      },
+    ];
+    const ui = (groupId: number) => (
+      <MantineProvider>
+        <BulkAllocation groupId={groupId} rows={rows} onClose={() => {}} />
+      </MantineProvider>
+    );
+    const { rerender } = render(ui(1));
+    fireEvent.change(screen.getByLabelText('סכום אחיד לכל החברים'), { target: { value: '500' } });
+    fireEvent.submit(screen.getByLabelText('סכום אחיד לכל החברים').closest('form')!);
+    expect(screen.queryByText(/נשאר להקצאה/)).toBeTruthy();
+    rerender(ui(2));
+    expect(screen.queryByText(/נשאר להקצאה/)).toBeNull();
+  });
 });

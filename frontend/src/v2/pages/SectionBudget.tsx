@@ -108,7 +108,12 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
         <p>{s.advancedText}</p>
       </details>
       {bulkOpen && (
-        <BulkAllocation groupId={Number(groupId)} rows={rows} onClose={() => setBulkOpen(false)} />
+        <BulkAllocation
+          key={groupId}
+          groupId={Number(groupId)}
+          rows={rows}
+          onClose={() => setBulkOpen(false)}
+        />
       )}
       {transferFrom !== null && (
         <TransferDrawer

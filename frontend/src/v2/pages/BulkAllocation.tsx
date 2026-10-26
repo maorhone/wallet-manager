@@ -28,10 +28,16 @@ export function BulkAllocation({
     overrides: override && overrideAmount ? { [override]: Number(overrideAmount) } : {},
   });
   // Confirm exactly what was previewed; any later edit invalidates the preview (D-066/D-069).
-  const [previewed, setPreviewed] = useState<{ body: ReturnType<typeof body>; key: string } | null>(
-    null,
-  );
-  const fresh = previewed !== null && JSON.stringify(previewed.body) === JSON.stringify(body());
+  const [previewed, setPreviewed] = useState<{
+    body: ReturnType<typeof body>;
+    key: string;
+    groupId: number;
+  } | null>(null);
+  // The preview is bound to the group it was made for (cached group routes reuse this drawer).
+  const fresh =
+    previewed !== null &&
+    previewed.groupId === groupId &&
+    JSON.stringify(previewed.body) === JSON.stringify(body());
   const p = fresh && !preview.isPending ? preview.data : undefined;
   return (
     <Drawer opened onClose={onClose} title={s.title}>
@@ -42,7 +48,7 @@ export function BulkAllocation({
           onSubmit={(e) => {
             e.preventDefault();
             const snapshot = body();
-            setPreviewed({ body: snapshot, key: crypto.randomUUID() });
+            setPreviewed({ body: snapshot, key: crypto.randomUUID(), groupId });
             preview.mutate(snapshot);
           }}
         >
@@ -114,7 +120,13 @@ export function BulkAllocation({
                 type="button"
                 disabled={!reason || p.exceeds_limit || commit.isPending || preview.isPending}
                 onClick={() =>
-                  previewed && commit.mutate({ body: previewed.body, reason, key: previewed.key })
+                  previewed &&
+                  commit.mutate({
+                    body: previewed.body,
+                    reason,
+                    key: previewed.key,
+                    groupId: previewed.groupId,
+                  })
                 }
               >
                 {s.confirm}

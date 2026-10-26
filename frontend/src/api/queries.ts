@@ -904,8 +904,8 @@ export const useBulkPreview = (groupId: number) =>
 export const useBulkAllocation = (groupId: number) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { body: BulkBody; reason: string; key: string }) =>
-      apiPost(`/groups/${groupId}/bulk-allocation`, v.body, {
+    mutationFn: (v: { body: BulkBody; reason: string; key: string; groupId?: number }) =>
+      apiPost(`/groups/${v.groupId ?? groupId}/bulk-allocation`, v.body, {
         reason: v.reason,
         idempotencyKey: v.key,
       }),
