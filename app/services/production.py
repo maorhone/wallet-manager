@@ -289,7 +289,7 @@ async def get_production(
     }  # fmt: skip
 
 
-async def list_owned_systems(db: AsyncSession, principal: Principal) -> dict:
+async def list_owned_systems(db: AsyncSession, principal: Principal, period: str) -> dict:
     """Org Systems whose view-only owner is the caller (D-048/D-063)."""
     query = (
         select(ProductionSystem)
@@ -300,9 +300,11 @@ async def list_owned_systems(db: AsyncSession, principal: Principal) -> dict:
         )
         .order_by(ProductionSystem.id)
     )
+    spend = await Spend.load(db, period)  # system-level, so a moved key keeps its history
     return {
         "items": [
-            {"id": s.id, "name": s.name, "budget": s.budget, "owner_upn": s.owner_upn}
+            {"id": s.id, "name": s.name, "budget": s.budget, "owner_upn": s.owner_upn,
+             "used": spend.used("system", s.id)}
             for s in await db.scalars(query)
         ]
-    }
+    }  # fmt: skip

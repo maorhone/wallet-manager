@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionsFor, approvalBlocked } from './Requests';
+import { actionsFor, approvalBlocked, parseTpm } from './Requests';
 
 describe('actionsFor', () => {
   it('lets heads only forward throughput, and the AI team apply or reject', () => {
@@ -29,5 +29,13 @@ describe('approvalBlocked', () => {
     expect(approvalBlocked('approve', null, '500')).toBe(false);
     expect(approvalBlocked('approve', 300, '')).toBe(false);
     expect(approvalBlocked('reject', null, '')).toBe(false);
+  });
+});
+
+// review-p5-r5 major: AI handlers supply per-model TPM limits
+describe('parseTpm', () => {
+  it('parses model=tpm pairs and drops invalid ones', () => {
+    expect(parseTpm('gpt=1000, claude=2000,bad=x')).toEqual({ gpt: 1000, claude: 2000 });
+    expect(parseTpm('')).toBeUndefined();
   });
 });

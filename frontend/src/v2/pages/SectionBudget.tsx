@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAttention, useBudgetOverview } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
 import { AttentionList, type AttentionItem } from '../components/AttentionList';
 import { DistributionBar } from '../components/DistributionBar';
-import { KpiCard } from '../components/KpiCard';
+import { BudgetKpis } from '../components/BudgetKpis';
 import { BulkAllocation } from './BulkAllocation';
 import { TransferDrawer } from './TransferDrawer';
 
@@ -20,6 +21,7 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
   if (overview.error || !overview.data)
     return <ErrorState error={overview.error} onRetry={overview.refetch} />;
   const { kpis, bar, rows, period } = overview.data;
+  const canWrite = overview.data.actions.edit_members;
   const a = attention.data;
   const items: AttentionItem[] = [
     ...(a?.requests ?? []).map((r) => ({
@@ -44,20 +46,7 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
       <p className="v2-muted">
         {s.period}: <bdi dir="ltr">{period}</bdi>
       </p>
-      <div className="v2-kpis">
-        <KpiCard title={s.kpiTotal} value={credits(kpis.total)} description={s.kpiTotal} />
-        <KpiCard
-          title={s.kpiAllocated}
-          value={credits(kpis.allocated)}
-          description={s.kpiAllocated}
-        />
-        <KpiCard title={s.kpiUsed} value={credits(kpis.used)} description={s.metered + ': '} />
-        <KpiCard
-          title={s.kpiRemaining}
-          value={credits(kpis.remaining)}
-          description={s.kpiRemaining}
-        />
-      </div>
+      <BudgetKpis labels={s} total={kpis.total} bar={bar} used={kpis.used} />
       <p className="v2-muted">
         {s.metered}:{' '}
         <bdi dir="ltr">
@@ -72,12 +61,16 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
       <AttentionList items={items} />
       <section className="v2-card">
         <h2>{s.rows}</h2>
-        <button type="button" onClick={() => setTransferFrom('')}>
-          {s.transfer}
-        </button>{' '}
-        <button type="button" onClick={() => setBulkOpen(true)}>
-          {s.bulk}
-        </button>
+        {canWrite && (
+          <>
+            <button type="button" onClick={() => setTransferFrom('')}>
+              {s.transfer}
+            </button>{' '}
+            <button type="button" onClick={() => setBulkOpen(true)}>
+              {s.bulk}
+            </button>
+          </>
+        )}
         <table>
           <thead>
             <tr>
@@ -90,13 +83,17 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
           <tbody>
             {rows.map((r) => (
               <tr key={`${r.kind}-${r.id}`}>
-                <td>{r.name}</td>
+                <td>
+                  {r.kind === 'group' ? <Link to={`/v2/group/${r.id}`}>{r.name}</Link> : r.name}
+                </td>
                 <td>{credits(r.total)}</td>
                 <td>{credits(r.used)}</td>
                 <td>
-                  <button type="button" onClick={() => setTransferFrom(`${r.kind}:${r.id}`)}>
-                    {s.transfer}
-                  </button>
+                  {canWrite && (
+                    <button type="button" onClick={() => setTransferFrom(`${r.kind}:${r.id}`)}>
+                      {s.transfer}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -107,7 +104,7 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
         <summary>{s.advanced}</summary>
         <p>{s.advancedText}</p>
       </details>
-      {bulkOpen && (
+      {canWrite && bulkOpen && (
         <BulkAllocation
           key={groupId}
           groupId={Number(groupId)}
@@ -115,7 +112,7 @@ export default function SectionBudget({ groupId }: { groupId: string }) {
           onClose={() => setBulkOpen(false)}
         />
       )}
-      {transferFrom !== null && (
+      {canWrite && transferFrom !== null && (
         <TransferDrawer
           groupId={Number(groupId)}
           rows={rows}

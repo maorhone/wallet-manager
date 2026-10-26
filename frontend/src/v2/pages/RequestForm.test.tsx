@@ -30,4 +30,20 @@ describe('RequestForm', () => {
       target: { kind: 'initiative', id: 7 },
     });
   });
+
+  // review-p5-r5 major: numbers are optional; a new initiative never carries a target
+  it('omits empty numbers and offers no new initiative for a targeted request', () => {
+    mutate.mockClear();
+    render(
+      <MemoryRouter initialEntries={['/v2/requests?target_kind=system&target_id=3']}>
+        <RequestForm />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('option', { name: 'יוזמה' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'more' } });
+    fireEvent.submit(screen.getByRole('textbox').closest('form')!);
+    const sent = mutate.mock.calls[0][0];
+    expect('amount' in sent).toBe(false);
+    expect(sent.key).toBeTruthy();
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   useCreateOrganization,
   useOrgAllocate,
@@ -93,15 +93,19 @@ function Table({
 export default function OrgAllocation({
   organizationId,
   isAdmin,
+  onCreated,
 }: {
   organizationId: number;
   isAdmin: boolean;
+  onCreated?: (id: number) => void;
 }) {
   const env = useOrgEnvelopes(organizationId);
   const create = useCreateOrganization();
   const [tab, setTab] = useState<'depts' | 'systems'>('depts');
   const [reason, setReason] = useState('');
   const [newName, setNewName] = useState('');
+  // One key per distinct organization submission: a retry replays, a new name does not.
+  const sent = useRef<{ name: string; key: string } | null>(null);
   if (env.isPending) return <p role="status">{he.loading}</p>;
   if (env.error || !env.data) return <ErrorState error={env.error} onRetry={env.refetch} />;
   const { departments, systems } = env.data;
@@ -156,7 +160,18 @@ export default function OrgAllocation({
           className="v2-card"
           onSubmit={(e) => {
             e.preventDefault();
-            create.mutate({ name: newName, reason: reason || s.newOrg });
+            if (sent.current?.name !== newName)
+              sent.current = { name: newName, key: crypto.randomUUID() };
+            create.mutate(
+              { name: newName, reason: reason || s.newOrg, key: sent.current.key },
+              {
+                onSuccess: (res) => {
+                  sent.current = null;
+                  const id = res.entities?.find((x) => x.entity === 'organization')?.id;
+                  if (id) onCreated?.(Number(id));
+                },
+              },
+            );
           }}
         >
           <h2>{s.newOrg}</h2>
@@ -164,7 +179,9 @@ export default function OrgAllocation({
             {s.orgName}
             <input required value={newName} onChange={(e) => setNewName(e.target.value)} />
           </label>
-          <button type="submit">{s.create}</button>
+          <button type="submit" disabled={create.isPending}>
+            {s.create}
+          </button>
         </form>
       )}
     </>

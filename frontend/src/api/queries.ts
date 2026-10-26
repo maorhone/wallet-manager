@@ -694,6 +694,7 @@ export const useBlockedReport = (scope: UsageScope, id: string, period: string) 
   });
 
 export interface MyStatus {
+  blocks_available?: boolean;
   wallet: { state: string; remaining: number };
   limits: { max_parallel: number | null; rpm_limit: number | null };
   last_blocks: {
@@ -750,6 +751,8 @@ export interface RequestItem {
   events?: { actor_upn: string; action: string; comment: string | null; created_at: string }[];
 }
 
+const awaitingApply = (r: Pick<RequestItem, 'status'>) => r.status === 'pending_apply';
+
 export const useRequests = (box: 'mine' | 'to_handle', type: string, status: string) =>
   useQuery({
     queryKey: ['requests', box, type, status],
@@ -757,6 +760,8 @@ export const useRequests = (box: 'mine' | 'to_handle', type: string, status: str
       apiFetch<{ items: RequestItem[] }>(
         `/requests?${new URLSearchParams({ box, ...(type && { type }), ...(status && { status }) })}`,
       ),
+    // D-071: keep showing the real application state while the outbox applies a decision
+    refetchInterval: (q) => (q.state.data?.items.some(awaitingApply) ? 3000 : false),
   });
 
 export const useRequestDetail = (id: number | null) =>
@@ -764,15 +769,32 @@ export const useRequestDetail = (id: number | null) =>
     queryKey: ['requests', 'detail', id],
     queryFn: () => apiFetch<RequestItem>(`/requests/${id}`),
     enabled: id !== null,
+    refetchInterval: (q) => (q.state.data && awaitingApply(q.state.data) ? 3000 : false),
   });
 
 export const useDecideRequest = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: number; decision: string; comment?: string; amount?: number }) =>
+    mutationFn: (v: {
+      id: number;
+      decision: string;
+      comment?: string;
+      amount?: number;
+      // D-045: technical values the AI team supplies when applying a narrative request
+      maxParallel?: number;
+      rpmLimit?: number;
+      modelTpmLimits?: Record<string, number>;
+    }) =>
       apiPost(
         `/requests/${v.id}/decide`,
-        { decision: v.decision, comment: v.comment || undefined, amount: v.amount },
+        {
+          decision: v.decision,
+          comment: v.comment || undefined,
+          amount: v.amount,
+          max_parallel: v.maxParallel,
+          rpm_limit: v.rpmLimit,
+          model_tpm_limits: v.modelTpmLimits,
+        },
         { reason: 'טיפול בבקשה' },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['requests'] }),
@@ -789,7 +811,7 @@ export const useSubmitRequest = () => {
       amount?: number;
       name?: string;
       target?: { kind: 'initiative' | 'system'; id: number }; // an existing subject (D-046..048)
-      key?: string; // caller-owned idempotency key, kept across retries of one submission
+      key: string; // caller-owned idempotency key, kept across retries of one submission
     }) =>
       apiPost(
         '/requests',
@@ -873,10 +895,20 @@ export const useTransfer = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { body: TransferBody; reason: string; key: string }) =>
-      apiPost('/transfers', v.body, { reason: v.reason, idempotencyKey: v.key }),
+      apiPost<WriteResponse>('/transfers', v.body, { reason: v.reason, idempotencyKey: v.key }),
     onSuccess: () => qc.invalidateQueries(),
   });
 };
+
+/** D-071: a transfer's application state, refreshed until it reaches done or failed. */
+export const useTransferStatus = (id: number | null) =>
+  useQuery({
+    queryKey: ['transfers', id],
+    queryFn: () =>
+      apiFetch<{ id: number; status: 'done' | 'pending_apply' | 'failed' }>(`/transfers/${id}`),
+    enabled: id !== null,
+    refetchInterval: (q) => (q.state.data?.status === 'pending_apply' ? 3000 : false),
+  });
 
 export interface BulkBody {
   all: boolean;
@@ -1001,6 +1033,7 @@ export interface OwnedSystem {
   name: string;
   budget: number;
   owner_upn: string | null;
+  used?: number; // system-level consumption with historical attribution
 }
 
 export const useMySystems = () =>
@@ -1027,6 +1060,7 @@ export type OrgEnvelopeRow = {
   name: string;
   budget: number;
   previous_used?: number;
+  used?: number;
   budget_period?: string;
   owner_upn?: string | null;
 };
@@ -1036,8 +1070,9 @@ export type OrgEnvelopes = {
   systems: { envelope: number; allocated: number; rows: OrgEnvelopeRow[] };
 };
 
-export const useOrgEnvelopes = (orgId: number) =>
+export const useOrgEnvelopes = (orgId: number, enabled = true) =>
   useQuery({
+    enabled,
     queryKey: ['org-envelopes', orgId],
     queryFn: () => apiFetch<OrgEnvelopes>(`/organizations/${orgId}/envelopes`),
   });
@@ -1069,11 +1104,11 @@ export const useOrgAllocate = (orgId: number) => {
 export const useCreateOrganization = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { name: string; reason: string }) =>
+    mutationFn: (v: { name: string; reason: string; key: string }) =>
       apiPost<WriteResponse>(
         '/organizations',
         { name: v.name },
-        { reason: v.reason, idempotencyKey: crypto.randomUUID() },
+        { reason: v.reason, idempotencyKey: v.key },
       ),
     onSuccess: () => qc.invalidateQueries(),
   });

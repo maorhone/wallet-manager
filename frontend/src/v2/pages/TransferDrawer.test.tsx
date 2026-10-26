@@ -19,6 +19,7 @@ vi.mock('../../api/queries', () => ({
     data: { source: { total: 100, after: 90 }, target: { total: 0, after: 10 } },
   }),
   useTransfer: () => ({ mutate: transferMutate }),
+  useTransferStatus: () => ({ data: undefined }),
 }));
 
 const rows = [

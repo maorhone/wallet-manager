@@ -152,3 +152,4 @@ async def test_my_systems_lists_owned_org_systems(login_wm, provisioned):
     )
     items = (await admin.get("/systems/mine")).json()["items"]
     assert [i["name"] for i in items] == ["Mine"]
+    assert "used" in items[0]  # review-p5-r5 major: system-level consumption, not key sums

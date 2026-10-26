@@ -1,20 +1,35 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMyInitiatives, useMySystems } from '../../api/queries';
+import { useMyInitiatives, useMySystems, useOrgEnvelopes } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { he } from '../../i18n/he';
 import { SystemDetail } from './SystemDetail';
 
 const s = he.v2.initPage;
 
-export default function Initiative({ canMove }: { canMove: boolean }) {
+export default function Initiative({
+  canMove,
+  organizationId = 1,
+}: {
+  canMove: boolean;
+  organizationId?: number;
+}) {
   const list = useMyInitiatives();
   const owned = useMySystems();
+  // Allocators manage every Org System of the selected organization, not only their own.
+  const managed = useOrgEnvelopes(organizationId, canMove);
   const [open, setOpen] = useState<string | null>(null);
-  if (list.isPending || owned.isPending) return <p role="status">{he.loading}</p>;
+  if (list.isPending || owned.isPending || (canMove && managed.isPending))
+    return <p role="status">{he.loading}</p>;
   if (list.error || !list.data) return <ErrorState error={list.error} onRetry={list.refetch} />;
   if (owned.error || !owned.data) return <ErrorState error={owned.error} onRetry={owned.refetch} />;
   // Initiatives and systems have independent ids: the identity is kind + id.
+  const systems = new Map<
+    number,
+    { id: number; name: string; budget: number; owner?: string; used?: number }
+  >();
+  for (const i of managed.data?.systems.rows ?? []) systems.set(i.id, i);
+  for (const i of owned.data.items) systems.set(i.id, { ...i, owner: i.owner_upn ?? undefined });
   const items = [
     ...list.data.items.map((i) => ({
       ref: `initiative:${i.id}`,
@@ -23,15 +38,17 @@ export default function Initiative({ canMove }: { canMove: boolean }) {
       name: i.name,
       budget: i.budget,
       owner: i.owner_upn,
+      used: undefined,
       tech: i.tech_status,
     })),
-    ...owned.data.items.map((i) => ({
+    ...[...systems.values()].map((i) => ({
       ref: `system:${i.id}`,
       kind: 'system' as const,
       id: i.id,
       name: i.name,
       budget: i.budget,
-      owner: i.owner_upn ?? undefined,
+      owner: i.owner,
+      used: i.used,
       tech: undefined,
     })),
   ];
@@ -60,6 +77,7 @@ export default function Initiative({ canMove }: { canMove: boolean }) {
           name: current.name,
           budget: current.budget,
           owner: current.owner,
+          used: current.used,
           tech: current.tech,
         }}
         canMove={canMove}

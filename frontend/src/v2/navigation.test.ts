@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Me } from '../api/types';
-import { areasFor, areaStorageKey, rememberedArea } from './navigation';
+import { allocatorOrgs, areasFor, drillArea, areaStorageKey, rememberedArea } from './navigation';
 const employee = {
   upn: 'employee@corp.example',
   roles: [{ role: 'employee', scope_kind: 'self' }],
@@ -58,4 +58,22 @@ it('works when browser storage is blocked', () => {
     throw new Error('blocked');
   });
   expect(rememberedArea(employee, areasFor(employee))).toBe('/v2/personal');
+});
+
+// review-p5-r5 major: allocators reach the systems inventory; inherited drill-down is accepted
+it('gives allocators the systems area and lists their organizations', () => {
+  const me = {
+    ...employee,
+    roles: [
+      ...employee.roles,
+      { role: 'org_allocator', scope_kind: 'organization', scope_id: 4, scope_name: 'Org' },
+    ],
+  } as Me;
+  expect(areasFor(me).map((a) => a.path)).toContain('/v2/systems');
+  expect(allocatorOrgs(me)).toEqual([{ id: 4, name: 'Org' }]);
+});
+it('accepts inherited group and department routes but nothing else', () => {
+  expect(drillArea('/v2/group/12')?.path).toBe('/v2/group/12');
+  expect(drillArea('/v2/department/3')?.path).toBe('/v2/department/3');
+  expect(drillArea('/v2/group/x')).toBeUndefined();
 });

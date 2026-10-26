@@ -5,6 +5,7 @@ from app.schemas.departments import DepartmentBudgetIn
 from app.schemas.org_systems import EnvelopesIn, OrgSystemIn
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn, ProductionSystemPatch
 from app.services import org_envelopes, org_systems, production
+from app.services.views import period_ctx
 from app.writes import Write, write_response
 
 router = APIRouter()
@@ -109,5 +110,6 @@ async def put_org_system_budget(
 
 
 @router.get("/systems/mine")
-async def my_systems(principal: CurrentPrincipal, db: Db):
-    return await production.list_owned_systems(db, principal)
+async def my_systems(request: Request, principal: CurrentPrincipal, db: Db):
+    period = period_ctx(request.app.state.settings, None)["period"]
+    return await production.list_owned_systems(db, principal, period)

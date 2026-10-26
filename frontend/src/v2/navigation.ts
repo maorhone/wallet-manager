@@ -7,6 +7,27 @@ export interface Area {
   label: string;
   legacy?: string;
 }
+const isAllocatorRole = (r: Me['roles'][number]) =>
+  ['platform_admin', 'org_allocator'].includes(r.role) &&
+  ['global', 'organization'].includes(r.scope_kind);
+
+export const isAllocator = (me: Me) => me.roles.some(isAllocatorRole);
+export const isAdmin = (me: Me) => me.roles.some((r) => r.role === 'platform_admin');
+
+/** Organizations the caller is bound to as allocator (an administrator may open any by id). */
+export const allocatorOrgs = (me: Me) =>
+  me.roles
+    .filter((r) => r.role === 'org_allocator' && r.scope_kind === 'organization' && r.scope_id)
+    .map((r) => ({ id: r.scope_id as number, name: r.scope_name ?? `#${r.scope_id}` }));
+
+/** An inherited group/department URL: the server decides access, the client never hides it. */
+export function drillArea(pathname: string): Area | undefined {
+  const m = /^\/v2\/(group|department)\/(\d+)$/.exec(pathname);
+  return m
+    ? { path: pathname, label: `${he.v2[m[1] as 'group' | 'department']} · ${m[2]}` }
+    : undefined;
+}
+
 /** Every scoped area comes from /me scopes, never from a client-supplied ID. */
 export function areasFor(me: Me): Area[] {
   const areas: Area[] = [{ path: '/v2/personal', label: he.v2.personal, legacy: '/wallet' }];
@@ -22,11 +43,7 @@ export function areasFor(me: Me): Area[] {
     }
   }
   // Ownership alone does not confer allocation rights.
-  const allocator = me.roles.some(
-    (r) =>
-      ['platform_admin', 'org_allocator'].includes(r.role) &&
-      ['global', 'organization'].includes(r.scope_kind),
-  );
+  const allocator = isAllocator(me);
   if (allocator)
     areas.push({
       path: '/v2/organization',
@@ -40,6 +57,7 @@ export function areasFor(me: Me): Area[] {
         (s.kind === 'department' && s.role !== 'pmo') ||
         (s.kind === 'group' && s.role === 'group_head'),
     ) ||
+    allocator ||
     me.roles.some((r) => ['system_owner', 'initiative_owner'].includes(r.role))
   ) {
     areas.push({ path: '/v2/systems', label: he.v2.systems });

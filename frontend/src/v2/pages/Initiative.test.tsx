@@ -30,10 +30,13 @@ vi.mock('../../api/queries', () => ({
   useServiceKeys: () => ({
     isPending: false,
     data: {
-      items: [{ id: 3, alias: 'bot', used: 250, max_parallel: 2, rpm_limit: 100 }],
+      items: [
+        { id: 3, alias: 'bot', status: 'active', used: 250, max_parallel: 2, rpm_limit: 100 },
+      ],
       spend_taken_at: null,
     },
   }),
+  useOrgEnvelopes: () => ({ isPending: false, data: { systems: { rows: [] } } }),
   useMoveKey: () => ({ mutate: vi.fn(), isPending: false, isSuccess: false }),
 }));
 

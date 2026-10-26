@@ -7,7 +7,15 @@ from sqlalchemy import func, select
 
 from app.auth.session import CurrentPrincipal, Db
 from app.errors import invalid_request
-from app.models import Department, Employee, Grp, Initiative, ProductionSystem, SpendSnapshot
+from app.models import (
+    Department,
+    Employee,
+    Grp,
+    Initiative,
+    Organization,
+    ProductionSystem,
+    SpendSnapshot,
+)
 from app.schemas.me import MeOut, NamedRef, RoleOut, ScopeOut
 from app.services import blocks, views
 
@@ -94,6 +102,8 @@ async def me(request: Request, principal: CurrentPrincipal, db: Db):
             scope = await db.get(Grp, b.scope_id)
         elif b.scope_kind == "department":
             scope = await db.get(Department, b.scope_id)
+        elif b.scope_kind == "organization":
+            scope = await db.get(Organization, b.scope_id)
         name = scope.name if scope else None
         roles.append(
             RoleOut(role=b.role, scope_kind=b.scope_kind, scope_id=b.scope_id, scope_name=name)

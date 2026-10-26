@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   useMe,
   useMyStatus,
@@ -23,21 +23,35 @@ function lastDay(period: string): string {
   return `${period}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
 }
 
+/** Telemetry must never read as "nothing happened" while it is loading or unreadable (D-062). */
+const tele = (q: { data?: unknown; error: unknown; isFetching: boolean }) =>
+  q.data !== undefined ? 'ok' : q.error || !q.isFetching ? 'unavailable' : 'loading';
+
 function RequestForm({ kind, onDone }: { kind: RequestKind; onDone: () => void }) {
   const [need, setNeed] = useState('');
   const [parallel, setParallel] = useState('');
   const submit = useSubmitRequest();
-  if (submit.isSuccess) return <p role="status">{p.sent}</p>;
+  // One key per distinct payload: a retry after a lost response replays, never duplicates.
+  const sent = useRef<{ sig: string; key: string } | null>(null);
+  if (submit.isSuccess)
+    return (
+      <>
+        <p role="status">{p.sent}</p>
+        <button type="button" onClick={onDone}>
+          {p.close}
+        </button>
+      </>
+    );
   return (
     <form
       className="v2-card"
       onSubmit={(e) => {
         e.preventDefault();
-        submit.mutate({
-          type: kind,
-          need,
-          maxParallel: kind === 'throughput' ? Number(parallel) : undefined,
-        });
+        // D-044/D-045: no numbers are required; an empty field is omitted
+        const maxParallel = kind === 'throughput' && parallel !== '' ? Number(parallel) : undefined;
+        const sig = JSON.stringify({ kind, need, maxParallel });
+        if (sent.current?.sig !== sig) sent.current = { sig, key: crypto.randomUUID() };
+        submit.mutate({ type: kind, need, maxParallel, key: sent.current.key });
       }}
     >
       <h3>{kind === 'credits' ? p.requestCredits : p.requestThroughput}</h3>
@@ -56,7 +70,6 @@ function RequestForm({ kind, onDone }: { kind: RequestKind; onDone: () => void }
           <input
             type="number"
             min={1}
-            required
             value={parallel}
             onChange={(e) => setParallel(e.target.value)}
           />
@@ -116,7 +129,11 @@ export default function Personal() {
       </section>
       <section className="v2-card" aria-label={p.lastBlock}>
         <h3>{p.lastBlock}</h3>
-        {explained ? (
+        {tele(status) === 'loading' ? (
+          <p role="status">{he.loading}</p>
+        ) : tele(status) === 'unavailable' || status.data?.blocks_available === false ? (
+          <p className="v2-muted">{he.v2.unavailable}</p>
+        ) : explained ? (
           <p data-testid="last-block">{explained.text}</p>
         ) : (
           <p className="v2-muted">{p.noBlock}</p>
@@ -124,7 +141,13 @@ export default function Personal() {
       </section>
       <section className="v2-card" aria-label={p.byModel}>
         <h3>{p.byModel}</h3>
-        {byModel.size === 0 && <p className="v2-muted">{p.noUsage}</p>}
+        {tele(usage) === 'loading' ? (
+          <p role="status">{he.loading}</p>
+        ) : tele(usage) === 'unavailable' ? (
+          <p className="v2-muted">{he.v2.unavailable}</p>
+        ) : (
+          byModel.size === 0 && <p className="v2-muted">{p.noUsage}</p>
+        )}
         <ul>
           {[...byModel].map(([model, spend]) => (
             <li key={model}>
@@ -135,7 +158,13 @@ export default function Personal() {
       </section>
       <section className="v2-card" aria-label={p.byProject}>
         <h3>{p.byProject}</h3>
-        {(tags.data?.series.length ?? 0) === 0 && <p className="v2-muted">{p.noUsage}</p>}
+        {tele(tags) === 'loading' ? (
+          <p role="status">{he.loading}</p>
+        ) : tele(tags) === 'unavailable' ? (
+          <p className="v2-muted">{he.v2.unavailable}</p>
+        ) : (
+          tags.data?.series.length === 0 && <p className="v2-muted">{p.noUsage}</p>
+        )}
         <ul>
           {tags.data?.series.map((r) => (
             <li key={`${r.bucket}${r.key}`}>
@@ -167,7 +196,7 @@ export default function Personal() {
           </p>
         )}
       </div>
-      {form && <RequestForm kind={form} onDone={() => setForm(null)} />}
+      {form && <RequestForm key={form} kind={form} onDone={() => setForm(null)} />}
     </div>
   );
 }

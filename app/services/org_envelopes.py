@@ -42,7 +42,9 @@ async def _systems(db, organization_id: int) -> list[ProductionSystem]:
 async def get_envelopes(db, principal, settings: Settings, organization_id: int) -> dict:
     can_manage_org_systems(principal, organization_id)
     org = await _org(db, organization_id)
-    spend = await Spend.load(db, _previous(views.period_ctx(settings, None)["period"]))
+    period = views.period_ctx(settings, None)["period"]
+    spend = await Spend.load(db, _previous(period))
+    current = await Spend.load(db, period)
     depts = list(
         await db.scalars(select(Department).where(Department.organization_id == organization_id))
     )
@@ -62,7 +64,8 @@ async def get_envelopes(db, principal, settings: Settings, organization_id: int)
             "envelope": org.systems_envelope,
             "allocated": sum((s.budget for s in systems), Decimal(0)),
             "rows": [
-                {"id": s.id, "name": s.name, "budget": s.budget, "owner_upn": s.owner_upn}
+                {"id": s.id, "name": s.name, "budget": s.budget, "owner_upn": s.owner_upn,
+                 "used": current.used("system", s.id)}
                 for s in systems
             ],
         },

@@ -1,5 +1,10 @@
 import { useRef, useState } from 'react';
-import { useTransfer, useTransferPreview, type BudgetRow } from '../../api/queries';
+import {
+  useTransfer,
+  useTransferPreview,
+  useTransferStatus,
+  type BudgetRow,
+} from '../../api/queries';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
 import { Drawer } from '../components/Drawer';
@@ -23,6 +28,8 @@ export function TransferDrawer({
   const [reason, setReason] = useState('');
   const preview = useTransferPreview();
   const transfer = useTransfer();
+  const created = transfer.data?.entities?.find((x) => x.entity === 'transfer')?.id;
+  const applied = useTransferStatus(created == null ? null : Number(created));
   // Endpoints are "kind:id": a group and an initiative may share a numeric id.
   const endpoint = (ref: string) => {
     const i = ref.indexOf(':');
@@ -49,7 +56,16 @@ export function TransferDrawer({
   return (
     <Drawer opened onClose={onClose} title={s.drawerTitle}>
       {transfer.isSuccess ? (
-        <p role="status">{s.done}</p>
+        <p role="status">
+          {s.done}{' '}
+          {applied.data?.status === 'failed'
+            ? s.applyFailed
+            : applied.data?.status === 'pending_apply'
+              ? s.applyPending
+              : applied.data?.status === 'done'
+                ? s.applyDone
+                : ''}
+        </p>
       ) : (
         <form
           onSubmit={(e) => {

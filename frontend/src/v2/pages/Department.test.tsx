@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import Department from './Department';
 
@@ -46,7 +47,9 @@ describe('Department', () => {
   it('compares sections, keeps org systems separate and adds a group above', () => {
     render(
       <MantineProvider>
-        <Department departmentId="1" />
+        <MemoryRouter>
+          <Department departmentId="1" />
+        </MemoryRouter>
       </MantineProvider>,
     );
     expect(screen.getByText('השוואת מדורים')).toBeTruthy();

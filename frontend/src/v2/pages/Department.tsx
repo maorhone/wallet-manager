@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useDepartmentOverview, type DepartmentSystem } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
 import { DistributionBar } from '../components/DistributionBar';
-import { KpiCard } from '../components/KpiCard';
+import { BudgetKpis } from '../components/BudgetKpis';
 import { HierarchyEditor } from './HierarchyEditor';
 
 const s = he.v2.deptPage;
@@ -41,20 +42,7 @@ export default function Department({ departmentId }: { departmentId: string }) {
   const d = overview.data;
   return (
     <>
-      <div className="v2-kpis">
-        <KpiCard title={s.kpiTotal} value={credits(d.kpis.total)} description={s.kpiTotal} />
-        <KpiCard
-          title={s.kpiAllocated}
-          value={credits(d.kpis.allocated)}
-          description={s.kpiAllocated}
-        />
-        <KpiCard title={s.kpiUsed} value={credits(d.kpis.used)} description={s.kpiUsed} />
-        <KpiCard
-          title={s.kpiRemaining}
-          value={credits(d.kpis.remaining)}
-          description={s.kpiRemaining}
-        />
-      </div>
+      <BudgetKpis labels={s} total={d.kpis.total} bar={d.bar} used={d.kpis.used} />
       <DistributionBar
         used={d.bar.used}
         assignedUnused={d.bar.allocated_unused}
@@ -86,7 +74,9 @@ export default function Department({ departmentId }: { departmentId: string }) {
               <tbody>
                 {d.sections.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.name}</td>
+                    <td>
+                      <Link to={`/v2/group/${r.id}`}>{r.name}</Link>
+                    </td>
                     <td>{credits(r.total)}</td>
                     <td>{credits(r.used)}</td>
                     <td>{r.members}</td>

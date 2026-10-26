@@ -18,6 +18,8 @@ export function BulkAllocation({
   const [amount, setAmount] = useState('');
   const [override, setOverride] = useState('');
   const [overrideAmount, setOverrideAmount] = useState('');
+  // D-066: any number of individual exceptions; all of them go into preview and confirmation.
+  const [extra, setExtra] = useState<Record<string, number>>({});
   const [reason, setReason] = useState('');
   const preview = useBulkPreview(groupId);
   const commit = useBulkAllocation(groupId);
@@ -25,7 +27,10 @@ export function BulkAllocation({
   const body = () => ({
     all: true,
     amount: Number(amount),
-    overrides: override && overrideAmount ? { [override]: Number(overrideAmount) } : {},
+    overrides: {
+      ...extra,
+      ...(override && overrideAmount ? { [override]: Number(overrideAmount) } : {}),
+    },
   });
   // Confirm exactly what was previewed; any later edit invalidates the preview (D-066/D-069).
   const [previewed, setPreviewed] = useState<{
@@ -82,6 +87,32 @@ export function BulkAllocation({
               onChange={(e) => setOverrideAmount(e.target.value)}
             />
           </label>
+          <button
+            type="button"
+            disabled={!override || overrideAmount === ''}
+            onClick={() => {
+              setExtra({ ...extra, [override]: Number(overrideAmount) });
+              setOverride('');
+              setOverrideAmount('');
+            }}
+          >
+            {s.addException}
+          </button>
+          <ul>
+            {Object.entries(extra).map(([upn, v]) => (
+              <li key={upn}>
+                <bdi dir="ltr">{upn}</bdi>: {credits(v)}{' '}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExtra(Object.fromEntries(Object.entries(extra).filter(([k]) => k !== upn)))
+                  }
+                >
+                  {s.removeException}
+                </button>
+              </li>
+            ))}
+          </ul>
           <button type="submit" disabled={preview.isPending}>
             {s.preview}
           </button>
