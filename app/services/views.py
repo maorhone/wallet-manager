@@ -107,6 +107,25 @@ async def _shares(db, group_ids: list[int]) -> list[tuple[int, str, Decimal]]:
     return [tuple(r) for r in rows.all()]
 
 
+async def internal_system_ids(db, dept_id: int) -> list[int]:
+    return list(
+        await db.scalars(
+            select(ProductionSystem.id).where(
+                ProductionSystem.department_id == dept_id,
+                ProductionSystem.funding == "department",
+            )
+        )
+    )
+
+
+async def dept_used(db, dept_id: int, spend: Spend) -> Decimal:
+    """Department consumption: its groups plus department-funded internal systems (D-076);
+    Org Systems never count. One definition for the current and the previous period."""
+    return spend.used("department", dept_id) + sum(
+        (spend.used("system", i) for i in await internal_system_ids(db, dept_id)), ZERO
+    )
+
+
 async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     """Department wallet card, its (non-archived) groups and their base budgets as of ``at``."""
     groups = list(
@@ -120,15 +139,7 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
     parents = await _parent_map(db, dept.id, at)
     groups = [g for g in groups if g.id in parents]
-    internal_ids = await db.scalars(
-        select(ProductionSystem.id).where(
-            ProductionSystem.department_id == dept.id,
-            ProductionSystem.funding == "department",
-        )
-    )
-    used = spend.used("department", dept.id) + sum(
-        (spend.used("system", system_id) for system_id in internal_ids), ZERO
-    )
+    used = await dept_used(db, dept.id, spend)
     card = wallet.department_wallet(
         values["budget"], sum((bases[g.id] for g in groups if parents.get(g.id) is None), ZERO),
         # D-076: internal systems are carved from the department envelope, like the reserve
@@ -162,35 +173,43 @@ async def _parent_map(db, department_id: int, at) -> dict[int, int | None]:
     for (gid,) in created:
         parents.pop(int(gid), None)
     # Parent insertion is audited once, on the new parent; it also moved the child (r7 B3).
-    inserted = await db.scalars(
+    # Insertions and the child's own parent changes form ONE history per child; the parent at
+    # ``at`` is the latest event at or before it, else the earliest later event's "before" (r9 B3).
+    events: dict[int, list[tuple[datetime, int, object, object]]] = {}
+    ids = [str(g.id) for g in groups]
+    for a in await db.scalars(
         select(AuditLog)
         .where(
             AuditLog.entity == "group",
-            AuditLog.entity_id.in_([str(g.id) for g in groups]),
+            AuditLog.entity_id.in_(ids),
             AuditLog.after.has_key("child_id"),
         )
         .order_by(AuditLog.at, AuditLog.id)
-    )
-    for a in inserted:
+    ):
         child = int(a.after["child_id"])
-        if child not in parents:
-            continue
-        own_later = await db.scalar(
-            select(AuditLog.id)
+        events.setdefault(child, []).append(
+            (a.at, a.id, a.before["child_parent_group_id"], a.after["child_parent_group_id"])
+        )
+    if events:
+        for a in await db.scalars(
+            select(AuditLog)
             .where(
                 AuditLog.entity == "group",
-                AuditLog.entity_id == str(child),
-                AuditLog.at > a.at,
-                AuditLog.at <= at,
+                AuditLog.entity_id.in_([str(c) for c in events]),
                 AuditLog.after.has_key("parent_group_id"),
             )
-            .limit(1)
-        )
-        if own_later is None:
-            moved = a.at <= at
-            parents[child] = (
-                a.after["child_parent_group_id"] if moved else a.before["child_parent_group_id"]
+            .order_by(AuditLog.at, AuditLog.id)
+        ):
+            events[int(a.entity_id)].append(
+                (a.at, a.id, (a.before or {}).get("parent_group_id"), a.after["parent_group_id"])
             )
+    for child, evs in events.items():
+        if child not in parents:
+            continue
+        evs.sort(key=lambda e: (e[0], e[1]))
+        done = [e for e in evs if e[0] <= at]
+        later = [e for e in evs if e[0] > at]
+        parents[child] = done[-1][3] if done else later[0][2]
     return parents
 
 

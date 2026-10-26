@@ -44,13 +44,13 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
         return []
     try:
         orgs, teams = await reader.org_allocations(), await reader.team_allocations()
-        live_budget = await reader.team_budgets()
+        live_budget, live_org = await reader.team_budgets(), await reader.team_orgs()
     except Exception:
         log.warning("over-allocation check: LiteLLM database unreachable; WM checks only")
         return []
     by_org = {d.litellm_org_id: d for d in depts}
     by_team = {g.litellm_team_id: g for g in groups}
-    carved: dict[int, Decimal] = defaultdict(Decimal)
+    carved: dict[str, Decimal] = defaultdict(Decimal)  # live organization id -> nested carve
     child_carve: dict[str, Decimal] = defaultdict(Decimal)  # live parent team -> live children
     by_id = {g.id: g for g in groups}
     for g in groups:
@@ -58,12 +58,17 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
             # D-055: child teams are carved from a parent. WM only names the hierarchy; the
             # amount is the child's live LiteLLM budget (a drifted WM value must not mask it).
             live = live_budget.get(g.litellm_team_id, ZERO)
-            carved[g.department_id] += live
+            # only a child the live organization aggregate really includes, together with its
+            # live parent, is carved out of that aggregate (r9 B1b)
+            parent = by_id[g.parent_group_id]
+            org = live_org.get(g.litellm_team_id)
+            if org is not None and org == live_org.get(parent.litellm_team_id):
+                carved[org] += live
             child_carve[by_id[g.parent_group_id].litellm_team_id] += live
     out = []
     for o in orgs:
         d = by_org.get(o.organization_id)
-        allocated = o.allocated - (carved[d.id] if d else ZERO)
+        allocated = o.allocated - carved[o.organization_id]
         total = o.dept_budget - (d.reserve if d else ZERO)
         if allocated > total:
             out.append(

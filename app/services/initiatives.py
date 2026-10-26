@@ -89,7 +89,7 @@ async def _view(db, initiatives: list[Initiative], settings: Settings) -> list[d
             "period_start": i.period_start,
             "period_end": i.period_end,
             "budget": i.budget,
-            "used": await initiative_used(db, spend, i.id, period),
+            "used": await initiative_used(db, spend, i.id, period, settings.app_timezone),
             "status": i.status,
             "tech_status": tech_status([k for k in keys if k.owner_id == i.id]),
         }

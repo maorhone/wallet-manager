@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from app.errors import invalid_request
-from app.models import RateCard, SpendSnapshot
+from app.models import AuditLog, RateCard, SpendSnapshot
 from app.permissions import Principal, can_manage_platform
 from app.schemas.platform import RateCardIn
 from app.services.history import values_as_of
@@ -82,14 +82,20 @@ def _value(rows, rates) -> Decimal | None:
 async def _value_between(db, current: dict, rows, start: datetime, end: datetime):
     """Value ``rows`` consumed within [start, end): ``None`` if a rate they use changed inside
     the span, because aggregated data cannot say which side of the change the tokens fell on."""
-    first, last = (
-        await _rates_at(db, current, start),
-        await _rates_at(db, current, end - timedelta(microseconds=1)),
-    )
-    for r in rows:
-        if r.model in first and (first[r.model].input_per_1m, first[r.model].output_per_1m) != (
-            last[r.model].input_per_1m, last[r.model].output_per_1m
-        ):  # fmt: skip
+    last = await _rates_at(db, current, end - timedelta(microseconds=1))
+    used = {r.model for r in rows if r.prompt_tokens or r.completion_tokens}
+    # Every audited change inside the span counts, also one that was reverted before its end
+    # (equal endpoint rates would hide it); the first price ever set has no "before" (r9 B3).
+    for a in await db.scalars(
+        select(AuditLog).where(
+            AuditLog.entity == "rate_card",
+            AuditLog.entity_id.in_(used),
+            AuditLog.at > start,
+            AuditLog.at < end,
+        )
+    ):
+        keys = ("input_per_1m", "output_per_1m")
+        if a.before and any(Decimal(str(a.before[k])) != Decimal(str(a.after[k])) for k in keys):
             return None
     return _value(rows, last)
 

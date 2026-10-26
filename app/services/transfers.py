@@ -100,7 +100,9 @@ async def lock_scope(db, group: Grp, endpoints) -> None:
         await lock_parent(db, LockKind.GROUP, gid)
 
 
-async def group_committed(db, spend: Spend, group: Grp, with_shares: bool = False) -> Decimal:
+async def group_committed(
+    db, spend: Spend, group: Grp, with_shares: bool = False, initiative_spent=None
+) -> Decimal:
     """Consumption plus what is still allocated and unspent; spent credit is counted once.
 
     Employee and key spend is part of the group team's own spend, so only the unspent rest of
@@ -128,21 +130,29 @@ async def group_committed(db, spend: Spend, group: Grp, with_shares: bool = Fals
         select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
     ):
         committed += max(child.base_budget, spend.used("group", child.id))
-    keys = await db.scalars(
-        select(ServiceKey).where(
-            ServiceKey.status.in_(("active", "pending")),
-            ServiceKey.owner_kind.in_(("group", "initiative")),
-        )
-    )
     initiatives = {
         i.id: i for i in await db.scalars(select(Initiative).where(Initiative.group_id == group.id))
     }
-    spent: dict[int, Decimal] = {}
-    for key in keys:
-        if key.owner_kind == "group" and key.owner_id == group.id:
-            committed += max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO)
-        elif key.owner_kind == "initiative" and key.owner_id in initiatives:
+    # An initiative's consumption comes from ALL its keys, revoked ones included: it is in the
+    # group's own spend already, so it must not stay counted as unspent funding (r9 B1a1).
+    # The overview passes ``initiative_spent`` (also covering keys moved to a system, r9 B3).
+    spent = initiative_spent
+    if spent is None:
+        spent = {}
+        for key in await db.scalars(
+            select(ServiceKey).where(
+                ServiceKey.owner_kind == "initiative", ServiceKey.owner_id.in_(list(initiatives))
+            )
+        ):
             spent[key.owner_id] = spent.get(key.owner_id, ZERO) + spend.used("service_key", key.id)
+    for key in await db.scalars(
+        select(ServiceKey).where(
+            ServiceKey.status.in_(("active", "pending")),
+            ServiceKey.owner_kind == "group",
+            ServiceKey.owner_id == group.id,
+        )
+    ):
+        committed += max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO)
     for i in initiatives.values():
         if i.status == "active":
             committed += max(i.budget - spent.get(i.id, ZERO), ZERO)
@@ -661,14 +671,19 @@ async def _retire_superseded(db, write_id: int) -> list[int]:
             Transfer.target_id == row.entity_id,
             Transfer.state == "pending",
             literal(write_id) != all_(Transfer.write_ids),
-            exists().where(
-                LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status == "applied"
+            or_(
+                Transfer.first_write_id.is_(None),  # initiative-origin: no source write (B1a1)
+                exists().where(
+                    LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status == "applied"
+                ),
             ),
         )
     )
     retired = []
     for other in siblings:
-        for wid in (other.write_ids or [])[1:]:
+        for wid in other.write_ids or []:
+            if wid == other.first_write_id:
+                continue  # the source write is its own; only destination writes are superseded
             held = await db.get(LitellmWrite, wid)
             if held is not None and held.status == "pending":
                 held.status, held.last_error = "applied", f"superseded by write {write_id}"

@@ -62,7 +62,7 @@ async def get_envelopes(db, principal, settings: Settings, organization_id: int)
     )
     initiative_rows = [
         {"id": i.id, "name": i.name, "budget": i.budget, "owner_upn": i.owner_upn,
-         "used": await initiative_used(db, current, i.id, period)}
+         "used": await initiative_used(db, current, i.id, period, settings.app_timezone)}
         for i in initiatives
     ]  # fmt: skip
     return {

@@ -1,6 +1,7 @@
 """Section budget overview and Action Center (5.17, WF-01): read-only, built on group_summary."""
 
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
@@ -74,10 +75,13 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
             {"kind": "group", "id": str(child.id), "name": child.name, "total": total,
              "used": used, "percent": _pct(used, total), "state": None}
         )  # fmt: skip
+    ini_used: dict[int, Decimal] = {}
     for ini in await db.scalars(
         select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
     ):
-        used = await initiative_used(db, spend, ini.id, s["period"])
+        used = ini_used[ini.id] = await initiative_used(
+            db, spend, ini.id, s["period"], settings.app_timezone
+        )
         rows.append(
             {"kind": "initiative", "id": str(ini.id), "name": ini.name, "total": ini.budget,
              "used": used, "percent": _pct(used, ini.budget), "state": None}
@@ -88,7 +92,9 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     own_used = spend.used("group", group_id)
     unused = None  # a past period has no live allocations to read: the allocated-minus-used rule
     if at is None:
-        committed = await group_committed(db, spend, group, with_shares=True)
+        committed = await group_committed(
+            db, spend, group, with_shares=True, initiative_spent=ini_used
+        )
         unused = max(committed - own_used - (used - own_used), Decimal(0))
     remaining = w["total"] - used
     return {
@@ -107,7 +113,9 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     }  # fmt: skip
 
 
-async def initiative_used(db, spend: Spend, initiative_id: int, period: str) -> Decimal:
+async def initiative_used(
+    db, spend: Spend, initiative_id: int, period: str, tz: str = "UTC"
+) -> Decimal:
     """No initiative snapshot scope exists: sum its keys (revoked/rotated generations included,
     and keys moved to a system for the periods up to the move, r6 B3)."""
     key_ids = await db.scalars(
@@ -116,7 +124,7 @@ async def initiative_used(db, spend: Spend, initiative_id: int, period: str) -> 
         )
     )
     used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
-    for key_id, this_period in await _moved_keys(db, initiative_id, period):
+    for key_id, this_period in await _moved_keys(db, initiative_id, period, tz):
         if not this_period:
             used += spend.used("service_key", key_id)
             continue
@@ -126,9 +134,13 @@ async def initiative_used(db, spend: Spend, initiative_id: int, period: str) -> 
     return used
 
 
-async def _moved_keys(db, initiative_id: int, period: str) -> list[tuple[int, bool]]:
-    """Keys moved out of the initiative in ``period`` or later: (id, moved within ``period``)."""
+async def _moved_keys(
+    db, initiative_id: int, period: str, tz: str = "UTC"
+) -> list[tuple[int, bool]]:
+    """Keys moved out of the initiative in ``period`` or later: (id, moved within ``period``).
+    Months are those of ``tz`` (APP_TIMEZONE), like the snapshot periods (r9 B3)."""
     out = []
+    zone = ZoneInfo(tz)
     for a in await db.scalars(
         select(AuditLog).where(
             AuditLog.entity == "service_key",
@@ -136,8 +148,9 @@ async def _moved_keys(db, initiative_id: int, period: str) -> list[tuple[int, bo
             AuditLog.before["owner_id"].as_string() == str(initiative_id),
         )
     ):
-        if a.after and a.after.get("owner_kind") == "system" and a.at.strftime("%Y-%m") >= period:
-            out.append((int(a.entity_id), a.at.strftime("%Y-%m") == period))
+        month = a.at.astimezone(zone).strftime("%Y-%m")
+        if a.after and a.after.get("owner_kind") == "system" and month >= period:
+            out.append((int(a.entity_id), month == period))
     return out
 
 
@@ -205,6 +218,21 @@ def _previous(period: str) -> str:
     return f"{year - (month == 1)}-{(month - 2) % 12 + 1:02d}"
 
 
+async def _dept_metered_value(db, dept_id: int, period: str, tz: str) -> Decimal | None:
+    """D-049: tokens x rate for the department's groups and internal systems (not Org Systems);
+    ``None`` if any part cannot be priced."""
+    scopes = [("department", dept_id)] + [
+        ("system", i) for i in await views.internal_system_ids(db, dept_id)
+    ]
+    total = Decimal(0)
+    for kind, scope_id in scopes:
+        value = await metered_value(db, kind, scope_id, period, tz)
+        if value is None:
+            return None
+        total += value
+    return total
+
+
 async def department_overview(
     db, principal, settings: Settings, scope: str, raw_period: str | None
 ) -> dict:
@@ -254,10 +282,13 @@ async def department_overview(
     return {
         "period": pc["period"], "reset_date": pc["reset_date"], "department": dept.name,
         "kpis": {"total": card["total"], "allocated": card["allocated"], "used": card["used"],
-                 "remaining": card["remaining"]},
+                 "remaining": card["remaining"],
+                 "metered_value": await _dept_metered_value(
+                     db, dept_id, pc["period"], settings.app_timezone
+                 )},
         "bar": _bar(card["used"], card["allocated"], card["total"]),
         "previous_period": {"period": _previous(pc["period"]),
-                            "used": before.used("department", dept_id)},
+                            "used": await views.dept_used(db, dept_id, before)},
         "sections": sections,
         "tree": [{"id": g.id, "name": g.name, "parent_group_id": parents.get(g.id)}
                  for g in groups],
