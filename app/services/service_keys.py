@@ -18,6 +18,7 @@ from app.models import (
     ProductionSystem,
     ServiceKey,
 )
+from app.errors import ApiError
 from app.permissions import AI_TEAM, can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
 from app.services.validation import (
@@ -255,18 +256,12 @@ async def change(ctx, principal, client, key_id, action):
 
 
 async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
-    viewed = await can_view_service_keys(db, principal, owner_kind, owner_id)
-    if owner_kind == "initiative" and viewed == "owner":
-        # ownership is a read shortcut: management follows the section role (a head who owns it)
-        initiative = await db.get(Initiative, owner_id)
-        if principal.has("group_head", "group", initiative.group_id):
-            viewed = "group_head"
-    manage = (
-        principal.is_admin
-        or (owner_kind == "group" and principal.has("group_head", "group", owner_id))
-        or (owner_kind == "initiative" and viewed == "group_head")
-        or (owner_kind == "system" and viewed == "org_allocator")
-    )
+    await can_view_service_keys(db, principal, owner_kind, owner_id)
+    try:  # advertised actions are exactly what the mutations authorize (r6 B2)
+        await can_manage_service_keys(db, principal, owner_kind, owner_id)
+        manage = True
+    except ApiError:
+        manage = False
     keys = list(
         await db.scalars(
             select(ServiceKey)

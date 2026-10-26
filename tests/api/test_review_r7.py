@@ -121,3 +121,60 @@ async def test_r7_targeted_throughput_requires_and_records_limits(login_wm, prov
     async with provisioned() as s:
         req = await s.get(Request, rid)
         assert (req.status, req.payload["applied_limits"]) == ("applied", {"max_parallel": 7})
+
+
+async def _owned(provisioned):
+    from app.models import Initiative, ProductionSystem, ServiceKey
+
+    async with provisioned() as s:
+        system = ProductionSystem(
+            department_id=1, name="Own", budget=10, litellm_team_id="sys-r7",
+            owner_upn="yael@corp.example",
+        )  # fmt: skip
+        init = Initiative(
+            name="P", owner_upn="yael@corp.example", group_id=1, department_id=1, budget=10,
+            created_by="dana@corp.example",
+        )  # fmt: skip
+        s.add_all([system, init])
+        await s.flush()
+        s.add_all(
+            [
+                ServiceKey(owner_kind="system", owner_id=system.id, max_budget=1, status="active"),
+                ServiceKey(owner_kind="initiative", owner_id=init.id, max_budget=1, status="active"),
+            ]
+        )
+        await s.commit()
+        return system.id, init.id
+
+
+# review-p5-r6 major B2: an internal-system owner reads its keys (never writes)
+async def test_r7_internal_system_owner_reads_keys(login_wm, provisioned):
+    sid, _ = await _owned(provisioned)
+    yael = await login_wm("yael")
+    r = await yael.get(f"/service-keys?owner_kind=system&owner_id={sid}")
+    assert r.status_code == 200, r.text
+    assert [i["actions"] for i in r.json()["items"]] == [{"rotate": False, "revoke": False}]
+    other = await (await login_wm("dani")).get(f"/service-keys?owner_kind=system&owner_id={sid}")
+    assert other.status_code == 403
+
+
+# review-p5-r6 major B2: advertised actions follow the mutation authorization
+async def test_r7_actions_for_caller_with_rep_and_head(provisioned):
+    from app.permissions import Binding, Principal
+    from app.services.service_keys import list_keys
+
+    _, iid = await _owned(provisioned)
+    caller = Principal(
+        "multi@corp.example", "Multi",
+        [Binding("department_rep", "department", 1), Binding("group_head", "group", 1)],
+    )  # fmt: skip
+
+    class Clock:
+        def now(self):
+            return datetime.now(UTC)
+
+    from app.config import Settings
+
+    async with provisioned() as s:
+        got = await list_keys(s, caller, Settings(_env_file=None), Clock(), "initiative", iid)
+    assert got["items"][0]["actions"] == {"rotate": True, "revoke": True}

@@ -344,7 +344,12 @@ async def can_view_service_keys(session, p: Principal, owner_kind: str, owner_id
         if system.owner_upn == p.upn:  # the owner views, never writes (D-077)
             return "owner"
         raise _forbidden()
-    return await can_view_production(session, p, system.department_id)
+    try:
+        return await can_view_production(session, p, system.department_id)
+    except ApiError:
+        if system.owner_upn == p.upn:  # the owner reads limits and keys, never writes (D-048)
+            return "owner"
+        raise
 
 
 async def can_manage_service_keys(session, p: Principal, owner_kind: str, owner_id: int) -> str:
