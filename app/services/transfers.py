@@ -23,7 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import all_, any_, exists, literal, or_, select, update
+from sqlalchemy import all_, any_, exists, literal, or_, select, tuple_, update
 
 from app.db import LockKind, lock_parent
 from app.errors import ApiError, invalid_request
@@ -220,6 +220,11 @@ async def _plan(
     target = await _side(ctx.db, spend, group, body.target)
     if (source.kind, source.id) == (target.kind, target.id):
         raise invalid_request("Source and target are the same", {"reason": "same_entity"})
+    if await _closes_cycle(ctx.db, group, source, target):
+        raise invalid_request(
+            "A pending transfer already moves credit back toward the source; wait for it to apply",
+            {"reason": "dependency_cycle"},
+        )
     for side in (source, target):  # unsettled incoming credit cannot move on, whatever the kind
         if side.kind != "system":  # system_committed already includes it
             side.committed += await pending_incoming(ctx.db, side.kind, side.id)
@@ -233,6 +238,25 @@ async def _plan(
             {"reason": "exceeds_unused", "unused": source.unused},
         )
     return group, role, source, target
+
+
+async def _closes_cycle(db, group: Grp, source: Side, target: Side) -> bool:
+    """B1a1: pending transfers hold a source's reduction while credit is incoming, so a loop of
+    pending transfers (A->B, B->A) would wait on itself forever. Refuse the closing edge."""
+    seen, frontier = set(), {(target.kind, target.id)}
+    while frontier:
+        seen |= frontier
+        edges = await db.execute(
+            select(Transfer.target_kind, Transfer.target_id).where(
+                Transfer.group_id == group.id,
+                Transfer.state == "pending",
+                tuple_(Transfer.source_kind, Transfer.source_id).in_(frontier),
+            )
+        )
+        frontier = {(k, i) for k, i in edges} - seen
+        if (source.kind, source.id) in frontier:
+            return True
+    return False
 
 
 async def preview(
@@ -560,6 +584,45 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
     return ok
 
 
+async def _retire_superseded(db, write_id: int) -> list[int]:
+    """B1a1: an applied destination write publishes every receipt of its target whose source
+    already applied (the payload is rebuilt under the money locks). Those siblings' own
+    destination writes are redundant: mark them applied so the transfers settle with the
+    payload that actually carried their credit, instead of a later undo restoring only the
+    local side. Returns the ids of the transfers whose destination writes were retired."""
+    row = await db.get(LitellmWrite, write_id)
+    if row is None or row.status != "applied" or row.entity not in _ENTITY.values():
+        return []
+    is_destination = await db.scalar(
+        select(Transfer.id).where(
+            literal(write_id) == any_(Transfer.write_ids),
+            or_(Transfer.first_write_id.is_(None), Transfer.first_write_id != write_id),
+        ).limit(1)
+    )  # fmt: skip
+    if is_destination is None:
+        return []
+    kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
+    siblings = await db.scalars(
+        select(Transfer).where(
+            Transfer.target_kind.in_(kinds),
+            Transfer.target_id == row.entity_id,
+            Transfer.state == "pending",
+            literal(write_id) != all_(Transfer.write_ids),
+            exists().where(
+                LitellmWrite.id == Transfer.first_write_id, LitellmWrite.status == "applied"
+            ),
+        )
+    )
+    retired = []
+    for other in siblings:
+        for wid in (other.write_ids or [])[1:]:
+            held = await db.get(LitellmWrite, wid)
+            if held is not None and held.status == "pending":
+                held.status, held.last_error = "applied", f"superseded by write {write_id}"
+                retired.append(other.id)
+    return retired
+
+
 async def settle(db, settings, reader, now: datetime, write_id: int | None = None) -> None:
     """Pending transfers whose writes are all applied become ``applied`` (credit usable).
 
@@ -568,7 +631,8 @@ async def settle(db, settings, reader, now: datetime, write_id: int | None = Non
     """
     q = select(Transfer).where(Transfer.state == "pending")
     if write_id is not None:
-        q = q.where(literal(write_id) == any_(Transfer.write_ids))
+        retired = await _retire_superseded(db, write_id)
+        q = q.where(or_(literal(write_id) == any_(Transfer.write_ids), Transfer.id.in_(retired)))
     for transfer in list(await db.scalars(q)):
         ids = transfer.write_ids or []
         statuses = set(

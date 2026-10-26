@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.models import Department
 from tests.api.test_transfers import move, send
@@ -65,3 +65,31 @@ async def test_r7_approval_refreshes_group_after_locks(
     )  # fmt: skip
     assert base > 1
     assert r.status_code == 422, r.text
+
+
+# review-p5-r6 blocker B1a1: an aggregate destination write settles every receipt it published
+async def test_r7_aggregate_destination_write_settles_siblings(
+    login_wm, provisioned, litellm, prov_settings
+):
+    from app.models import Transfer
+    from app.outbox.worker import drain
+
+    head = await login_wm("dana")
+    a = await send(head, "POST", "/transfers", move(10))
+    b = await send(head, "POST", "/transfers", move(20))
+    assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
+    await drain(provisioned, litellm, prov_settings)
+    async with provisioned() as s:
+        states = [t.state for t in await s.scalars(select(Transfer).order_by(Transfer.id))]
+    assert states == ["applied", "applied"]
+
+
+# review-p5-r6 major B1a1: reciprocal pending transfers would wait on each other forever
+async def test_r7_reciprocal_transfer_refused(login_wm, provisioned):
+    head = await login_wm("dana")
+    assert (await send(head, "POST", "/transfers", move(20))).status_code == 200
+    r = await send(
+        head, "POST", "/transfers", move(20, "yael@corp.example", "dani@corp.example")
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["details"]["reason"] == "dependency_cycle"
