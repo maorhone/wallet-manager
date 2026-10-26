@@ -178,3 +178,56 @@ async def test_r8_history_follows_parent_insertion(login_wm, provisioned):
         before = await _parent_map(s, 1, now - timedelta(days=1))
         after = await _parent_map(s, 1, now + timedelta(days=1))
         assert (before[1], after[1]) == (None, new_id)
+
+
+# review-p5-r7 major B3: a revoked key's spend does not eat the fresh allocation
+async def test_r8_overview_unused_after_revocation(login_wm, provisioned):
+    from datetime import UTC, datetime
+
+    from app.models import Employee, Grp, Initiative, ServiceKey, SpendSnapshot
+
+    period = datetime.now(UTC).strftime("%Y-%m")
+    async with provisioned() as s:
+        g = await s.get(Grp, 1)
+        g.base_budget = 100
+        for e in await s.scalars(select(Employee).where(Employee.group_id == 1)):
+            e.base_cap = 0
+        for i in await s.scalars(select(Initiative).where(Initiative.group_id == 1)):
+            i.status = "closed"
+        s.add_all(
+            [
+                ServiceKey(owner_kind="group", owner_id=1, max_budget=80, status="revoked"),
+                ServiceKey(owner_kind="group", owner_id=1, max_budget=20, status="active"),
+                SpendSnapshot(
+                    scope_kind="group", scope_id="1", period=period, model=None, spend=80
+                ),
+            ]
+        )
+        await s.commit()
+    bar = (await (await login_wm("dana")).get("/budget/overview?scope=group:1")).json()["bar"]
+    assert (bar["used"], bar["allocated_unused"], bar["unallocated"]) == (80, 20, 0)
+
+
+# review-p5-r7 major B3: post-move consumption stays out of the initiative's usage
+async def test_r8_initiative_usage_stops_at_the_move(login_wm, provisioned):
+    from datetime import UTC, datetime
+
+    from app.models import ServiceKey, SpendSnapshot
+    from tests.api.test_review_r7 import _owned
+
+    sid, iid = await _owned(provisioned)
+    now = datetime.now(UTC)
+    month = now.strftime("%Y-%m")
+    async with provisioned() as s:
+        key = ServiceKey(owner_kind="system", owner_id=sid, max_budget=1, status="active")
+        s.add(key)
+        await s.flush()
+        await _audit(s, "service_key", key.id, {"owner_kind": "initiative", "owner_id": iid},
+                     {"owner_kind": "system", "owner_id": sid}, now.replace(day=10))  # fmt: skip
+        for period, spend in ((month, 39), (f"{month}-09", 9), (f"{month}-11", 30)):
+            s.add(SpendSnapshot(scope_kind="service_key", scope_id=str(key.id), period=period,
+                                model=None, spend=spend))  # fmt: skip
+        await s.commit()
+    r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
+    row = next(x for x in r.json()["rows"] if x["kind"] == "initiative" and x["id"] == str(iid))
+    assert row["used"] == 9

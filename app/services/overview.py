@@ -15,6 +15,7 @@ from app.models import (
     ProductionSystem,
     Request,
     ServiceKey,
+    SpendSnapshot,
 )
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import requests as requests_service
@@ -22,6 +23,7 @@ from app.services import views
 from app.services.history import values_as_of
 from app.services.rate_card import metered_value
 from app.services.spend import Spend
+from app.services.transfers import group_committed
 
 DEFAULT_SHORTAGE = Decimal("0.85")
 
@@ -82,6 +84,13 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
              "used": used, "percent": _pct(used, ini.budget), "state": None}
         )  # fmt: skip
     used = w["rollup_used"]  # D-055: descendants' consumption counts once, in the parent's view
+    # D-055: unused = what each live allocation still holds, never reduced by spend of a retired
+    # one (a revoked key's spend is in ``used`` already); r7 B3.
+    own_used = spend.used("group", group_id)
+    unused = None  # a past period has no live allocations to read: the allocated-minus-used rule
+    if at is None:
+        committed = await group_committed(db, spend, group)
+        unused = max(committed - own_used - (used - own_used), Decimal(0))
     remaining = w["total"] - used
     return {
         "period": s["period"], "reset_date": s["reset_date"], "spend_taken_at": s["spend_taken_at"],
@@ -91,7 +100,7 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
             "remaining": remaining,
             "metered_value": await metered_value(db, "group", group_id, s["period"]),
         },
-        "bar": _bar(used, w["allocated"], w["total"]),
+        "bar": _bar(used, w["allocated"], w["total"], unused),
         "rows": rows,
         "actions": s["actions"],
     }  # fmt: skip
@@ -100,20 +109,34 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
 async def initiative_used(db, spend: Spend, initiative_id: int, period: str) -> Decimal:
     """No initiative snapshot scope exists: sum its keys (revoked/rotated generations included,
     and keys moved to a system for the periods up to the move, r6 B3)."""
-    key_ids = [
-        *await db.scalars(
-            select(ServiceKey.id).where(
-                ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
+    key_ids = await db.scalars(
+        select(ServiceKey.id).where(
+            ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
+        )
+    )
+    used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
+    for key_id, day in await _moved_keys(db, initiative_id, period):
+        if day is None:
+            used += spend.used("service_key", key_id)
+            continue
+        # Moved in this period: only the days up to the move day belong to the initiative (r7 B3).
+        rows = await db.scalars(
+            select(SpendSnapshot).where(
+                SpendSnapshot.scope_kind == "service_key",
+                SpendSnapshot.scope_id == str(key_id),
+                SpendSnapshot.model.is_(None),
+                SpendSnapshot.period.like(f"{period}-%"),
+                SpendSnapshot.period <= day,
             )
-        ),
-        *await _moved_key_ids(db, initiative_id, period),
-    ]
-    return sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
+        )
+        used += sum((r.spend for r in rows), Decimal(0))
+    return used
 
 
-async def _moved_key_ids(db, initiative_id: int, period: str) -> list[int]:
-    """Keys moved out of the initiative whose move happened in ``period`` or later."""
-    ids = []
+async def _moved_keys(db, initiative_id: int, period: str) -> list[tuple[int, str | None]]:
+    """Keys moved out of the initiative in ``period`` or later: (id, move day when it is this
+    period, so that only earlier days count; None when the move came after the period)."""
+    out = []
     for a in await db.scalars(
         select(AuditLog).where(
             AuditLog.entity == "service_key",
@@ -122,15 +145,18 @@ async def _moved_key_ids(db, initiative_id: int, period: str) -> list[int]:
         )
     ):
         if a.after and a.after.get("owner_kind") == "system" and a.at.strftime("%Y-%m") >= period:
-            ids.append(int(a.entity_id))
-    return ids
+            same = a.at.strftime("%Y-%m") == period
+            out.append((int(a.entity_id), a.at.strftime("%Y-%m-%d") if same else None))
+    return out
 
 
-def _bar(used: Decimal, allocated: Decimal, total: Decimal) -> dict:
+def _bar(used: Decimal, allocated: Decimal, total: Decimal, unused: Decimal | None = None) -> dict:
     """D-055: used + allocated_unused + unallocated == total, also when spend came from a
     revoked allocation (it is in ``used`` but no longer in ``allocated``)."""
     remaining = max(total - used, Decimal(0))
-    unused = min(max(allocated - used, Decimal(0)), remaining)
+    if unused is None:
+        unused = max(allocated - used, Decimal(0))
+    unused = min(unused, remaining)
     return {"used": used, "allocated_unused": unused, "unallocated": remaining - unused,
             "total": total}  # fmt: skip
 

@@ -314,6 +314,12 @@ async def test_r7_moved_initiative_key_keeps_usage(login_wm, provisioned):
                 spend=9,
             )
         )
+        s.add(  # spent on the move day (the snapshot also keeps one row per day)
+            SpendSnapshot(
+                scope_kind="service_key", scope_id=str(key.id),
+                period=datetime.now(UTC).strftime("%Y-%m-%d"), model=None, spend=9,
+            )
+        )  # fmt: skip
         await s.commit()
     r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
     row = next(x for x in r.json()["rows"] if x["kind"] == "initiative" and x["id"] == str(iid))
