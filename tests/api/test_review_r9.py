@@ -120,3 +120,25 @@ async def test_r9_overview_counts_grant_shares_as_allocated(login_wm, provisione
         await s.commit()
     bar = (await (await login_wm("dana")).get("/budget/overview?scope=group:1")).json()["bar"]
     assert bar["allocated_unused"] >= 100
+
+
+# review-p5-r8 major B3 (rate_card:105): rate intervals follow the consumption timezone
+async def test_r9_rates_use_local_days_and_refuse_same_day_changes(provisioned):
+    from decimal import Decimal
+
+    from app.models import RateCard
+    from app.services.rate_card import metered_value
+    from tests.api.test_review_r8 import _audit, _tokens
+
+    old, new = {"input_per_1m": 10, "output_per_1m": 0}, {"input_per_1m": 20, "output_per_1m": 0}
+    async with provisioned() as s:
+        s.add(RateCard(model="gpt-4", input_per_1m=20, output_per_1m=0))
+        await _audit(s, "rate_card", "gpt-4", None, old, datetime(2026, 5, 1, tzinfo=UTC))
+        # 00:30 on June 16 in Jerusalem: June 15 is wholly before it, June 16 straddles it
+        await _audit(s, "rate_card", "gpt-4", old, new, datetime(2026, 6, 15, 21, 30, tzinfo=UTC))
+        await _tokens(s, "2026-06-15", "gpt-4", 1_000_000)
+        await s.commit()
+        assert await metered_value(s, "group", 1, "2026-06", "Asia/Jerusalem") == Decimal(10)
+        await _tokens(s, "2026-06-16", "gpt-4", 1_000_000)
+        await s.commit()
+        assert await metered_value(s, "group", 1, "2026-06", "Asia/Jerusalem") is None

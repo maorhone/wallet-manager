@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
@@ -78,11 +79,29 @@ def _value(rows, rates) -> Decimal | None:
     return total
 
 
-async def metered_value(db, scope_kind: str, scope_id, period: str) -> Decimal | None:
+async def _value_between(db, current: dict, rows, start: datetime, end: datetime):
+    """Value ``rows`` consumed within [start, end): ``None`` if a rate they use changed inside
+    the span, because aggregated data cannot say which side of the change the tokens fell on."""
+    first, last = (
+        await _rates_at(db, current, start),
+        await _rates_at(db, current, end - timedelta(microseconds=1)),
+    )
+    for r in rows:
+        if r.model in first and (first[r.model].input_per_1m, first[r.model].output_per_1m) != (
+            last[r.model].input_per_1m, last[r.model].output_per_1m
+        ):  # fmt: skip
+            return None
+    return _value(rows, last)
+
+
+async def metered_value(
+    db, scope_kind: str, scope_id, period: str, tz: str = "UTC"
+) -> Decimal | None:
     """Value of the scope's tokens at the rate card; ``None`` if consumed tokens cannot be priced.
 
-    Each day is valued at the rates of that day, so a mid-month price change splits the month;
-    a month without day rows is valued at its month-end rates."""
+    Snapshot days are local days of ``tz`` (APP_TIMEZONE), each valued at its own rates, so a
+    price change between days splits the month; a change inside a day (or inside a month that
+    has no day rows) makes that span unavailable (D-049)."""
     rows = list(
         await db.scalars(
             select(SpendSnapshot).where(
@@ -98,12 +117,16 @@ async def metered_value(db, scope_kind: str, scope_id, period: str) -> Decimal |
         if len(r.period) > 7:
             by_day.setdefault(r.period, []).append(r)
     if not by_day:
-        end = month_bounds(period[:7], UTC)[1]
-        return _value([r for r in rows if r.period == period], await _rates_at(db, current, end))
+        start, end = month_bounds(period[:7], ZoneInfo(tz))
+        return await _value_between(
+            db, current, [r for r in rows if r.period == period], start, end
+        )
     total = Decimal(0)
     for day, day_rows in by_day.items():
-        end = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC) + timedelta(days=1)
-        value = _value(day_rows, await _rates_at(db, current, end))
+        local = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=ZoneInfo(tz))
+        start = local.astimezone(UTC)
+        end = (local.replace(tzinfo=None) + timedelta(days=1)).replace(tzinfo=ZoneInfo(tz))
+        value = await _value_between(db, current, day_rows, start, end.astimezone(UTC))
         if value is None:
             return None
         total += value
