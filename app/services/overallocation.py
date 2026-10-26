@@ -43,7 +43,7 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
     if reader is None:
         return []
     try:
-        orgs, teams = await reader.org_allocations(), await reader.overallocated_teams()
+        orgs, teams = await reader.org_allocations(), await reader.team_allocations()
         live_budget = await reader.team_budgets()
     except Exception:
         log.warning("over-allocation check: LiteLLM database unreachable; WM checks only")
@@ -51,12 +51,15 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
     by_org = {d.litellm_org_id: d for d in depts}
     by_team = {g.litellm_team_id: g for g in groups}
     carved: dict[int, Decimal] = defaultdict(Decimal)
-    parents = {g.id for g in groups}
+    child_carve: dict[str, Decimal] = defaultdict(Decimal)  # live parent team -> live children
+    by_id = {g.id: g for g in groups}
     for g in groups:
-        if g.parent_group_id in parents and g.status != "archived":
+        if g.parent_group_id in by_id and g.status != "archived":
             # D-055: child teams are carved from a parent. WM only names the hierarchy; the
             # amount is the child's live LiteLLM budget (a drifted WM value must not mask it).
-            carved[g.department_id] += live_budget.get(g.litellm_team_id, ZERO)
+            live = live_budget.get(g.litellm_team_id, ZERO)
+            carved[g.department_id] += live
+            child_carve[by_id[g.parent_group_id].litellm_team_id] += live
     out = []
     for o in orgs:
         d = by_org.get(o.organization_id)
@@ -70,10 +73,13 @@ async def _live(db: AsyncSession, reader, depts, groups) -> list[dict]:
             )  # fmt: skip
     for t in teams:
         g = by_team.get(t.team_id)
-        out.append(
-            _finding("litellm", "group", g.id if g else t.team_id, g.name if g else t.team_alias,
-                     t.allocated, t.group_budget, g.department_id if g else None)
-        )  # fmt: skip
+        allocated = t.allocated + child_carve[t.team_id]  # members plus live child teams
+        if allocated > t.group_budget:
+            out.append(
+                _finding("litellm", "group", g.id if g else t.team_id,
+                         g.name if g else t.team_alias, allocated, t.group_budget,
+                         g.department_id if g else None)
+            )  # fmt: skip
     return out
 
 

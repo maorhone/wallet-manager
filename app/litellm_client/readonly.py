@@ -42,6 +42,17 @@ HAVING SUM(mb.max_budget + CASE WHEN mb.temp_budget_expiry > now()
 ORDER BY t.team_id
 """
 
+_TEAM_ALLOCATIONS = """
+SELECT t.team_id, t.team_alias, t.max_budget AS group_budget,
+       COALESCE(SUM(mb.max_budget + CASE WHEN mb.temp_budget_expiry > now()
+                                THEN COALESCE(mb.temp_budget_increase, 0) ELSE 0 END), 0) AS allocated
+FROM "LiteLLM_TeamTable"      t
+LEFT JOIN "LiteLLM_TeamMembership" m  ON m.team_id = t.team_id
+LEFT JOIN "LiteLLM_BudgetTable"    mb ON mb.budget_id = m.budget_id
+GROUP BY t.team_id, t.team_alias, t.max_budget
+ORDER BY t.team_id
+"""
+
 _SPEND_ROWS = """
 SELECT team_id, "user", api_key, model_group,
        ("startTime" AT TIME ZONE :timezone)::date AS day, SUM(spend) AS spend,
@@ -204,6 +215,14 @@ class LiteLLMReader:
         return [
             OverallocatedTeam(r[0], r[1], _dec(r[2]), _dec(r[3]))
             for r in await self._rows(_OVERALLOCATED_TEAMS)
+        ]
+
+    async def team_allocations(self) -> list[OverallocatedTeam]:
+        """Every team with the live sum of its member budgets (nested children are added by
+        the caller, who knows the hierarchy)."""
+        return [
+            OverallocatedTeam(r[0], r[1], _dec(r[2]), _dec(r[3]))
+            for r in await self._rows(_TEAM_ALLOCATIONS)
         ]
 
     async def spend_rows(

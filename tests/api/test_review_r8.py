@@ -91,3 +91,18 @@ async def test_r8_move_key_locks_organization_before_owner(
     r = await post(admin, f"/service-keys/{key_id}/move", {"target_system_id": target})
     assert r.status_code == 200, r.text
     assert order.index("PRODUCTION") < order.index("GROUP"), order
+
+
+# review-p5-r7 major B1b: a live parent budget below its live child budgets is a finding
+async def test_r8_live_parent_below_live_children(login_wm, provisioned, litellm):
+    from app.litellm_client import TeamUpdate
+    from app.models import Grp
+    from tests.api.test_overallocation import _report
+
+    async with provisioned() as s:
+        kid = await s.scalar(select(Grp).where(Grp.litellm_team_id == "A2"))
+        kid.parent_group_id = 1
+        await s.commit()
+    await litellm.team_update(TeamUpdate(team_id="A2", max_budget=5000000))
+    found = [f for f in await _report(await login_wm("admin")) if f["level"] == "group"]
+    assert [(f["source"], f["entity_id"]) for f in found] == [("litellm", 1)]
