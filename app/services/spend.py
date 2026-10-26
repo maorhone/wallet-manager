@@ -1,14 +1,15 @@
 """Spend snapshot (SPEC §12.9, §5.4): LiteLLM SpendLogs -> ``spend_snapshot`` for the UI."""
 
 import logging
+import re
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Employee, Grp, LitellmWrite, ProductionSystem, ServiceKey, SpendSnapshot
+from app.models import Department, Employee, Grp, Organization, LitellmWrite, ProductionSystem, ServiceKey, SpendSnapshot
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,34 @@ def _aggregate(rows, period: str, maps: tuple):
     return totals, tokens
 
 
+async def _window_start(db, now: datetime) -> datetime:
+    """Earliest instant any configured budget window can still cover (B1a2).
+
+    LiteLLM resets a budget every ``budget_duration``; a "2mo" budget still holds last month's
+    spend, so money decisions read back over the longest configured window (over-counting a
+    shorter window is the safe direction).
+    """
+    periods = set()
+    for model in (Organization, Department):
+        cols = [model.budget_period] + ([Department.prod_budget_period] if model is Department else [])
+        for col in cols:
+            periods.update(await db.scalars(select(col)))
+    months, days = 1, 0
+    for p in periods:
+        m = re.fullmatch(r"(\d+)(s|m|h|d|mo)", p or "")
+        if m is None:
+            raise SpendUnavailable  # an unreadable window is never treated as the month
+        n, unit = int(m[1]), m[2]
+        if unit == "mo":
+            months = max(months, n)
+        elif unit == "d":
+            days = max(days, n)
+    year, month = now.year, now.month - (months - 1)
+    year, month = year + (month - 1) // 12, (month - 1) % 12 + 1
+    start = datetime(year, month, 1, tzinfo=now.tzinfo).astimezone(UTC)
+    return min(start, (now - timedelta(days=days)).astimezone(UTC))
+
+
 async def fresh_spend(db, reader, now: datetime) -> "Spend":
     """Spend read straight from LiteLLM at call time (not the 5-minute UI cache).
 
@@ -86,6 +115,7 @@ async def fresh_spend(db, reader, now: datetime) -> "Spend":
         raise SpendUnavailable
     period = now.strftime("%Y-%m")
     start, end = month_bounds(period, now.tzinfo)
+    start = min(start, await _window_start(db, now))
     try:
         rows = await reader.spend_rows(start, end, timezone=str(now.tzinfo))
     except Exception:
