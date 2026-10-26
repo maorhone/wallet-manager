@@ -18,7 +18,6 @@ from app.models import (
     ProductionSystem,
     ServiceKey,
 )
-from app.errors import ApiError
 from app.permissions import AI_TEAM, can_manage_service_keys, can_view_service_keys
 from app.services.spend import Spend
 from app.services.validation import (

@@ -42,7 +42,7 @@ from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
 from app.services.spend import Spend, month_bounds
-from app.services.validation import initiative_allocated, internal_allocated, key_allocated
+from app.services.validation import initiative_allocated, key_allocated
 from app.writes import sync_status
 
 ZERO = Decimal(0)
@@ -117,6 +117,7 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
         db, "group", {str(g.id): {"base_budget": g.base_budget} for g in groups}, at
     )
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
+    parents = await _parent_map(db, dept.id, at)
     internal_ids = await db.scalars(
         select(ProductionSystem.id).where(
             ProductionSystem.department_id == dept.id,
@@ -127,9 +128,9 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
         (spend.used("system", system_id) for system_id in internal_ids), ZERO
     )
     card = wallet.department_wallet(
-        values["budget"], sum((bases[g.id] for g in groups if g.parent_group_id is None), ZERO),
+        values["budget"], sum((bases[g.id] for g in groups if parents.get(g.id) is None), ZERO),
         # D-076: internal systems are carved from the department envelope, like the reserve
-        values["pmo_pool"], values["reserve"] + await internal_allocated(db, dept.id),
+        values["pmo_pool"], values["reserve"] + await _internal_as_of(db, dept.id, at),
         used,
     )  # fmt: skip
     card["state"] = wallet.state(
@@ -138,11 +139,37 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     return {"card": card, "groups": groups, "bases": bases, "values": values}
 
 
-async def _descendants(db, group_id: int) -> list[int]:
-    """Ids below ``group_id`` in the same department tree (each node once)."""
+async def _parent_map(db, department_id: int, at) -> dict[int, int | None]:
+    """Group id -> parent id for the department's tree as it stood at ``at`` (audit history)."""
+    groups = list(await db.scalars(select(Grp).where(Grp.department_id == department_id)))
+    live = {str(g.id): {"parent_group_id": g.parent_group_id} for g in groups}
+    past = await values_as_of(db, "group", live, at)
+    return {int(k): v["parent_group_id"] for k, v in past.items()}
+
+
+async def _internal_as_of(db, department_id: int, at) -> Decimal:
+    """D-076 internal-system carve as it stood at ``at``."""
+    q = select(ProductionSystem).where(
+        ProductionSystem.department_id == department_id,
+        ProductionSystem.funding == "department",
+        ProductionSystem.status == "active",
+    )
+    if at is not None:
+        q = q.where(ProductionSystem.created_at <= at)
+    systems = list(await db.scalars(q))
+    past = await values_as_of(
+        db, "production_system", {str(x.id): {"budget": x.budget} for x in systems}, at
+    )
+    return sum((v["budget"] for v in past.values()), ZERO)
+
+
+async def _descendants(db, group_id: int, at=None) -> list[int]:
+    """Ids below ``group_id`` in the same department tree (each node once), as of ``at``."""
+    dept = await db.scalar(select(Grp.department_id).where(Grp.id == group_id))
+    parents = await _parent_map(db, dept, at)
     out, level = [], [group_id]
     while level:
-        level = list(await db.scalars(select(Grp.id).where(Grp.parent_group_id.in_(level))))
+        level = [g for g, p in parents.items() if p in level]
         out += level
     return out
 
@@ -191,9 +218,13 @@ class _Group:
         keys_budget = await key_allocated(db, "group", group.id) + await initiative_allocated(
             db, group.id
         )
+        parents = await _parent_map(db, group.department_id, at)
         children = list(
             await db.scalars(
-                select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
+                select(Grp).where(
+                    Grp.id.in_([g for g, p in parents.items() if p == group.id]),
+                    Grp.status != "archived",
+                )
             )
         )
         child_bases = await values_as_of(
@@ -206,7 +237,7 @@ class _Group:
         )  # fmt: skip
         card["base"], card["grants"] = base, grants
         card["rollup_used"] = card["used"] + sum(
-            (spend.used("group", d) for d in await _descendants(db, group.id)), ZERO
+            (spend.used("group", d) for d in await _descendants(db, group.id, at)), ZERO
         )
         card["state"] = wallet.state(
             card["total"], card["used"], card["remaining"],

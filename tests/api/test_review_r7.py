@@ -178,3 +178,103 @@ async def test_r7_actions_for_caller_with_rep_and_head(provisioned):
     async with provisioned() as s:
         got = await list_keys(s, caller, Settings(_env_file=None), Clock(), "initiative", iid)
     assert got["items"][0]["actions"] == {"rotate": True, "revoke": True}
+
+
+async def _audit(s, entity, entity_id, before, after, at):
+    from app.models import AuditLog
+
+    s.add(
+        AuditLog(
+            actor_upn="x", actor_role="platform_admin", entity=entity, entity_id=str(entity_id),
+            before=before, after=after, at=at, request_id=f"r7-{entity}-{entity_id}-{at}",
+        )
+    )  # fmt: skip
+
+
+async def _past_card(s, at):
+    from app.models import Department
+    from app.services import views
+    from app.services.spend import Spend
+
+    dept = await s.get(Department, 1)
+    th = {"near": 0.8, "full": 1}
+    got = await views._dept(s, dept, Spend([], "2020-01"), at, th)
+    return got["card"]["allocated"]
+
+
+# review-p5-r6 major B3: historical wallets use the budgets of internal systems at the cutoff
+async def test_r7_history_internal_system_budget_at_cutoff(provisioned):
+    from app.models import ProductionSystem
+
+    async with provisioned() as s:
+        system = ProductionSystem(
+            department_id=1, name="S", budget=20, litellm_team_id="sys-h",
+            created_at=datetime(2019, 12, 1, tzinfo=UTC),
+        )  # fmt: skip
+        s.add(system)
+        await s.flush()
+        await _audit(s, "production_system", system.id, {}, {"budget": 10},
+                     datetime(2020, 1, 15, tzinfo=UTC))  # fmt: skip
+        await _audit(s, "production_system", system.id, {"budget": 10}, {"budget": 20},
+                     datetime(2020, 3, 1, tzinfo=UTC))  # fmt: skip
+        await s.flush()
+        past = await _past_card(s, datetime(2020, 2, 1, tzinfo=UTC))
+        now = await _past_card(s, None)
+    assert now - past == 10
+
+
+# review-p5-r6 major B3: historical roots follow the hierarchy of that time
+async def test_r7_history_uses_historical_parents(provisioned):
+    from app.models import Grp
+
+    async with provisioned() as s:
+        g = await s.get(Grp, 2)
+        g.parent_group_id = 1  # reparented under group 1 after the cutoff
+        await _audit(s, "group", 2, {"parent_group_id": None}, {"parent_group_id": 1},
+                     datetime(2020, 3, 1, tzinfo=UTC))  # fmt: skip
+        await s.flush()
+        past = await _past_card(s, datetime(2020, 2, 1, tzinfo=UTC))
+        now = await _past_card(s, None)
+        assert past - now == g.base_budget
+
+
+# review-p5-r6 major B3: distribution components reconcile after a revocation
+def test_r7_bar_reconciles_after_revocation():
+    from decimal import Decimal as D
+
+    from app.services.overview import _bar
+
+    bar = _bar(D(80), D(0), D(100))  # 80 spent through a since-revoked key
+    assert (bar["used"], bar["allocated_unused"], bar["unallocated"]) == (80, 0, 20)
+    live = _bar(D(20), D(50), D(100))
+    assert (live["allocated_unused"], live["unallocated"]) == (30, 50)
+
+
+# review-p5-r6 major B3: a child row carries its whole subtree
+async def test_r7_child_row_includes_descendants(login_wm, provisioned):
+    from app.models import Grp, SpendSnapshot
+
+    period = datetime.now(UTC).strftime("%Y-%m")
+    async with provisioned() as s:
+        b = Grp(
+            litellm_team_id="r7-b", department_id=1, name="B", base_budget=100,
+            default_member_cap=0, status="active", parent_group_id=1,
+        )  # fmt: skip
+        s.add(b)
+        await s.flush()
+        c = Grp(
+            litellm_team_id="r7-c", department_id=1, name="C", base_budget=50,
+            default_member_cap=0, status="active", parent_group_id=b.id,
+        )  # fmt: skip
+        s.add(c)
+        await s.flush()
+        s.add(
+            SpendSnapshot(
+                scope_kind="group", scope_id=str(c.id), period=period, model=None, spend=7
+            )
+        )
+        await s.commit()
+        bid = b.id
+    r = await (await login_wm("dana")).get("/budget/overview?scope=group:1")
+    row = next(x for x in r.json()["rows"] if x["id"] == str(bid))
+    assert row["used"] == 7

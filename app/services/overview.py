@@ -48,10 +48,16 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
              "used": r["used"], "percent": r["percent"], "state": r["state"]}
             for r in g.rows(spend, th)
         ]  # fmt: skip
+    at = views.period_ctx(settings, raw_period)["at"]
+    parents = await views._parent_map(db, group.department_id, at)
     for child in await db.scalars(
-        select(Grp).where(Grp.parent_group_id == group_id, Grp.status != "archived")
+        select(Grp).where(
+            Grp.id.in_([g for g, p in parents.items() if p == group_id]), Grp.status != "archived"
+        )
     ):
-        used = spend.used("group", child.id)
+        # A child's row carries its whole subtree, like the headline (D-055, r6 B3).
+        subtree = [child.id, *await views._descendants(db, child.id, at)]
+        used = sum((spend.used("group", i) for i in subtree), Decimal(0))
         rows.append(
             {"kind": "group", "id": str(child.id), "name": child.name, "total": child.base_budget,
              "used": used, "percent": _pct(used, child.base_budget), "state": None}
@@ -80,11 +86,19 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
             "remaining": remaining,
             "metered_value": await metered_value(db, "group", group_id, s["period"]),
         },
-        "bar": {"used": used, "allocated_unused": max(w["allocated"] - used, 0),
-                "unallocated": w["unallocated"], "total": w["total"]},
+        "bar": _bar(used, w["allocated"], w["total"]),
         "rows": rows,
         "actions": s["actions"],
     }  # fmt: skip
+
+
+def _bar(used: Decimal, allocated: Decimal, total: Decimal) -> dict:
+    """D-055: used + allocated_unused + unallocated == total, also when spend came from a
+    revoked allocation (it is in ``used`` but no longer in ``allocated``)."""
+    remaining = max(total - used, Decimal(0))
+    unused = min(max(allocated - used, Decimal(0)), remaining)
+    return {"used": used, "allocated_unused": unused, "unallocated": remaining - unused,
+            "total": total}  # fmt: skip
 
 
 def _pct(used: Decimal, total: Decimal) -> float:
@@ -160,8 +174,9 @@ async def department_overview(
     card = d["card"]
     groups = d["groups"]
     sections = []
-    for g in (x for x in groups if x.parent_group_id is None):
-        ids = [g.id, *await views._descendants(db, g.id)]
+    parents = await views._parent_map(db, dept_id, pc["at"])
+    for g in (x for x in groups if parents.get(x.id) is None):
+        ids = [g.id, *await views._descendants(db, g.id, pc["at"])]
         members = await db.scalar(
             select(func.count()).where(Employee.group_id.in_(ids), Employee.status != "left")
         )
@@ -189,12 +204,11 @@ async def department_overview(
         "period": pc["period"], "reset_date": pc["reset_date"], "department": dept.name,
         "kpis": {"total": card["total"], "allocated": card["allocated"], "used": card["used"],
                  "remaining": card["remaining"]},
-        "bar": {"used": card["used"], "allocated_unused": max(card["allocated"] - card["used"], 0),
-                "unallocated": card["unallocated"], "total": card["total"]},
+        "bar": _bar(card["used"], card["allocated"], card["total"]),
         "previous_period": {"period": _previous(pc["period"]),
                             "used": before.used("department", dept_id)},
         "sections": sections,
-        "tree": [{"id": g.id, "name": g.name, "parent_group_id": g.parent_group_id}
+        "tree": [{"id": g.id, "name": g.name, "parent_group_id": parents.get(g.id)}
                  for g in groups],
         "internal_systems": await systems(
             ProductionSystem.funding == "department", ProductionSystem.department_id == dept_id
