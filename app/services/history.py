@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,23 +20,36 @@ def _like(current, value):
 
 
 async def values_as_of(
-    db: AsyncSession, entity: str, current: dict[str, dict], at: datetime | None
+    db: AsyncSession,
+    entity: str,
+    current: dict[str, dict],
+    at: datetime | None,
+    also: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, dict]:
     """``current`` is ``{id: {field: live value}}``; returns the same shape as of ``at``.
 
     Per field: the latest audit ``after`` at or before ``at``, else the earliest later audit
-    ``before``, else the live value. ``at=None`` means now.
+    ``before``, else the live value. ``at=None`` means now. ``also`` merges the audits of other
+    entities into one chronological history: ``{entity: {their field: our field}}``.
     """
     if at is None or not current:
         return current
+    renames = {entity: {}, **(also or {})}
     rows = await db.scalars(
         select(AuditLog)
-        .where(AuditLog.entity == entity, AuditLog.entity_id.in_(list(current)))
+        .where(AuditLog.entity.in_(list(renames)), AuditLog.entity_id.in_(list(current)))
         .order_by(AuditLog.at, AuditLog.id)
     )
-    audits: dict[str, list[AuditLog]] = {}
+    audits: dict[str, list[SimpleNamespace]] = {}
     for r in rows:
-        audits.setdefault(r.entity_id, []).append(r)
+        names = renames[r.entity]
+        audits.setdefault(r.entity_id, []).append(
+            SimpleNamespace(
+                at=r.at,
+                before={names.get(k, k): v for k, v in (r.before or {}).items()},
+                after={names.get(k, k): v for k, v in (r.after or {}).items()},
+            )
+        )
     out: dict[str, dict] = {}
     for id_, fields in current.items():
         out[id_] = {}
@@ -64,5 +78,9 @@ async def initiative_budgets_as_of(
     if at is not None:
         query = query.where(Initiative.created_at <= at)
     live = {str(i.id): {"total": i.budget} for i in await db.scalars(query.order_by(Initiative.id))}
-    past = await values_as_of(db, "transfer_initiative", live, at)
+    # request-approved increases are audited on the initiative itself, transfers on their own
+    # entity: one chronological history of the budget (r12 B3)
+    past = await values_as_of(
+        db, "transfer_initiative", live, at, also={"initiative": {"budget": "total"}}
+    )
     return {int(i): v["total"] for i, v in past.items()}

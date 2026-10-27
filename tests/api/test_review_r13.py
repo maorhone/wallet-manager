@@ -131,3 +131,30 @@ async def test_r13_owner_throughput_request_without_managing_group(login_wm, pro
     assert r.status_code == 200, r.text
     async with provisioned() as s:
         assert (await s.get(Request, rid)).status == "applied"
+
+
+# review-p5-r12 major B3: request increases and transfers form one chronological budget history
+async def test_r13_initiative_budget_history_merges_request_increases_and_transfers(provisioned):
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import Initiative
+    from app.services.history import initiative_budgets_as_of
+    from tests.api.test_review_r8 import _audit
+
+    now = datetime.now(UTC)
+    async with provisioned() as s:
+        ini = Initiative(
+            name="H", owner_upn=YAEL, group_id=1, department_id=1, budget=300, created_by=YAEL,
+            created_at=now - timedelta(days=90),
+        )  # fmt: skip
+        s.add(ini)
+        await s.flush()
+        iid = ini.id
+        # 100 -> (transfer) 150 at -40d -> (approved request) 200 at -20d -> (transfer) 300 now
+        await _audit(s, "transfer_initiative", iid, {"total": 100}, {"total": 150}, now - timedelta(days=40))
+        await _audit(s, "initiative", iid, {"budget": 150}, {"budget": 200}, now - timedelta(days=20))
+        await _audit(s, "transfer_initiative", iid, {"total": 200}, {"total": 300}, now - timedelta(days=1))
+        await s.commit()
+        for days, want in ((60, 100), (30, 150), (10, 200), (0, 300)):
+            got = await initiative_budgets_as_of(s, 1, now - timedelta(days=days, seconds=-1))
+            assert got[iid] == want, (days, got[iid])
