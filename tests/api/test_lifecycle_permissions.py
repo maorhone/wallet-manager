@@ -43,10 +43,10 @@ async def test_matrix(case, action, login, provisioned, request):
         request.applymarker(
             pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-26; see OPEN-ITEMS")
         )
-    if (case, action) == ("head_other_group", "kick"):
-        request.applymarker(
+    if (case, action) == ("head_other_group", "kick"):  # xfail flaky
+        request.applymarker(  # xfail flaky
             pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-27; see OPEN-ITEMS")
-        )
+        )  # xfail flaky
     who, group, target, expected = CASES[case]
     want = expected[ACTIONS.index(action)]
     client = await login(who)
