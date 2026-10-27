@@ -3,7 +3,7 @@
 from sqlalchemy import select
 
 from app.litellm_client import LiteLLMReader, TeamNew
-from app.models import Grp, Transfer
+from app.models import Grp, ServiceKey, Transfer
 from app.outbox.worker import drain
 from tests.api.test_review_money import DANI, _child, _log
 from tests.api.test_transfers import move, send
@@ -73,3 +73,26 @@ async def test_r14_split_cuts_parent_and_child_together(login_wm, provisioned, f
         kid = await s.scalar(select(Grp.id).where(Grp.litellm_team_id == "A1-kid"))
     r = await _split(await login_wm("rep"), [{"group_id": 1, "base": 50}, {"group_id": kid, "base": 50}])
     assert r.status_code == 200, r.text
+
+
+# review-p5-r13 major B3: failures of a rotated-out key generation stay in the telemetry history
+async def test_r14_telemetry_includes_retired_generations(login_wm, provisioned, fake_app):
+    import httpx
+
+    from app.models import LitellmWrite
+    from tests.api.test_review_r13 import _err, _owned_initiative_with_key
+
+    mine = await _owned_initiative_with_key(provisioned, "Mine", "hash-new")
+    async with provisioned() as s:
+        key_id = await s.scalar(select(ServiceKey.id).where(ServiceKey.owner_id == mine))
+        s.add(LitellmWrite(entity="service_key", entity_id=str(key_id), endpoint="/key/delete",
+                           payload={"keys": ["hash-old"]}, idempotency_key="r14-old"))  # fmt: skip
+        await s.commit()
+    rows = [_err(429, "max_parallel_requests", "Max parallel request limit", "hash-old")]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_app), base_url="http://fake"
+    ) as c:
+        assert (await c.post("/_test/errors", json=rows)).status_code == 200
+    url = f"/service-keys/telemetry?owner_kind=initiative&owner_id={mine}"
+    body = (await (await login_wm("yael")).get(url)).json()
+    assert {x["reason"]: x["count"] for x in body["by_reason"]} == {"RATE_LIMIT": 1}

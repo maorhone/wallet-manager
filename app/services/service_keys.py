@@ -304,15 +304,23 @@ async def telemetry(db, principal, reader, clock, owner_kind, owner_id) -> dict:
     the screen then says so instead of implying a healthy service.
     """
     await can_view_service_keys(db, principal, owner_kind, owner_id)
-    hashes = list(
-        await db.scalars(
-            select(ServiceKey.litellm_token_hash).where(
-                ServiceKey.owner_kind == owner_kind,
-                ServiceKey.owner_id == owner_id,
-                ServiceKey.litellm_token_hash.is_not(None),
+    keys = (
+        await db.execute(
+            select(ServiceKey.id, ServiceKey.litellm_token_hash).where(
+                ServiceKey.owner_kind == owner_kind, ServiceKey.owner_id == owner_id
             )
         )
-    )
+    ).all()
+    hashes = [h for _, h in keys if h]
+    # rotated-out generations stay in the history (their deletion payloads keep the former hash)
+    for payload in await db.scalars(
+        select(LitellmWrite.payload).where(
+            LitellmWrite.entity == "service_key",
+            LitellmWrite.endpoint == "/key/delete",
+            LitellmWrite.entity_id.in_([str(i) for i, _ in keys]),
+        )
+    ):
+        hashes += [t for t in (payload or {}).get("keys", []) if t not in hashes]
     out = {"available": False, "by_reason": [], "last_blocks": [], "taken_at": clock.now()}
     if reader is None:
         return out
