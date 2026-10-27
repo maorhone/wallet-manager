@@ -71,3 +71,63 @@ async def test_r13_failed_destination_write_superseded_by_sibling(
         assert set(await s.scalars(select(Transfer.state))) == {"applied"}
         statuses = set(await s.scalars(select(LitellmWrite.status)))
         assert "failed" not in statuses
+
+
+async def _ownerless_group_system(provisioned, budget=100):
+    from app.models import Department, ProductionSystem
+
+    async with provisioned() as s:
+        (await s.get(Department, 1)).budget += 1000  # D1 is exactly full in the seed
+        row = ProductionSystem(
+            department_id=1, name="NoGroup", budget=budget, owner_upn=YAEL, litellm_team_id="sys-ng"
+        )
+        s.add(row)
+        await s.commit()
+        return row.id
+
+
+# review-p5-r12 major B1c: an owner of a system with no managing section asks the department
+async def test_r13_owner_credit_request_without_managing_group(
+    login_wm, provisioned, litellm, prov_settings
+):
+    from app.models import ProductionSystem, Request
+    from tests.api.test_requests import send as rsend
+    from tests.api.test_requests import submit
+
+    sid = await _ownerless_group_system(provisioned)
+    yael, dana, rep = await login_wm("yael"), await login_wm("dana"), await login_wm("rep")
+    target = {"kind": "system", "id": sid}
+    rid = await submit(yael, "credits", amount=50, target=target)
+    async with provisioned() as s:
+        req = await s.get(Request, rid)
+        assert (req.scope_kind, req.scope_id, req.handler_role) == (
+            "department",
+            1,
+            "department_rep",
+        )
+    assert (
+        await rsend(dana, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    ).status_code in (403, 404)
+    r = await rsend(rep, "POST", f"/requests/{rid}/decide", {"decision": "approve"})
+    assert r.status_code == 200, r.text
+    async with provisioned() as s:
+        assert (await s.get(ProductionSystem, sid)).budget == 150
+
+
+# review-p5-r12 major B1c: a throughput request for such a system goes REP -> AI team
+async def test_r13_owner_throughput_request_without_managing_group(login_wm, provisioned):
+    from app.models import Request
+    from tests.api.test_requests import send as rsend
+    from tests.api.test_requests import submit
+
+    sid = await _ownerless_group_system(provisioned)
+    yael, rep, ai = await login_wm("yael"), await login_wm("rep"), await login_wm("aiteam")
+    rid = await submit(
+        yael, "throughput", payload={"need": "more"}, target={"kind": "system", "id": sid}
+    )
+    r = await rsend(rep, "POST", f"/requests/{rid}/decide", {"decision": "forward"})
+    assert r.status_code == 200, r.text
+    r = await rsend(ai, "POST", f"/requests/{rid}/decide", {"decision": "apply", "max_parallel": 4})
+    assert r.status_code == 200, r.text
+    async with provisioned() as s:
+        assert (await s.get(Request, rid)).status == "applied"

@@ -16,6 +16,7 @@ from app.models import Department, Employee, Grp, ProductionSystem, ServiceKey
 from app.permissions import (
     ADMIN,
     HEAD,
+    REP,
     Principal,
     can_manage_platform,
     can_view_production,
@@ -180,8 +181,12 @@ async def update_system_budget(
     body: ProductionSystemPatch,
     clock: Clock | None = None,
     reader=None,
+    delegate: bool = False,
 ) -> list[dict]:
-    """Admin, or the head of the system's managing section (delegation), edits the budget."""
+    """Admin, or the head of the system's managing section (delegation), edits the budget.
+
+    ``delegate``: the caller already passed the request center's handler check (the department's
+    representative deciding an owner's request for a system with no managing section)."""
     system = await ctx.db.get(ProductionSystem, system_id)
     if system is None or system.funding != "department":
         raise ApiError(404, "NOT_FOUND", "System not found")
@@ -195,6 +200,12 @@ async def update_system_budget(
         ctx.db, principal, system.managing_group_id
     ):
         role = HEAD
+    elif (
+        delegate
+        and system.managing_group_id is None
+        and REP in principal.department_roles(department_id)
+    ):
+        role = REP
     else:
         raise ApiError(403, "FORBIDDEN", "Your role does not permit this action")
     dept = await ctx.db.get(Department, department_id)
