@@ -66,3 +66,43 @@ async def test_r17_initiative_refused_after_group_consumption(login_wm, fake_eng
     body = {"name": "Pilot", "owner_upn": DANI, "budget": 1000}
     r = await send(head, "POST", "/groups/1/initiatives", body)
     assert r.status_code == 422 and r.json()["code"] == "PARENT_OVERALLOCATED", r.text
+
+
+# review-p5-r16 blocker B1a1: an uncertain (attempted, outcome unknown) destination write is
+# republished with its restored value when the source credit is restored
+async def test_r17_uncertain_destination_restored_on_late_spend(
+    login_wm, provisioned, fake_engine, litellm, prov_settings, ro_engine
+):
+    from app.litellm_client import LiteLLMReader
+    from app.litellm_client.errors import LiteLLMTransientError
+    from app.models import Employee, LitellmWrite
+    from tests.api.test_review_money import YAEL
+    from tests.api.test_review_r7 import _log_at
+
+    head = await login_wm("dana")
+    async with provisioned() as s:
+        base = (await s.get(Employee, YAEL)).base_cap
+    assert (await send(head, "POST", "/transfers", move(50, DANI, YAEL))).status_code == 200
+    real, sent = litellm.team_member_update, []
+
+    async def lost_response(body):
+        if body.user_id == YAEL:
+            sent.append(body.max_budget_in_team)
+            await real(body)  # the update lands upstream ...
+            if len(sent) == 1:
+                raise LiteLLMTransientError("response lost")  # ... but the answer is lost
+            return None
+        return await real(body)
+
+    litellm.team_member_update = lost_response
+    reader = LiteLLMReader(ro_engine)
+    await drain(provisioned, litellm, prov_settings, reader)
+    assert sent == [float(base + 50)]
+    await _log_at(fake_engine, 1, "A1", DANI, 10**8, datetime.now(UTC))  # late source spend
+    for _ in range(3):
+        await drain(provisioned, litellm, prov_settings, reader)
+    assert sent[-1] == float(base)  # the destination credit was reversed upstream
+    async with provisioned() as s:
+        assert (await s.scalar(select(Transfer.state))) == "compensated"
+        keys = set(await s.scalars(select(LitellmWrite.idempotency_key)))
+        assert any(":restore-target:" in k for k in keys)

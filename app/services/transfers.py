@@ -501,9 +501,26 @@ async def _source_overspent(db, reader, transfer: Transfer, now: datetime, tz: s
 
 
 async def _release_cancelled(db, settings, transfer: Transfer) -> None:
-    await _undo(
+    # A destination write that was attempted (transient error, response lost) may have been
+    # published upstream: its restored value is republished too (review-p5-r16 B1a1).
+    uncertain = list(
+        await db.scalars(
+            select(LitellmWrite).where(
+                LitellmWrite.id.in_((transfer.write_ids or [])[1:]),
+                LitellmWrite.status == "pending",
+                LitellmWrite.attempts > 0,
+            )
+        )
+    )
+    undone = await _undo(
         db, transfer, f"cancelled: source spent the released credit (transfer {transfer.id})"
     )
+    if undone:
+        for w in uncertain:
+            await enqueue(
+                db, settings, w.entity, w.entity_id, w.endpoint,
+                f"transfer:{transfer.id}:restore-target:{w.id}",
+            )  # fmt: skip
     if transfer.first_write_id is None:
         return  # no source write: nothing upstream to restore
     source_write = await db.get(LitellmWrite, transfer.first_write_id)
