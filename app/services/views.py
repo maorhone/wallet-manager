@@ -38,12 +38,12 @@ from app.permissions import (
 )
 from app.services import wallet
 from app.services.attribution import displayed_used
-from app.services.history import values_as_of
+from app.services.history import initiative_budgets_as_of, values_as_of
 from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
 from app.services.spend import Spend, month_bounds
-from app.services.validation import initiative_allocated, key_allocated
+from app.services.validation import key_allocated
 from app.writes import sync_status
 
 ZERO = Decimal(0)
@@ -281,8 +281,8 @@ class _Group:
             group.id, ZERO
         )
         active = [m.upn for m in members if m.status != "left"]
-        keys_budget = await key_allocated(db, "group", group.id) + await initiative_allocated(
-            db, group.id
+        keys_budget = await key_allocated(db, "group", group.id) + sum(
+            (await initiative_budgets_as_of(db, group.id, at)).values(), ZERO
         )
         parents = await _parent_map(db, group.department_id, at)
         children = list(

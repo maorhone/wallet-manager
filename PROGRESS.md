@@ -1139,3 +1139,6 @@ Tests: tests/api/test_review_r10.py, TransferDrawer/Initiative/serviceKeyWrite v
 ## fix-review-p5-r11 (0 blockers + 6 majors)
 Groups: (1) backend consumption: `initiative_used`/`_moved_keys` moved to `service_keys.py`; `group_committed` (transfer path, takes `tz`) uses it, so moved keys count (B1a1); `_subtree_metered_value` prices the group and its descendants like `rollup_used` (B3); group overview gains `previous_period` (D-058). (2) UI manager visibility: `BlockSummary` + `useBlockSummary` (/reports/blocks) on section and department pages (D-064); department shows `metered_value`; section shows the period comparison. (3) HierarchyEditor key is bound to the submitted operation signature (edit after a lost response gets a new key).
 Tests: tests/api/test_review_r11.py, Department/SectionBudget vitest. e2e not run.
+
+## fix-review-p5-r12 (2026-10-27)
+Done: 0 blockers, 3 majors. Groups: (1) fresh-spend window moved-key attribution: `initiative_used(window=True)` used by `group_committed`; (2) historical initiative allocations: one `initiative_budgets_as_of` shared by wallet totals and overview rows; (3) manager block summary covers the group subtree (`reports.block_reasons`). Tests in tests/api/test_review_r11.py (`test_r12_*`).

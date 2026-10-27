@@ -423,10 +423,14 @@ async def blocked(db, principal, settings, clock, kind, id_, start, end):
 async def block_reasons(db, principal, settings, reader, kind, id_, start, end):
     lo, hi = report_window(start, end, settings.app_timezone, 400)
     scope = await _report_scope(db, principal, kind, id_, need_members=True)
+    groups = scope.groups
+    if kind == "group":  # a manager's blocks cover the whole subtree, each team once (r11 B3)
+        below = await views._descendants(db, groups[0].id)
+        groups = list(await db.scalars(select(Grp).where(Grp.id.in_([groups[0].id, *below]))))
     rows = await reader.failed_requests(
         lo,
         hi,
-        team_ids=None if kind == "global" else [g.litellm_team_id for g in scope.groups],
+        team_ids=None if kind == "global" else [g.litellm_team_id for g in groups],
         users=[scope.entity.upn] if kind == "employee" else None,
     )
     by_reason, by_consumer = blocks.aggregate(rows)

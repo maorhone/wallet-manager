@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog
+from app.models import AuditLog, Initiative
 
 
 def _like(current, value):
@@ -52,3 +52,17 @@ async def values_as_of(
                 value = later.before[field] if later else live
             out[id_][field] = live if value is live else _like(live, value)
     return out
+
+
+async def initiative_budgets_as_of(
+    db: AsyncSession, group_id: int, at: datetime | None
+) -> dict[int, Decimal]:
+    """Budgets of the group's active initiatives as of ``at``: the ones created by then, with
+    the budget moved by transfers up to then (``at=None``: live). One source for the wallet
+    totals and the overview rows (r11 B3)."""
+    query = select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
+    if at is not None:
+        query = query.where(Initiative.created_at <= at)
+    live = {str(i.id): {"total": i.budget} for i in await db.scalars(query.order_by(Initiative.id))}
+    past = await values_as_of(db, "transfer_initiative", live, at)
+    return {int(i): v["total"] for i, v in past.items()}

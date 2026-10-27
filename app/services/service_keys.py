@@ -296,17 +296,19 @@ async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
 
 
 async def initiative_used(
-    db, spend: Spend, initiative_id: int, period: str, tz: str = "UTC"
+    db, spend: Spend, initiative_id: int, period: str, tz: str = "UTC", window: bool = False
 ) -> Decimal:
     """No initiative snapshot scope exists: sum its keys (revoked/rotated generations included,
-    and keys moved to a system for the periods up to the move, r6 B3)."""
+    and keys moved to a system for the periods up to the move, r6 B3). ``window``: ``spend`` is
+    a fresh multi-month window read under ``period``, so every move counts its group-team part
+    (r11 B1a1)."""
     key_ids = await db.scalars(
         select(ServiceKey.id).where(
             ServiceKey.owner_kind == "initiative", ServiceKey.owner_id == initiative_id
         )
     )
     used = sum((spend.used("service_key", k) for k in key_ids), Decimal(0))
-    for key_id, this_period in await _moved_keys(db, initiative_id, period, tz):
+    for key_id, this_period in await _moved_keys(db, initiative_id, period, tz, window):
         if not this_period:
             used += spend.used("service_key", key_id)
             continue
@@ -317,7 +319,7 @@ async def initiative_used(
 
 
 async def _moved_keys(
-    db, initiative_id: int, period: str, tz: str = "UTC"
+    db, initiative_id: int, period: str, tz: str = "UTC", window: bool = False
 ) -> list[tuple[int, bool]]:
     """Keys moved out of the initiative in ``period`` or later: (id, moved within ``period``).
     Months are those of ``tz`` (APP_TIMEZONE), like the snapshot periods (r9 B3)."""
@@ -331,6 +333,6 @@ async def _moved_keys(
         )
     ):
         month = a.at.astimezone(zone).strftime("%Y-%m")
-        if a.after and a.after.get("owner_kind") == "system" and month >= period:
-            out.append((int(a.entity_id), month == period))
+        if a.after and a.after.get("owner_kind") == "system" and (window or month >= period):
+            out.append((int(a.entity_id), window or month == period))
     return out

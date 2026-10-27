@@ -17,7 +17,7 @@ from app.models import (
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import requests as requests_service
 from app.services import views
-from app.services.history import values_as_of
+from app.services.history import initiative_budgets_as_of, values_as_of
 from app.services.rate_card import metered_value
 from app.services.service_keys import _moved_keys, initiative_used  # noqa: F401
 from app.services.spend import Spend
@@ -74,15 +74,17 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
              "used": used, "percent": _pct(used, total), "state": None}
         )  # fmt: skip
     ini_used: dict[int, Decimal] = {}
+    ini_budgets = await initiative_budgets_as_of(db, group_id, at)
     for ini in await db.scalars(
-        select(Initiative).where(Initiative.group_id == group_id, Initiative.status == "active")
+        select(Initiative).where(Initiative.id.in_(list(ini_budgets))).order_by(Initiative.id)
     ):
+        budget = ini_budgets[ini.id]
         used = ini_used[ini.id] = await initiative_used(
             db, spend, ini.id, s["period"], settings.app_timezone
         )
         rows.append(
-            {"kind": "initiative", "id": str(ini.id), "name": ini.name, "total": ini.budget,
-             "used": used, "percent": _pct(used, ini.budget), "state": None}
+            {"kind": "initiative", "id": str(ini.id), "name": ini.name, "total": budget,
+             "used": used, "percent": _pct(used, budget), "state": None}
         )  # fmt: skip
     used = w["rollup_used"]  # D-055: descendants' consumption counts once, in the parent's view
     # D-055: unused = what each live allocation still holds, never reduced by spend of a retired
