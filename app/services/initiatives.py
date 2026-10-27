@@ -3,7 +3,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import Settings
@@ -16,7 +16,6 @@ from app.permissions import (
     Principal,
     can_view_group,
     group_roles_of,
-    headed_groups,
 )
 from app.services.overview import initiative_used
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
@@ -135,14 +134,7 @@ async def list_for_group(db, principal: Principal, group_id: int, settings: Sett
 
 
 async def list_mine(db, principal: Principal, settings: Settings) -> dict:
-    headed = await headed_groups(
-        db, principal, await db.scalars(select(Initiative.group_id).distinct())
-    )
-    query = (  # owned ones plus those of sections the caller heads (D-056/D-057)
-        select(Initiative)
-        .where(or_(Initiative.owner_upn == principal.upn, Initiative.group_id.in_(headed)))
-        .order_by(Initiative.id)
-    )
+    query = select(Initiative).where(Initiative.owner_upn == principal.upn).order_by(Initiative.id)
     return {"items": await _view(db, list(await db.scalars(query)), settings)}
 
 
