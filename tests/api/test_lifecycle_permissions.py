@@ -39,7 +39,11 @@ def group_of(upn):
 @pytest.mark.parametrize("action", ACTIONS)
 @pytest.mark.parametrize("case", CASES)
 async def test_matrix(case, action, login, provisioned, request):
-    if (case, action) in (("admin_on_self", "kick"), ("head_other_group", "kick")):
+    if (case, action) == ("admin_on_self", "kick"):
+        request.applymarker(
+            pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-26; see OPEN-ITEMS")
+        )
+    if (case, action) == ("head_other_group", "kick"):
         request.applymarker(
             pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-27; see OPEN-ITEMS")
         )
