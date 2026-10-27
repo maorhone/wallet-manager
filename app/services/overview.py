@@ -101,7 +101,8 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
             tz=settings.app_timezone,
         )
         unused = max(committed - own_used - (used - own_used), Decimal(0))
-    remaining = w["total"] - used
+    total = w["rollup_total"]  # same funding boundary as ``used`` (descendant grants, once)
+    remaining = total - used
     before = await Spend.load(db, _previous(s["period"]))
     prev_used = sum(
         (before.used("group", i) for i in [group_id, *await views._descendants(db, group_id, at)]),
@@ -111,13 +112,13 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         "period": s["period"], "reset_date": s["reset_date"], "spend_taken_at": s["spend_taken_at"],
         "group": s["group"],
         "kpis": {
-            "total": w["total"], "allocated": w["allocated"], "used": used,
+            "total": total, "allocated": w["allocated"], "used": used,
             "remaining": remaining,
             "metered_value": await _subtree_metered_value(
                 db, group_id, at, s["period"], settings.app_timezone
             ),
         },
-        "bar": _bar(used, w["allocated"], w["total"], unused),
+        "bar": _bar(used, w["allocated"], total, unused),
         # D-058: the section head's period comparison (same subtree as ``used``, r10 F1)
         "previous_period": {"period": _previous(s["period"]), "used": prev_used},
         "rows": rows,

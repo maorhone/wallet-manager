@@ -306,6 +306,12 @@ class _Group:
         card["rollup_used"] = card["used"] + sum(
             (spend.used("group", d) for d in await _descendants(db, group.id, at)), ZERO
         )
+        # D-055: the roll-up funding boundary: a descendant's base is carved from this group's
+        # base, but its PMO grants are not, so they join the total exactly once here (r16 B3)
+        below = await _descendants(db, group.id, at)
+        card["rollup_total"] = card["total"] + sum(
+            (await _grants_by_group(db, below, timezone, spend.period)).values(), ZERO
+        )
         card["state"] = wallet.state(
             card["total"], card["used"], card["remaining"],
             [("department", dept_card["remaining"])], card["allocated"], **th,
@@ -533,7 +539,7 @@ async def group_summary(
             "name": group.name,
             "default_member_cap": group.default_member_cap,
         },  # fmt: skip
-        "wallet": {k: g.card[k] for k in (*CARD, "base", "grants", "rollup_used")},
+        "wallet": {k: g.card[k] for k in (*CARD, "base", "grants", "rollup_used", "rollup_total")},
         "pots": [
             {
                 "model": model,

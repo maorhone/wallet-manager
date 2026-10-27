@@ -106,3 +106,19 @@ async def test_r17_uncertain_destination_restored_on_late_spend(
         assert (await s.scalar(select(Transfer.state))) == "compensated"
         keys = set(await s.scalars(select(LitellmWrite.idempotency_key)))
         assert any(":restore-target:" in k for k in keys)
+
+
+# review-p5-r16 major B3 (overview:114): a descendant's PMO grant joins the rolled-up total once
+async def test_r17_overview_total_includes_descendant_grants(login, provisioned):
+    from app.models import Grant
+    from tests.api.test_review_money import _child
+
+    gid = await _child(provisioned)
+    head = await login("dana")
+    before = (await head.get("/budget/overview?scope=group:1")).json()["kpis"]["total"]
+    async with provisioned() as s:
+        s.add(Grant(department_id=1, group_id=gid, amount=100, status="active", created_by="x"))
+        await s.commit()
+    body = (await head.get("/budget/overview?scope=group:1")).json()
+    assert body["kpis"]["total"] == before + 100
+    assert body["kpis"]["remaining"] == body["kpis"]["total"] - body["kpis"]["used"]
