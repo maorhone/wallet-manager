@@ -1,5 +1,7 @@
 import asyncio
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
@@ -8,7 +10,14 @@ from app.errors import ApiError, invalid_request, scope_forbidden
 from app.models import Department, DepartmentModelAllowance, Grp, Organization
 from app.permissions import Principal, can_edit_dept_budget, can_edit_split
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services.validation import check_group_tree, check_sum, internal_allocated
+from app.services.spend import SpendUnavailable, fresh_spend
+from app.services.transfers import group_committed
+from app.services.validation import (
+    check_group_tree,
+    check_sum,
+    internal_allocated,
+    pending_incoming,
+)
 from app.writes import WriteContext
 
 
@@ -69,8 +78,43 @@ async def apply_budget(ctx: WriteContext, dept: Department, body: DepartmentBudg
     return [{"entity": "department", "id": dept.id, "values": after}]
 
 
+async def _check_consumption_floor(ctx, changed, new, reader, clock) -> None:
+    """A cut may not release credit already consumed (revoked keys, departed members) or pending.
+
+    Same floor as a transfer out of the group: fresh spend + what is still allocated and unspent
+    + unsettled incoming credit. Without a fresh reading the cut is refused, never assumed zero.
+    """
+    cuts = [g for g in changed if new[g.id] < g.base_budget]
+    if not cuts:
+        return
+    tz = ZoneInfo(ctx.settings.app_timezone)
+    now = (clock.now() if clock else datetime.now(tz)).astimezone(tz)
+    try:
+        spend = await fresh_spend(ctx.db, reader, now)
+    except SpendUnavailable:
+        raise ApiError(
+            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
+        ) from None
+    rows = []
+    for g in cuts:
+        floor = await group_committed(ctx.db, spend, g, tz=ctx.settings.app_timezone)
+        floor += await pending_incoming(ctx.db, "group", g.id)
+        if new[g.id] < floor:
+            rows.append({"group_id": g.id, "code": "BELOW_CONSUMED", "floor": floor})
+    if rows:
+        raise invalid_request(
+            "A group budget cannot go below its consumed and committed credit",
+            {"reason": "below_consumed", "rows": rows},
+        )
+
+
 async def set_split(
-    ctx: WriteContext, principal: Principal, department_id: int, body: DepartmentSplitIn
+    ctx: WriteContext,
+    principal: Principal,
+    department_id: int,
+    body: DepartmentSplitIn,
+    reader=None,
+    clock=None,
 ) -> list[dict]:
     """FR-D2: group bases + PMO pool + reserve must fit the department budget."""
     role = await can_edit_split(ctx.db, principal, department_id)
@@ -102,6 +146,7 @@ async def set_split(
         ctx.db, dept, groups.values(), bases, body.pmo_pool, body.reserve, rows
     ):
         raise err
+    await _check_consumption_floor(ctx, changed, new, reader, clock)
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
     entities = []

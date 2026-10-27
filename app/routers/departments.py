@@ -68,9 +68,16 @@ async def put_budget(
 
 @router.put("/departments/{department_id}/split")
 async def put_split(
-    department_id: int, body: DepartmentSplitIn, ctx: Write, principal: CurrentPrincipal
+    department_id: int,
+    body: DepartmentSplitIn,
+    ctx: Write,
+    principal: CurrentPrincipal,
+    request: Request,
 ):
-    entities = await departments.set_split(ctx, principal, department_id, body)
+    state = request.app.state
+    entities = await departments.set_split(
+        ctx, principal, department_id, body, state.litellm_reader, state.clock
+    )
     return await write_response(ctx, entities)
 
 
