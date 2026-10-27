@@ -252,15 +252,15 @@ async def department_overview(
         )  # fmt: skip
 
     async def systems(*where):
-        out = []
-        for x in await db.scalars(
-            select(ProductionSystem)
-            .where(ProductionSystem.status == "active", *where)
-            .order_by(ProductionSystem.id)
-        ):
-            out.append({"id": x.id, "name": x.name, "budget": x.budget,
-                        "used": spend.used("system", x.id)})  # fmt: skip
-        return out
+        query = select(ProductionSystem).where(ProductionSystem.status == "active", *where)
+        if pc["at"] is not None:  # a past period: only systems that existed then, at their budget
+            query = query.where(ProductionSystem.created_at <= pc["at"])
+        rows = list(await db.scalars(query.order_by(ProductionSystem.id)))
+        past = await values_as_of(
+            db, "production_system", {str(x.id): {"budget": x.budget} for x in rows}, pc["at"]
+        )
+        return [{"id": x.id, "name": x.name, "budget": past[str(x.id)]["budget"],
+                 "used": spend.used("system", x.id)} for x in rows]  # fmt: skip
 
     return {
         "period": pc["period"], "reset_date": pc["reset_date"], "department": dept.name,

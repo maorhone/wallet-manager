@@ -27,7 +27,7 @@ def upgrade() -> None:
     op.create_index("ix_transfer_first_write_id", "transfer", ["first_write_id"])
     op.create_index("ix_transfer_target", "transfer", ["target_kind", "target_id", "state"])
     op.execute(
-        "UPDATE transfer SET first_write_id = write_ids[1], state = 'pending' "
+        "UPDATE transfer SET state = 'pending' "
         "WHERE cardinality(write_ids) > 0 AND EXISTS ("
         "SELECT 1 FROM litellm_write w WHERE w.id = ANY(transfer.write_ids) "
         "AND w.status <> 'applied')"

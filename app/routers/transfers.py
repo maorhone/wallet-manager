@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 
 from app.auth.session import CurrentPrincipal, Db
+from app.errors import invalid_request
 from app.schemas.transfers import TransferIn
 from app.services import transfers
 from app.writes import Write, WriteContext, write_response
@@ -20,6 +21,10 @@ async def preview(body: TransferIn, principal: CurrentPrincipal, db: Db, req: Re
 
 @router.post("/transfers")
 async def create(body: TransferIn, ctx: Write, principal: CurrentPrincipal, req: Request):
+    if "employee" in (body.source.kind, body.target.kind) and not (
+        req.headers.get("Idempotency-Key", "").strip()
+    ):  # a lost response must not let a retry move the credit twice
+        raise invalid_request("Idempotency-Key header is required for transfers to or from people")
     entities = await transfers.create(
         ctx, principal, req.app.state.directory, req.app.state.litellm_reader, body,
         req.app.state.clock,

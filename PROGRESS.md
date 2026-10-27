@@ -1151,3 +1151,7 @@ OPEN-ITEMS.md could NOT be updated this session (edit denied: sensitive file). T
 ## fix-review-p5-r14 (27/10)
 Groups (shared root cause): (1) transfer fence/compensation: `_source_overspent` now uses `group_committed` for group sources; `_undo` treats a permanently failed destination write as cancellable. (2) split floor: `group_committed(child_budgets=...)` uses the proposed child budgets. (3) telemetry: former key hashes from `/key/delete` payloads. (4) UI: `useOrgAllocate` owned by OrgAllocation, so outcomes survive tab switches.
 Tests: tests/api/test_review_r14.py (4) + OrgAllocation.test.tsx (+1). Blocker 1/1, majors 4/4 fixed. e2e not run.
+
+## fix-review-p5-r15 (27/10)
+Done: 1 blocker, 4 majors. (1) 0016 no longer sets first_write_id for pending initiative-origin transfers; (2) 0012 lifts department budgets/org envelope to cover legacy production funding; (3) POST /transfers requires Idempotency-Key when a person is an end; (4) initiative budget history includes transfer_compensation (`values_as_of(compensated=)`); (5) overview system rows resolved at the historical cutoff.
+Tests: tests/api/test_review_r15.py, 2 migration tests in tests/db/test_org_hierarchy_schema.py. Targeted only (4/6 runs); no full run, e2e not run.

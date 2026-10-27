@@ -278,3 +278,77 @@ async def test_r7_system_key_retired_budget_backfilled(pg_server):
             assert await conn.scalar(text("SELECT retired_budget FROM service_key")) == 80
     finally:
         await db.dispose()
+
+
+async def _migrated_db(pg_server, name, rev):
+    await create_database(pg_server.get_uri(), name)
+    url = to_asyncpg_url(pg_server.get_uri(), database=name)
+
+    def migrate(target):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", target],
+            env={**os.environ, "DATABASE_URL": url}, check=True, capture_output=True,
+        )  # fmt: skip
+
+    migrate(rev)
+    return migrate, create_async_engine(url)
+
+
+# review-p5-r15 B1b: a fully allocated v1 department with independently funded production
+async def test_r15_legacy_production_funding_reconciled(pg_server):
+    migrate, db = await _migrated_db(pg_server, "wm_legacy_prod", "0011")
+    try:
+        async with db.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO department (name, litellm_org_id, budget) "
+                    "VALUES ('Department A', 'legacy-a', 100)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO grp (name, litellm_team_id, department_id, base_budget) "
+                    "VALUES ('Group A', 'legacy-team', 1, 100)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO production_system (department_id, name, budget, litellm_team_id) "
+                    "VALUES (1, 'Prod', 20, 'legacy-prod')"
+                )
+            )
+        migrate("head")
+        async with db.connect() as conn:
+            assert await conn.scalar(text("SELECT budget FROM department")) == Decimal("120.00")
+            assert await conn.scalar(
+                text("SELECT departments_envelope FROM organization")
+            ) == Decimal("120.00")
+    finally:
+        await db.dispose()
+
+
+# review-p5-r15 B1b: a pending initiative-origin transfer has no source-write link
+async def test_r15_pending_initiative_transfer_has_no_source_write(pg_server):
+    migrate, db = await _migrated_db(pg_server, "wm_pending_transfer", "0015")
+    try:
+        async with db.begin() as conn:
+            wid = await conn.scalar(
+                text(
+                    "INSERT INTO litellm_write (entity, entity_id, endpoint, status) "
+                    "VALUES ('employee', 'a@corp.example', '/user/update', 'pending') RETURNING id"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO transfer (source_kind, source_id, target_kind, target_id, "
+                    "amount, write_ids, created_by) VALUES ('initiative', '1', 'employee', "
+                    "'a@corp.example', 5, ARRAY[:w]::bigint[], 'x@corp.example')"
+                ),
+                {"w": wid},
+            )
+        migrate("0016")
+        async with db.connect() as conn:
+            row = (await conn.execute(text("SELECT state, first_write_id FROM transfer"))).one()
+            assert tuple(row) == ("pending", None)
+    finally:
+        await db.dispose()

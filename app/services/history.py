@@ -25,6 +25,7 @@ async def values_as_of(
     current: dict[str, dict],
     at: datetime | None,
     also: dict[str, dict[str, str]] | None = None,
+    compensated: tuple[str, str] | None = None,
 ) -> dict[str, dict]:
     """``current`` is ``{id: {field: live value}}``; returns the same shape as of ``at``.
 
@@ -50,6 +51,19 @@ async def values_as_of(
                 after={names.get(k, k): v for k, v in (r.after or {}).items()},
             )
         )
+    if compensated:  # a cancelled transfer's restored totals, keyed "kind:id" in the audit
+        kind, field = compensated
+        comp = await db.scalars(select(AuditLog).where(AuditLog.entity == "transfer_compensation"))
+        for r in comp:
+            for key, value in (r.after or {}).items():
+                if key.startswith(f"{kind}:") and key.split(":", 1)[1] in current:
+                    audits.setdefault(key.split(":", 1)[1], []).append(
+                        SimpleNamespace(
+                            at=r.at, before={field: (r.before or {}).get(key)}, after={field: value}
+                        )
+                    )
+        for items in audits.values():
+            items.sort(key=lambda a: a.at)
     out: dict[str, dict] = {}
     for id_, fields in current.items():
         out[id_] = {}
@@ -81,6 +95,7 @@ async def initiative_budgets_as_of(
     # request-approved increases are audited on the initiative itself, transfers on their own
     # entity: one chronological history of the budget (r12 B3)
     past = await values_as_of(
-        db, "transfer_initiative", live, at, also={"initiative": {"budget": "total"}}
-    )
+        db, "transfer_initiative", live, at, also={"initiative": {"budget": "total"}},
+        compensated=("initiative", "total"),
+    )  # fmt: skip
     return {int(i): v["total"] for i, v in past.items()}

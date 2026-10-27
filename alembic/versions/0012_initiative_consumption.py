@@ -37,6 +37,21 @@ def upgrade() -> None:
               AND s.status = 'active'
         ), 0)
     """)
+    # v1 funded production independently of department.budget; the shared envelope now counts
+    # it. Lift each department budget to cover what it already committed (issued funding is
+    # kept), then lift its organization envelope to the sum of department budgets.
+    op.execute("""
+        UPDATE department AS d SET budget = GREATEST(d.budget,
+            COALESCE((SELECT SUM(g.base_budget) FROM grp AS g
+                      WHERE g.department_id = d.id AND g.parent_group_id IS NULL
+                        AND g.status <> 'archived'), 0)
+            + d.pmo_pool + d.reserve + d.prod_budget)
+    """)
+    op.execute("""
+        UPDATE organization AS o SET departments_envelope = GREATEST(o.departments_envelope,
+            COALESCE((SELECT SUM(d.budget) FROM department AS d
+                      WHERE d.organization_id = o.id), 0))
+    """)
 
 
 def downgrade() -> None:
