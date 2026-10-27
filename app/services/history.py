@@ -82,6 +82,22 @@ async def values_as_of(
     return out
 
 
+_TRANSFERRED = {"employee": "base_cap", "group": "base_budget", "system": "budget"}
+
+
+async def values_with_transfers(
+    db: AsyncSession, kind: str, current: dict[str, dict], at: datetime | None
+) -> dict[str, dict]:
+    """``values_as_of`` for an employee, group or system whose allocated total also moves by
+    transfers (audited as ``transfer_<kind>`` / compensation): one history (r16 B3)."""
+    field = _TRANSFERRED[kind]
+    entity = {"system": "production_system"}.get(kind, kind)
+    return await values_as_of(
+        db, entity, current, at, also={f"transfer_{kind}": {"total": field}},
+        compensated=(kind, field),
+    )  # fmt: skip
+
+
 async def initiative_budgets_as_of(
     db: AsyncSession, group_id: int, at: datetime | None
 ) -> dict[int, Decimal]:

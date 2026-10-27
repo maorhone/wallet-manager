@@ -17,7 +17,7 @@ from app.models import (
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
 from app.services import requests as requests_service
 from app.services import views
-from app.services.history import initiative_budgets_as_of, values_as_of
+from app.services.history import initiative_budgets_as_of, values_with_transfers
 from app.services.rate_card import metered_value
 from app.services.service_keys import _moved_keys, initiative_used  # noqa: F401
 from app.services.spend import Spend
@@ -61,7 +61,7 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         )
     )
     # Totals are the child's budget at the same cutoff as its membership (r7 B3).
-    budgets = await values_as_of(
+    budgets = await values_with_transfers(
         db, "group", {str(c.id): {"base_budget": c.base_budget} for c in kids}, at
     )
     for child in kids:
@@ -256,8 +256,8 @@ async def department_overview(
         if pc["at"] is not None:  # a past period: only systems that existed then, at their budget
             query = query.where(ProductionSystem.created_at <= pc["at"])
         rows = list(await db.scalars(query.order_by(ProductionSystem.id)))
-        past = await values_as_of(
-            db, "production_system", {str(x.id): {"budget": x.budget} for x in rows}, pc["at"]
+        past = await values_with_transfers(
+            db, "system", {str(x.id): {"budget": x.budget} for x in rows}, pc["at"]
         )
         return [{"id": x.id, "name": x.name, "budget": past[str(x.id)]["budget"],
                  "used": spend.used("system", x.id)} for x in rows]  # fmt: skip

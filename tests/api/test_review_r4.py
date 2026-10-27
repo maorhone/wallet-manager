@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app.litellm_client import LiteLLMReader
 from app.models import Grp, LitellmWrite, ProductionSystem, ServiceKey, Transfer
 from app.outbox.enqueue import enqueue
 from app.outbox.worker import drain
@@ -21,7 +22,7 @@ from tests.api.test_transfers import A1, move, send
 
 # review-p5-r3 blocker 1 (transfers:275): an older destination write waits for the source
 async def test_r4_older_destination_write_waits_for_source(
-    login_wm, provisioned, litellm, prov_settings
+    login_wm, provisioned, litellm, prov_settings, ro_engine
 ):
     async with provisioned() as s:
         older = await enqueue(s, prov_settings, "employee", YAEL, "/team/member_update", "older-1")
@@ -30,10 +31,12 @@ async def test_r4_older_destination_write_waits_for_source(
     assert (await send(head, "POST", "/transfers", move(50))).status_code == 200
     async with provisioned() as s:
         assert await held_by_incoming(s, await s.get(LitellmWrite, older))
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     async with provisioned() as s:
         assert (await s.get(LitellmWrite, older)).status == "pending"  # held in that drain
-    await drain(provisioned, litellm, prov_settings)  # the transfer settled: nothing holds it
+    await drain(
+        provisioned, litellm, prov_settings, LiteLLMReader(ro_engine)
+    )  # the transfer settled: nothing holds it
     async with provisioned() as s:
         assert (await s.get(LitellmWrite, older)).status == "applied"
         assert not await held_by_incoming(s, await s.get(LitellmWrite, older))

@@ -38,7 +38,7 @@ from app.permissions import (
 )
 from app.services import wallet
 from app.services.attribution import displayed_used
-from app.services.history import initiative_budgets_as_of, values_as_of
+from app.services.history import initiative_budgets_as_of, values_as_of, values_with_transfers
 from app.services.lifecycle import row_actions
 from app.services.owners import holders, owner_of
 from app.services.personal_values import authorize
@@ -133,7 +133,7 @@ async def _dept(db, dept: Department, spend: Spend, at, th) -> dict:
     )
     live = {"budget": dept.budget, "pmo_pool": dept.pmo_pool, "reserve": dept.reserve}
     values = (await values_as_of(db, "department", {str(dept.id): live}, at))[str(dept.id)]
-    bases = await values_as_of(
+    bases = await values_with_transfers(
         db, "group", {str(g.id): {"base_budget": g.base_budget} for g in groups}, at
     )
     bases = {int(k): v["base_budget"] for k, v in bases.items()}
@@ -223,8 +223,8 @@ async def _internal_as_of(db, department_id: int, at) -> Decimal:
     if at is not None:
         q = q.where(ProductionSystem.created_at <= at)
     systems = list(await db.scalars(q))
-    past = await values_as_of(
-        db, "production_system", {str(x.id): {"budget": x.budget} for x in systems}, at
+    past = await values_with_transfers(
+        db, "system", {str(x.id): {"budget": x.budget} for x in systems}, at
     )
     return sum((v["budget"] for v in past.values()), ZERO)
 
@@ -271,9 +271,10 @@ class _Group:
             }
             for m in members
         }  # fmt: skip
-        values = await values_as_of(db, "employee", live, at)
+        values = await values_with_transfers(db, "employee", live, at)
         base_live = {str(group.id): {"base_budget": group.base_budget}}
-        base = (await values_as_of(db, "group", base_live, at))[str(group.id)]["base_budget"]
+        base_past = await values_with_transfers(db, "group", base_live, at)
+        base = base_past[str(group.id)]["base_budget"]
         shares: dict[str, Decimal] = defaultdict(lambda: ZERO)
         for _, upn, amount in await _shares(db, [group.id]):
             shares[upn] += amount
@@ -293,7 +294,7 @@ class _Group:
                 )
             )
         )
-        child_bases = await values_as_of(
+        child_bases = await values_with_transfers(
             db, "group", {str(c.id): {"base_budget": c.base_budget} for c in children}, at
         )
         carved = sum((v["base_budget"] for v in child_bases.values()), ZERO)  # D-055: once, here

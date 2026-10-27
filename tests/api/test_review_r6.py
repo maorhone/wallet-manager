@@ -6,6 +6,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from app.db import LockKind, lock_parent
+from app.litellm_client import LiteLLMReader
 from app.models import AuditLog, Employee, Grp, LitellmWrite, ProductionSystem, ServiceKey, Transfer
 from app.outbox.enqueue import enqueue
 from app.outbox.worker import drain
@@ -117,12 +118,14 @@ async def test_r6_worker_serializes_with_transfer_creation(
 
 
 # review-p5-r5 majors (transfers:454, worker:136): receipts to one target never block each other
-async def test_r6_two_transfers_to_one_target_settle(login_wm, provisioned, litellm, prov_settings):
+async def test_r6_two_transfers_to_one_target_settle(
+    login_wm, provisioned, litellm, prov_settings, ro_engine
+):
     head = await login_wm("dana")
     assert (await send(head, "POST", "/transfers", move(50))).status_code == 200
     assert (await send(head, "POST", "/transfers", move(50))).status_code == 200
     for _ in range(4):
-        await drain(provisioned, litellm, prov_settings)
+        await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     async with provisioned() as s:
         states = list(await s.scalars(select(Transfer.state).order_by(Transfer.id)))
     assert states == ["applied", "applied"]

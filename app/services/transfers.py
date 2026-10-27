@@ -619,8 +619,6 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
     Fails closed: an unreadable spend holds the write. Returns True when it may be applied.
     Destinations without a write (initiatives) get the same check in ``settle``.
     """
-    if reader is None:
-        return True
     # the write's own transfer, whether or not it has a source write (an initiative-origin
     # receipt has none, so a dependency check would let it bypass an unreadable sibling fence)
     transfer = await db.scalar(
@@ -718,7 +716,7 @@ async def settle(db, settings, reader, now: datetime, write_id: int | None = Non
         )
         if not ids or statuses != {"applied"}:
             continue
-        if transfer.first_write_id and len(ids) == 1 and reader is not None:
+        if transfer.first_write_id and len(ids) == 1:
             try:
                 if await _source_overspent(db, reader, transfer, now, settings.app_timezone):
                     await _release_cancelled(db, settings, transfer)

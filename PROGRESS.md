@@ -1155,3 +1155,6 @@ Tests: tests/api/test_review_r14.py (4) + OrgAllocation.test.tsx (+1). Blocker 1
 ## fix-review-p5-r15 (27/10)
 Done: 1 blocker, 4 majors. (1) 0016 no longer sets first_write_id for pending initiative-origin transfers; (2) 0012 lifts department budgets/org envelope to cover legacy production funding; (3) POST /transfers requires Idempotency-Key when a person is an end; (4) initiative budget history includes transfer_compensation (`values_as_of(compensated=)`); (5) overview system rows resolved at the historical cutoff.
 Tests: tests/api/test_review_r15.py, 2 migration tests in tests/db/test_org_hierarchy_schema.py. Targeted only (4/6 runs); no full run, e2e not run.
+
+## fix-review-p5-r16 (27/10)
+Done: B1a1 blocker (transfer fence/settle now fail closed without a spend reader; tests that settle transfers pass a reader), B3 major (new `values_with_transfers` merges transfer audits + compensation into historical system/employee/group totals). Tests: tests/api/test_review_r16.py. Targeted only (5/6 runs); no full run, e2e not run.

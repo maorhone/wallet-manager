@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import func, select, text
 
+from app.litellm_client import LiteLLMReader
 from app.models import AuditLog, Employee, Initiative, Notification, ProductionSystem, Transfer
 from app.outbox.worker import drain
 
@@ -87,7 +88,9 @@ async def test_org_system_not_allowed(login_wm, provisioned):
     assert r.status_code == 422 and r.json()["details"]["reason"] == "system_mixed", r.text
 
 
-async def test_total_unchanged_and_audited(login_wm, provisioned, litellm, prov_settings):
+async def test_total_unchanged_and_audited(
+    login_wm, provisioned, litellm, prov_settings, ro_engine
+):
     async with provisioned() as s:
         s.add(Initiative(name="Pilot", owner_upn="yael@corp.example", group_id=A1, department_id=1,
                          budget=2000, created_by="dana@corp.example"))  # fmt: skip
@@ -125,5 +128,5 @@ async def test_total_unchanged_and_audited(login_wm, provisioned, litellm, prov_
             ("yael@corp.example", "transfer_received"),
         }
     assert (await head.get(f"/transfers/{tid}")).json()["status"] == "pending_apply"
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     assert (await head.get(f"/transfers/{tid}")).json()["status"] == "done"

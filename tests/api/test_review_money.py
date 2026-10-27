@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
+from app.litellm_client import LiteLLMReader
 from app.models import (
     Employee,
     Grp,
@@ -127,7 +128,7 @@ async def test_review_transfer_partial_failure_compensates(
 
 
 async def test_review_initiative_credit_gated_until_source_applied(
-    login_wm, provisioned, litellm, prov_settings
+    login_wm, provisioned, litellm, prov_settings, ro_engine
 ):
     iid = await _initiative(provisioned, budget=1000)
     head = await login_wm("dana")
@@ -146,7 +147,7 @@ async def test_review_initiative_credit_gated_until_source_applied(
     denied = await send(head, "POST", "/service-keys", key)
     assert denied.status_code == 422, denied.text
     assert denied.json()["code"] == "PARENT_OVERALLOCATED"
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     allowed = await send(head, "POST", "/service-keys", key)
     assert allowed.status_code == 200, allowed.text
 
