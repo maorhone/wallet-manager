@@ -151,9 +151,15 @@ async def test_r13_initiative_budget_history_merges_request_increases_and_transf
         await s.flush()
         iid = ini.id
         # 100 -> (transfer) 150 at -40d -> (approved request) 200 at -20d -> (transfer) 300 now
-        await _audit(s, "transfer_initiative", iid, {"total": 100}, {"total": 150}, now - timedelta(days=40))
-        await _audit(s, "initiative", iid, {"budget": 150}, {"budget": 200}, now - timedelta(days=20))
-        await _audit(s, "transfer_initiative", iid, {"total": 200}, {"total": 300}, now - timedelta(days=1))
+        await _audit(
+            s, "transfer_initiative", iid, {"total": 100}, {"total": 150}, now - timedelta(days=40)
+        )
+        await _audit(
+            s, "initiative", iid, {"budget": 150}, {"budget": 200}, now - timedelta(days=20)
+        )
+        await _audit(
+            s, "transfer_initiative", iid, {"total": 200}, {"total": 300}, now - timedelta(days=1)
+        )
         await s.commit()
         for days, want in ((60, 100), (30, 150), (10, 200), (0, 300)):
             got = await initiative_budgets_as_of(s, 1, now - timedelta(days=days, seconds=-1))
