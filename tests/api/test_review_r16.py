@@ -122,3 +122,20 @@ async def test_r17_overview_total_includes_descendant_grants(login, provisioned)
     body = (await head.get("/budget/overview?scope=group:1")).json()
     assert body["kpis"]["total"] == before + 100
     assert body["kpis"]["remaining"] == body["kpis"]["total"] - body["kpis"]["used"]
+
+
+# review-p5-r16 major B3 (rate_card:76): one currency per rate card, also across later edits
+async def test_r17_rate_card_single_currency(login, put, seeded):
+    admin = await login("admin")
+    mixed = {
+        "rates": [
+            {"model": "gpt-4", "input_per_1m": "10", "output_per_1m": "30", "currency": "USD"},
+            {"model": "claude", "input_per_1m": "3", "output_per_1m": "15", "currency": "EUR"},
+        ]
+    }
+    assert (await put(admin, "/rate-card", mixed)).status_code == 422
+    usd = {"rates": [{**mixed["rates"][0]}]}
+    assert (await put(admin, "/rate-card", usd)).status_code == 200
+    eur = {"rates": [{**mixed["rates"][1]}]}  # a later edit may not introduce another currency
+    r = await put(admin, "/rate-card", eur)
+    assert r.status_code == 422, r.text

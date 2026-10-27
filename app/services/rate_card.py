@@ -35,6 +35,13 @@ async def set_rates(ctx: WriteContext, principal: Principal, body: RateCardIn) -
     if len(set(models)) != len(models):
         raise invalid_request("Duplicate model in rate card", {"field": "rates"})
     existing = {r.model: r for r in await ctx.db.scalars(select(RateCard))}
+    # One denomination for the whole card (r16 B3): values are summed across models and over
+    # time without conversion, so the currency is fixed once the first rate exists.
+    currencies = {r.currency for r in existing.values()} | {i.currency for i in body.rates}
+    if len(currencies) > 1:
+        raise invalid_request(
+            "All rates must use one currency", {"field": "currency", "currencies": sorted(currencies)}
+        )
     entities = []
     for item in body.rates:
         row = existing.get(item.model)
