@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { he } from '../../i18n/he';
 import OrgAllocation from './OrgAllocation';
 
 const mutate = vi.fn();
@@ -61,6 +63,31 @@ describe('OrgAllocation', () => {
     fireEvent.change(screen.getByLabelText('הקצאה: מחלקה א'), { target: { value: '999' } });
     fireEvent.click(screen.getByRole('tab', { name: 'מערכות ארגוניות' }));
     expect((screen.getByLabelText('הקצאה: מערכת ארגונית') as HTMLInputElement).value).toBe('100');
+  });
+
+  // review-p5-r12 major F1: a pending write keeps its status after switching tabs and back
+  it('keeps the synchronization status of a saved allocation across tab changes', () => {
+    const result = {
+      request_id: 'r1',
+      status: 'pending',
+      entities: [{ entity: 'department', id: '3', sync_status: 'pending', values: {} }],
+    };
+    mutate.mockImplementationOnce((_v, opts) =>
+      opts.onSuccess({ result, replay: () => Promise.resolve(result) }),
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <OrgAllocation organizationId={1} isAdmin />
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByLabelText('סיבת השינוי'), { target: { value: 'תכנון' } });
+    fireEvent.change(screen.getByLabelText('הקצאה: מחלקה א'), { target: { value: '700' } });
+    fireEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(screen.getByText(he.v2.writeOutcome.pending)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'מערכות ארגוניות' }));
+    expect(screen.queryByText(he.v2.writeOutcome.pending)).toBeNull(); // the other tab's table
+    fireEvent.click(screen.getByRole('tab', { name: 'מחלקות' }));
+    expect(screen.getByText(he.v2.writeOutcome.pending)).toBeTruthy();
   });
 
   it('shows a rejected allocation', () => {

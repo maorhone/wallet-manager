@@ -14,23 +14,31 @@ import { KpiCard } from '../components/KpiCard';
 
 const s = he.v2.orgAlloc;
 
+type Outcome = {
+  kind: 'department' | 'system';
+  name: string;
+  result: WriteResponse;
+  replay: () => Promise<WriteResponse>;
+};
+
 function Table({
   rows,
   kind,
   orgId,
   reason,
+  outcomes,
+  onSaved,
 }: {
   rows: OrgEnvelopeRow[];
   kind: 'department' | 'system';
   orgId: number;
   reason: string;
+  // Held above the tabs, so switching tabs neither drops a pending write nor its poller (D-071).
+  outcomes: Outcome[];
+  onSaved: (o: Outcome) => void;
 }) {
   const allocate = useOrgAllocate(orgId);
   const [edit, setEdit] = useState<Record<number, string>>({});
-  // Every saved write keeps showing whether LiteLLM enforces it yet (D-071).
-  const [outcomes, setOutcomes] = useState<
-    { name: string; result: WriteResponse; replay: () => Promise<WriteResponse> }[]
-  >([]);
   if (!rows.length) return <p className="v2-muted">{s.none}</p>;
   return (
     <>
@@ -76,7 +84,7 @@ function Table({
                       {
                         // Reconcile: after a persisted write the server value replaces the draft.
                         onSuccess: ({ result, replay }) => {
-                          setOutcomes((o) => [...o, { name: r.name, result, replay }]);
+                          onSaved({ kind, name: r.name, result, replay });
                           setEdit((d) =>
                             Object.fromEntries(
                               Object.entries(d).filter(([k]) => k !== String(r.id)),
@@ -117,6 +125,7 @@ export default function OrgAllocation({
   const create = useCreateOrganization();
   const [tab, setTab] = useState<'depts' | 'systems'>('depts');
   const [reason, setReason] = useState('');
+  const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const [newName, setNewName] = useState('');
   // One key per distinct organization submission: a retry replays, a new name does not.
   const sent = useRef<{ name: string; key: string } | null>(null);
@@ -158,6 +167,8 @@ export default function OrgAllocation({
             kind="department"
             orgId={organizationId}
             reason={reason}
+            outcomes={outcomes.filter((o) => o.kind === 'department')}
+            onSaved={(o) => setOutcomes((all) => [...all, o])}
           />
         ) : (
           <Table
@@ -166,6 +177,8 @@ export default function OrgAllocation({
             kind="system"
             orgId={organizationId}
             reason={reason}
+            outcomes={outcomes.filter((o) => o.kind === 'system')}
+            onSaved={(o) => setOutcomes((all) => [...all, o])}
           />
         )}
       </section>
