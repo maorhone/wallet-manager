@@ -58,3 +58,18 @@ async def test_r14_failed_destination_cancelled_when_source_overspent(
     async with provisioned() as s:
         states = list(await s.scalars(select(Transfer.state).order_by(Transfer.id)))
         assert states == ["applied", "compensated"], states
+
+
+# review-p5-r13 major B3: a simultaneous cut of a parent and its child is judged on proposed budgets
+async def test_r14_split_cuts_parent_and_child_together(login_wm, provisioned, fake_engine):
+    from tests.api.test_review_r10 import _quiet_group
+    from tests.api.test_review_r13 import _split
+
+    async with provisioned() as s:
+        await _quiet_group(s, budget=100)
+        s.add(Grp(litellm_team_id="A1-kid", department_id=1, name="kid", base_budget=100,
+                  default_member_cap=0, status="active", parent_group_id=1))  # fmt: skip
+        await s.commit()
+        kid = await s.scalar(select(Grp.id).where(Grp.litellm_team_id == "A1-kid"))
+    r = await _split(await login_wm("rep"), [{"group_id": 1, "base": 50}, {"group_id": kid, "base": 50}])
+    assert r.status_code == 200, r.text

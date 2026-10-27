@@ -101,7 +101,8 @@ async def lock_scope(db, group: Grp, endpoints) -> None:
 
 
 async def group_committed(
-    db, spend: Spend, group: Grp, with_shares: bool = False, initiative_spent=None, tz: str = "UTC"
+    db, spend: Spend, group: Grp, with_shares: bool = False, initiative_spent=None, tz: str = "UTC",
+    child_budgets: dict[int, Decimal] | None = None,
 ) -> Decimal:
     """Consumption plus what is still allocated and unspent; spent credit is counted once.
 
@@ -129,7 +130,8 @@ async def group_committed(
     for child in await db.scalars(
         select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
     ):
-        committed += max(child.base_budget, spend.used("group", child.id))
+        budget = (child_budgets or {}).get(child.id, child.base_budget)  # proposed cuts, if any
+        committed += max(budget, spend.used("group", child.id))
     initiatives = {
         i.id: i for i in await db.scalars(select(Initiative).where(Initiative.group_id == group.id))
     }

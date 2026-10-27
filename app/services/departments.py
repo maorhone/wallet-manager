@@ -97,7 +97,9 @@ async def _check_consumption_floor(ctx, changed, new, reader, clock) -> None:
         ) from None
     rows = []
     for g in cuts:
-        floor = await group_committed(ctx.db, spend, g, tz=ctx.settings.app_timezone)
+        floor = await group_committed(
+            ctx.db, spend, g, tz=ctx.settings.app_timezone, child_budgets=new
+        )
         floor += await pending_incoming(ctx.db, "group", g.id)
         if new[g.id] < floor:
             rows.append({"group_id": g.id, "code": "BELOW_CONSUMED", "floor": floor})
