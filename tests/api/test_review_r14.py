@@ -71,7 +71,8 @@ async def test_r14_split_cuts_parent_and_child_together(login_wm, provisioned, f
                   default_member_cap=0, status="active", parent_group_id=1))  # fmt: skip
         await s.commit()
         kid = await s.scalar(select(Grp.id).where(Grp.litellm_team_id == "A1-kid"))
-    r = await _split(await login_wm("rep"), [{"group_id": 1, "base": 50}, {"group_id": kid, "base": 50}])
+    cuts = [{"group_id": 1, "base": 50}, {"group_id": kid, "base": 50}]
+    r = await _split(await login_wm("rep"), cuts)
     assert r.status_code == 200, r.text
 
 

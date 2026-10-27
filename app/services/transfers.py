@@ -101,7 +101,12 @@ async def lock_scope(db, group: Grp, endpoints) -> None:
 
 
 async def group_committed(
-    db, spend: Spend, group: Grp, with_shares: bool = False, initiative_spent=None, tz: str = "UTC",
+    db,
+    spend: Spend,
+    group: Grp,
+    with_shares: bool = False,
+    initiative_spent=None,
+    tz: str = "UTC",
     child_budgets: dict[int, Decimal] | None = None,
 ) -> Decimal:
     """Consumption plus what is still allocated and unspent; spent credit is counted once.
@@ -484,9 +489,7 @@ async def compensate_failed_source(db, write: LitellmWrite) -> None:
         )
 
 
-async def _source_overspent(
-    db, reader, transfer: Transfer, now: datetime, tz: str = "UTC"
-) -> bool:
+async def _source_overspent(db, reader, transfer: Transfer, now: datetime, tz: str = "UTC") -> bool:
     kind, ident = transfer.source_kind, transfer.source_id
     row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
     total = getattr(row, {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget"))
