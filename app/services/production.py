@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import Clock
@@ -21,6 +21,7 @@ from app.permissions import (
     can_manage_platform,
     can_view_production,
     group_roles_of,
+    headed_groups,
 )
 from app.schemas.production import ProductionOrgIn, ProductionSystemIn, ProductionSystemPatch
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
@@ -302,11 +303,26 @@ async def get_production(
 
 async def list_owned_systems(db: AsyncSession, principal: Principal, period: str) -> dict:
     """Systems (organization- or department-funded) whose owner is the caller (D-048/D-063)."""
+    # plus the systems delegated to a section the caller heads, whoever owns them (D-056/D-057)
+    delegated = await headed_groups(
+        db,
+        principal,
+        await db.scalars(
+            select(ProductionSystem.managing_group_id)
+            .where(
+                ProductionSystem.status == "active", ProductionSystem.managing_group_id.isnot(None)
+            )
+            .distinct()
+        ),
+    )
     query = (
         select(ProductionSystem)
         .where(
-            ProductionSystem.owner_upn == principal.upn,
             ProductionSystem.status == "active",
+            or_(
+                ProductionSystem.owner_upn == principal.upn,
+                ProductionSystem.managing_group_id.in_(delegated),
+            ),
         )
         .order_by(ProductionSystem.id)
     )

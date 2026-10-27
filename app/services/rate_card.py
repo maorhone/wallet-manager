@@ -40,7 +40,8 @@ async def set_rates(ctx: WriteContext, principal: Principal, body: RateCardIn) -
     currencies = {r.currency for r in existing.values()} | {i.currency for i in body.rates}
     if len(currencies) > 1:
         raise invalid_request(
-            "All rates must use one currency", {"field": "currency", "currencies": sorted(currencies)}
+            "All rates must use one currency",
+            {"field": "currency", "currencies": sorted(currencies)},
         )
     entities = []
     for item in body.rates:

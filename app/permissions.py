@@ -211,6 +211,13 @@ async def group_roles_of(session, p: Principal, group_id: int) -> set[str]:
     return await _group_roles(session, p, group_id)
 
 
+async def headed_groups(session, p: Principal, group_ids) -> set[int]:
+    """The subset of ``group_ids`` the caller heads (D-056/D-057)."""
+    return {
+        g for g in set(group_ids) if g is not None and HEAD in await _group_roles(session, p, g)
+    }
+
+
 async def can_view_group(session, p: Principal, group_id: int) -> str:
     return _pick(await _group_roles(session, p, group_id), _GROUP_VIEW, _GROUP_VIEW)
 

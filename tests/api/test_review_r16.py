@@ -139,3 +139,21 @@ async def test_r17_rate_card_single_currency(login, put, seeded):
     eur = {"rates": [{**mixed["rates"][1]}]}  # a later edit may not introduce another currency
     r = await put(admin, "/rate-card", eur)
     assert r.status_code == 422, r.text
+
+
+# review-p5-r16 major F1 (Initiative.tsx:18): systems delegated to a section the caller heads
+async def test_r17_head_sees_system_managed_by_section(login, provisioned):
+    from app.models import ProductionSystem
+
+    async with provisioned() as s:
+        s.add(
+            ProductionSystem(
+                name="Billing", department_id=1, owner_upn="yael@corp.example", status="active",
+                managing_group_id=1, budget=10, funding="department",
+            )
+        )  # fmt: skip
+        await s.commit()
+    mine = (await (await login("dana")).get("/systems/mine")).json()["items"]
+    assert [x["name"] for x in mine] == ["Billing"]
+    other = (await (await login("dani")).get("/systems/mine")).json()["items"]
+    assert [x["name"] for x in other] == []
