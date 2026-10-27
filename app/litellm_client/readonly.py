@@ -89,15 +89,18 @@ WITH e AS (
                     request_kwargs #>> '{metadata,user_api_key_team_id}') AS team,
            model_group, "startTime", status_code, exception_type, exception_string,
            CASE WHEN request_kwargs ->> 'retry_after' ~ '^[0-9]+$'
-                THEN (request_kwargs ->> 'retry_after')::int END AS retry_after
+                THEN (request_kwargs ->> 'retry_after')::int END AS retry_after,
+           COALESCE(request_kwargs #>> '{litellm_params,metadata,user_api_key_hash}',
+                    request_kwargs #>> '{metadata,user_api_key_hash}') AS key_hash
     FROM "LiteLLM_ErrorLogs"
     WHERE "startTime" >= :start AND "startTime" < :end
 )
 SELECT usr, team, model_group, "startTime", status_code, exception_type, exception_string,
-       retry_after
+       retry_after, key_hash
 FROM e
 WHERE (CAST(:teams AS text[]) IS NULL OR team = ANY(CAST(:teams AS text[])))
   AND (CAST(:users AS text[]) IS NULL OR usr = ANY(CAST(:users AS text[])))
+  AND (CAST(:keys AS text[]) IS NULL OR key_hash = ANY(CAST(:keys AS text[])))
 ORDER BY "startTime" DESC
 LIMIT :limit
 """
@@ -182,6 +185,7 @@ class FailedRow(NamedTuple):
     exception_type: str
     message: str
     retry_after: int | None
+    key_hash: str | None = None
 
 
 class PeakRow(NamedTuple):
@@ -254,7 +258,14 @@ class LiteLLMReader:
         ]
 
     async def failed_requests(
-        self, start: datetime, end: datetime, *, team_ids=None, users=None, limit: int = 5000
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        team_ids=None,
+        users=None,
+        key_hashes=None,
+        limit: int = 5000,
     ) -> list[FailedRow]:
         """Failed requests (LiteLLM_ErrorLogs), newest first; never reads request content."""
         return [
@@ -267,9 +278,16 @@ class LiteLLMReader:
                 r[5] or "",
                 r[6] or "",
                 r[7],
+                r[8],
             )
             for r in await self._rows(
-                _FAILED_REQUESTS, start=start, end=end, teams=team_ids, users=users, limit=limit
+                _FAILED_REQUESTS,
+                start=start,
+                end=end,
+                teams=team_ids,
+                users=users,
+                keys=key_hashes,
+                limit=limit,
             )
         ]
 

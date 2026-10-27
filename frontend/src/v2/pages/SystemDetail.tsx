@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMoveKey, useServiceKeys } from '../../api/queries';
+import { useMoveKey, useServiceKeys, useSubjectTelemetry } from '../../api/queries';
 import { ErrorState } from '../../components/ErrorState';
 import { credits } from '../../format';
 import { he } from '../../i18n/he';
@@ -22,6 +22,7 @@ export interface DetailSubject {
 export function SystemDetail({ subject, canMove }: { subject: DetailSubject; canMove: boolean }) {
   const keys = useServiceKeys(subject.kind, subject.id);
   const move = useMoveKey();
+  const health = useSubjectTelemetry(subject.kind, subject.id);
   const [target, setTarget] = useState('');
   const [chosen, setChosen] = useState('');
   // The idempotency key belongs to one submitted payload: a retry of the same move replays,
@@ -97,6 +98,23 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
         </table>
       ) : (
         <p className="v2-muted">{s.noKeys}</p>
+      )}
+      <h3>{s.health}</h3>
+      {health.isPending ? (
+        <p role="status">{he.loading}</p>
+      ) : health.error || !health.data?.available ? (
+        <p role="alert">{s.healthUnavailable}</p>
+      ) : health.data.by_reason.length ? (
+        <ul>
+          {health.data.by_reason.map((r) => (
+            <li key={`${r.reason}:${r.sub ?? ''}`}>
+              {he.v2.blockSummary.reasons[r.reason] ?? r.reason}
+              {r.sub && ` (${he.v2.blockSummary.subs[r.sub] ?? r.sub})`}: {s.healthCount} {r.count}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="v2-muted">{s.healthNone}</p>
       )}
       {canMove && subject.kind === 'initiative' && movable.length > 0 && (
         <form

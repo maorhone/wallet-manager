@@ -53,6 +53,7 @@ class ErrorRow(BaseModel):
     message: str = ""
     retry_after: int | None = None
     at: AwareDatetime | None = None
+    key_hash: str | None = None
 
 
 @router.post("/errors")
@@ -74,6 +75,7 @@ async def add_errors(body: list[ErrorRow], request: Request):
                             "metadata": {
                                 "user_api_key_user_id": e.user_id,
                                 "user_api_key_team_id": e.team_id,
+                                "user_api_key_hash": e.key_hash,
                             }
                         },
                         "retry_after": e.retry_after,

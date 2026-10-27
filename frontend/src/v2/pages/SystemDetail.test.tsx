@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   mutate: vi.fn(),
   initiatives: [] as unknown[],
   mine: [] as unknown[],
+  health: { available: true, by_reason: [], last_blocks: [], taken_at: '' } as unknown,
 }));
 vi.mock('../../api/queries', () => ({
   useMyInitiatives: () => ({ isPending: false, data: { items: h.mine } }),
@@ -18,6 +19,7 @@ vi.mock('../../api/queries', () => ({
     isPending: false,
     data: { systems: { rows: [] }, initiatives: h.initiatives },
   }),
+  useSubjectTelemetry: () => ({ isPending: false, data: h.health }),
   useMoveKey: () => ({ mutate: h.mutate, isPending: false, isError: false }),
 }));
 
@@ -44,9 +46,26 @@ describe('SystemDetail / Initiative (review-p5-r6 majors)', () => {
     h.keys = [key(1, 'a'), key(2, 'b')];
     h.initiatives = [ini];
     h.mine = [];
+    h.health = { available: true, by_reason: [], last_blocks: [], taken_at: '' };
     h.mutate.mockReset();
   });
   afterEach(cleanup);
+
+  // review-p5-r12 major F1: the owner sees classified failures, or that they cannot be read
+  it('shows classified service failures and an explicit unavailable state', () => {
+    h.health = {
+      available: true,
+      by_reason: [{ reason: 'RATE_LIMIT', sub: 'concurrency', count: 3, action: 'x' }],
+      last_blocks: [],
+      taken_at: '',
+    };
+    const { unmount } = mount();
+    expect(screen.getByText(/מגבלת קצב או מקביליות/)).toBeTruthy();
+    unmount();
+    h.health = { available: false, by_reason: [], last_blocks: [], taken_at: '' };
+    mount();
+    expect(screen.getByRole('alert').textContent).toContain('אינם זמינים');
+  });
 
   it('lists and shows consumption of an initiative the caller does not own', () => {
     mount();

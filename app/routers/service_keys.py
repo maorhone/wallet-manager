@@ -31,6 +31,20 @@ async def move(key_id: int, body: KeyMoveIn, ctx: Write, principal: CurrentPrinc
     return await write_response(ctx, await org_systems.move_key(ctx, principal, key_id, body))
 
 
+@router.get("/service-keys/telemetry")
+async def telemetry(
+    owner_kind: Literal["system", "initiative"],
+    owner_id: int,
+    request: Request,
+    principal: CurrentPrincipal,
+    db: Db,
+):
+    state = request.app.state
+    return await service_keys.telemetry(
+        db, principal, state.litellm_reader, state.clock, owner_kind, owner_id
+    )
+
+
 @router.get("/service-keys")
 async def list_keys(
     owner_kind: Literal["group", "system", "initiative"],

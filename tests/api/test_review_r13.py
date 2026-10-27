@@ -158,3 +158,64 @@ async def test_r13_initiative_budget_history_merges_request_increases_and_transf
         for days, want in ((60, 100), (30, 150), (10, 200), (0, 300)):
             got = await initiative_budgets_as_of(s, 1, now - timedelta(days=days, seconds=-1))
             assert got[iid] == want, (days, got[iid])
+
+
+async def _owned_initiative_with_key(provisioned, name, token_hash):
+    from app.models import Initiative
+
+    async with provisioned() as s:
+        ini = Initiative(
+            name=name, owner_upn=YAEL, group_id=1, department_id=1, budget=10, created_by=YAEL
+        )
+        s.add(ini)
+        await s.flush()
+        s.add(
+            ServiceKey(
+                owner_kind="initiative", owner_id=ini.id, max_budget=1, status="active",
+                litellm_token_hash=token_hash,
+            )
+        )  # fmt: skip
+        await s.commit()
+        return ini.id
+
+
+def _err(status, type_, message, key_hash):
+    from datetime import UTC, datetime
+
+    return dict(team_id="A1", user_id="svc", model="m", status_code=status, exception_type=type_,
+                message=message, key_hash=key_hash, at=datetime.now(UTC).isoformat())  # fmt: skip
+
+
+# review-p5-r12 major F1 (SystemDetail): the owner sees classified failures of their own subject
+async def test_r13_subject_telemetry_is_scoped_to_the_subjects_keys(
+    login_wm, provisioned, fake_app
+):
+    import httpx
+
+    mine = await _owned_initiative_with_key(provisioned, "Mine", "hash-mine")
+    await _owned_initiative_with_key(provisioned, "Other", "hash-other")
+    rows = [
+        _err(429, "max_parallel_requests", "Max parallel request limit", "hash-mine"),
+        _err(500, "boom", "upstream", "hash-other"),
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_app), base_url="http://fake"
+    ) as c:
+        assert (await c.post("/_test/errors", json=rows)).status_code == 200
+    url = f"/service-keys/telemetry?owner_kind=initiative&owner_id={mine}"
+    r = await (await login_wm("yael")).get(url)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert {x["reason"]: x["count"] for x in body["by_reason"]} == {"RATE_LIMIT": 1}
+    assert [b["reason"] for b in body["last_blocks"]] == ["RATE_LIMIT"]
+    assert (await (await login_wm("dani")).get(url)).status_code in (403, 404)  # scope isolation
+
+
+# review-p5-r12 major F1 (SystemDetail): unreadable telemetry is reported, never shown as healthy
+async def test_r13_subject_telemetry_unavailable_without_reader(login, provisioned):
+    mine = await _owned_initiative_with_key(provisioned, "Mine", "hash-mine")
+    client = await login("yael", litellm_database_url=None)
+    r = await client.get(f"/service-keys/telemetry?owner_kind=initiative&owner_id={mine}")
+    assert r.status_code == 200, r.text
+    assert r.json()["available"] is False and r.json()["by_reason"] == []

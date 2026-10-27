@@ -547,6 +547,24 @@ export const useServiceKeys = (ownerKind: 'group' | 'system' | 'initiative', own
     refetchInterval: pollWhilePending(hasPendingServiceKeys),
   });
 
+export interface SubjectTelemetry {
+  available: boolean;
+  by_reason: { reason: string; sub: string | null; count: number; action: string }[];
+  last_blocks: { at: string; model: string | null; reason: string; sub: string | null }[];
+  taken_at: string;
+}
+
+/** D-060/D-063: classified failures of an initiative's or system's own keys (last 7 days). */
+export const useSubjectTelemetry = (ownerKind: 'system' | 'initiative', ownerId: number) =>
+  useQuery({
+    queryKey: ['service-keys-telemetry', ownerKind, ownerId],
+    queryFn: () =>
+      apiFetch<SubjectTelemetry>(
+        `/service-keys/telemetry?owner_kind=${ownerKind}&owner_id=${ownerId}`,
+      ),
+    refetchInterval: 30000,
+  });
+
 /** Create, rotate or revoke a service key; create/rotate responses carry the one-time secret. */
 export const useServiceKeyWrite = (onSecret?: (secret: string) => void) => {
   const qc = useQueryClient();

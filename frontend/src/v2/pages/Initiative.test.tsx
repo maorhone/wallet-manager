@@ -65,6 +65,10 @@ vi.mock('../../api/queries', () => ({
   }),
   useOrgEnvelopes: () => managed,
   useMoveKey: () => ({ mutate: vi.fn(), isPending: false, isSuccess: false }),
+  useSubjectTelemetry: () => ({
+    isPending: false,
+    data: { available: true, by_reason: [], last_blocks: [], taken_at: '' },
+  }),
 }));
 
 describe('Initiative', () => {

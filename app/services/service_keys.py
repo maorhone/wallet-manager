@@ -1,6 +1,7 @@
 """Service keys: synchronous secret delivery, transactional audit and fixed deletion targets."""
 
 import json
+from datetime import timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,7 @@ from app.models import (
     ServiceKey,
 )
 from app.permissions import AI_TEAM, can_manage_service_keys, can_view_service_keys
+from app.services import blocks
 from app.services.spend import Spend
 from app.services.validation import (
     check_limit,
@@ -292,6 +294,42 @@ async def list_keys(db, principal, settings, clock, owner_kind, owner_id):
             for k in keys
         ],
         "spend_taken_at": spend.taken_at,
+    }
+
+
+async def telemetry(db, principal, reader, clock, owner_kind, owner_id) -> dict:
+    """D-060/D-063: classified failures of the subject's own keys (last 7 days, no content).
+
+    Same visibility as the keys list. ``available`` is False when the failure log cannot be read:
+    the screen then says so instead of implying a healthy service.
+    """
+    await can_view_service_keys(db, principal, owner_kind, owner_id)
+    hashes = list(
+        await db.scalars(
+            select(ServiceKey.litellm_token_hash).where(
+                ServiceKey.owner_kind == owner_kind,
+                ServiceKey.owner_id == owner_id,
+                ServiceKey.litellm_token_hash.is_not(None),
+            )
+        )
+    )
+    out = {"available": False, "by_reason": [], "last_blocks": [], "taken_at": clock.now()}
+    if reader is None:
+        return out
+    if not hashes:
+        return out | {"available": True}
+    now = clock.now()
+    try:
+        rows = await reader.failed_requests(
+            now - timedelta(days=7), now + timedelta(minutes=1), key_hashes=hashes, limit=500
+        )
+    except Exception:  # telemetry down: say so (D-060)
+        return out
+    by_reason, _ = blocks.aggregate(rows)
+    return out | {
+        "available": True,
+        "by_reason": by_reason,
+        "last_blocks": [blocks.describe(r) for r in rows[:10]],
     }
 
 
