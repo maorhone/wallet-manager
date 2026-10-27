@@ -1158,3 +1158,7 @@ Tests: tests/api/test_review_r15.py, 2 migration tests in tests/db/test_org_hier
 
 ## fix-review-p5-r16 (27/10)
 Done: B1a1 blocker (transfer fence/settle now fail closed without a spend reader; tests that settle transfers pass a reader), B3 major (new `values_with_transfers` merges transfer audits + compensation into historical system/employee/group totals). Tests: tests/api/test_review_r16.py. Targeted only (5/6 runs); no full run, e2e not run.
+
+## fix-review-p5-r17 (27/10)
+Groups: (1) money commitments: B1b initiative funding uses `group_committed` (spend-aware, fresh spend; cached snapshot only when no LiteLLM DB is configured); B1a1 uncertain destination writes (attempted, outcome unknown) are republished with the restored value (`restore-target` write) when late source spend cancels a transfer. (2) displays: B3 overview total adds descendant PMO grants once (`rollup_total`); B3 rate card allows one currency only; F1 `/systems/mine` also lists systems delegated to a section the caller heads (Initiative page reads it; `/initiatives` stays personal, an existing test pins that).
+Tests: tests/api/test_review_r16.py (r17 tests). Targeted only (4/15); full run not done (phase-end mode). e2e not run. One load flake quarantined (test_r16_transfer_stays_pending_without_reader, passes alone).
