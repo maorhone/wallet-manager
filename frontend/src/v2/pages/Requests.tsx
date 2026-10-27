@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   useDecideRequest,
   useRequestDetail,
@@ -39,6 +39,14 @@ export function approvalBlocked(
   return !(value > 0);
 }
 
+/** The key of the decision being sent: reused while the same decision is retried. */
+export function decisionKey(
+  prev: { sig: string; key: string } | null,
+  sig: string,
+): { sig: string; key: string } {
+  return prev?.sig === sig ? prev : { sig, key: crypto.randomUUID() };
+}
+
 function Detail({ id, canAct }: { id: number; canAct: boolean }) {
   const detail = useRequestDetail(id);
   const decide = useDecideRequest();
@@ -47,6 +55,9 @@ function Detail({ id, canAct }: { id: number; canAct: boolean }) {
   const [parallel, setParallel] = useState('');
   const [rpm, setRpm] = useState('');
   const [tpm, setTpm] = useState('');
+  // One key per distinct decision: a retry after a lost response reuses it (the server replays
+  // the first result, so a forward never advances twice); a confirmed success renews it.
+  const sent = useRef<{ sig: string; key: string } | null>(null);
   if (detail.isPending) return <p role="status">{he.loading}</p>;
   // After forwarding, the request may leave this user's scope and the refetch 404s.
   if (decide.isSuccess && (detail.error || !detail.data)) return <p role="status">{s.decided}</p>;
@@ -133,8 +144,8 @@ function Detail({ id, canAct }: { id: number; canAct: boolean }) {
               key={d}
               type="button"
               disabled={decide.isPending || approvalBlocked(d, r.amount, amount)}
-              onClick={() =>
-                decide.mutate({
+              onClick={() => {
+                const vars = {
                   id: r.id,
                   decision: d,
                   comment,
@@ -144,8 +155,14 @@ function Detail({ id, canAct }: { id: number; canAct: boolean }) {
                     ...(rpm !== '' && { rpmLimit: Number(rpm) }),
                     modelTpmLimits: parseTpm(tpm),
                   }),
-                })
-              }
+                };
+                const sig = JSON.stringify([r.status, vars]);
+                sent.current = decisionKey(sent.current, sig);
+                decide.mutate(
+                  { ...vars, key: sent.current.key },
+                  { onSuccess: () => (sent.current = null) },
+                );
+              }}
             >
               {s[d as 'approve' | 'reject' | 'forward' | 'apply']}
             </button>

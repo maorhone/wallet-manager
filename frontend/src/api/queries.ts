@@ -804,6 +804,7 @@ export const useDecideRequest = () => {
       maxParallel?: number;
       rpmLimit?: number;
       modelTpmLimits?: Record<string, number>;
+      key: string; // caller-owned idempotency key, kept across retries of one decision
     }) =>
       apiPost(
         `/requests/${v.id}/decide`,
@@ -815,7 +816,7 @@ export const useDecideRequest = () => {
           rpm_limit: v.rpmLimit,
           model_tpm_limits: v.modelTpmLimits,
         },
-        { reason: 'טיפול בבקשה' },
+        { reason: 'טיפול בבקשה', idempotencyKey: v.key },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['requests'] }),
   });
