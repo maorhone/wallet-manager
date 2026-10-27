@@ -24,20 +24,20 @@ type Outcome = {
 function Table({
   rows,
   kind,
-  orgId,
+  allocate,
   reason,
   outcomes,
   onSaved,
 }: {
   rows: OrgEnvelopeRow[];
   kind: 'department' | 'system';
-  orgId: number;
+  // Owned by the page, so a save still reports its outcome after a tab switch unmounts the table.
+  allocate: ReturnType<typeof useOrgAllocate>;
   reason: string;
   // Held above the tabs, so switching tabs neither drops a pending write nor its poller (D-071).
   outcomes: Outcome[];
   onSaved: (o: Outcome) => void;
 }) {
-  const allocate = useOrgAllocate(orgId);
   const [edit, setEdit] = useState<Record<number, string>>({});
   if (!rows.length) return <p className="v2-muted">{s.none}</p>;
   return (
@@ -123,6 +123,7 @@ export default function OrgAllocation({
 }) {
   const env = useOrgEnvelopes(organizationId);
   const create = useCreateOrganization();
+  const allocate = useOrgAllocate(organizationId);
   const [tab, setTab] = useState<'depts' | 'systems'>('depts');
   const [reason, setReason] = useState('');
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
@@ -165,7 +166,7 @@ export default function OrgAllocation({
             key="department"
             rows={departments.rows}
             kind="department"
-            orgId={organizationId}
+            allocate={allocate}
             reason={reason}
             outcomes={outcomes.filter((o) => o.kind === 'department')}
             onSaved={(o) => setOutcomes((all) => [...all, o])}
@@ -175,7 +176,7 @@ export default function OrgAllocation({
             key="system"
             rows={systems.rows}
             kind="system"
-            orgId={organizationId}
+            allocate={allocate}
             reason={reason}
             outcomes={outcomes.filter((o) => o.kind === 'system')}
             onSaved={(o) => setOutcomes((all) => [...all, o])}
