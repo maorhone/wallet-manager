@@ -55,3 +55,14 @@ async def test_r16_history_includes_transfers(provisioned):
             live = {id_: {field: Decimal(now)}}
             assert (await values_with_transfers(s, kind, live, before))[id_][field] == was
             assert (await values_with_transfers(s, kind, live, after))[id_][field] == now
+
+
+# review-p5-r16 blocker B1b: consumed credit (e.g. a revoked key) stays committed for new funding
+async def test_r17_initiative_refused_after_group_consumption(login_wm, fake_engine):
+    from tests.api.test_review_r7 import _log_at
+
+    await _log_at(fake_engine, 1, "A1", DANI, 10**8, datetime.now(UTC))
+    head = await login_wm("dana")
+    body = {"name": "Pilot", "owner_upn": DANI, "budget": 1000}
+    r = await send(head, "POST", "/groups/1/initiatives", body)
+    assert r.status_code == 422 and r.json()["code"] == "PARENT_OVERALLOCATED", r.text

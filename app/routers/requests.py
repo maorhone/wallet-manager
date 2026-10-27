@@ -34,5 +34,8 @@ async def get(request_id: int, principal: CurrentPrincipal, db: Db):
 async def decide(
     request_id: int, body: DecideIn, ctx: Write, principal: CurrentPrincipal, req: Request
 ):
-    entities = await requests.decide(ctx, principal, req.app.state.directory, request_id, body)
+    state = req.app.state
+    entities = await requests.decide(
+        ctx, principal, state.directory, request_id, body, state.litellm_reader, state.clock
+    )
     return await write_response(ctx, entities)

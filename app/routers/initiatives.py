@@ -9,8 +9,14 @@ router = APIRouter()
 
 
 @router.post("/groups/{group_id}/initiatives")
-async def create(group_id: int, body: InitiativeIn, ctx: Write, principal: CurrentPrincipal):
-    return await write_response(ctx, await initiatives.create(ctx, principal, group_id, body))
+async def create(
+    group_id: int, body: InitiativeIn, ctx: Write, principal: CurrentPrincipal, request: Request
+):
+    state = request.app.state
+    entities = await initiatives.create(
+        ctx, principal, group_id, body, state.litellm_reader, state.clock
+    )
+    return await write_response(ctx, entities)
 
 
 @router.get("/groups/{group_id}/initiatives")

@@ -265,7 +265,13 @@ async def get(db, principal: Principal, request_id: int) -> dict:
 
 
 async def decide(
-    ctx: WriteContext, principal: Principal, directory: Directory, request_id: int, body
+    ctx: WriteContext,
+    principal: Principal,
+    directory: Directory,
+    request_id: int,
+    body,
+    reader=None,
+    clock=None,
 ) -> list[dict]:
     req = await ctx.db.get(Request, request_id)
     if req is None:
@@ -313,7 +319,7 @@ async def decide(
             await _apply_credits(ctx, principal, directory, req, group, Decimal(amount))
             req.status = "pending_apply"
         else:
-            await _apply_initiative(ctx, principal, req, group, Decimal(amount))
+            await _apply_initiative(ctx, principal, req, group, Decimal(amount), reader, clock)
             req.status = "applied"
         req.amount = amount
     else:
@@ -416,7 +422,9 @@ async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount
     return "pending_apply"
 
 
-async def _apply_initiative(ctx, principal, req: Request, group: Grp, amount: Decimal) -> None:
+async def _apply_initiative(
+    ctx, principal, req: Request, group: Grp, amount: Decimal, reader=None, clock=None
+) -> None:
     p = req.payload
     try:
         body = InitiativeIn(
@@ -425,7 +433,7 @@ async def _apply_initiative(ctx, principal, req: Request, group: Grp, amount: De
         )  # fmt: skip
     except ValidationError as exc:
         raise invalid_request("Invalid initiative details", {"errors": str(exc)}) from None
-    await initiatives.create(ctx, principal, group.id, body)
+    await initiatives.create(ctx, principal, group.id, body, reader, clock)
 
 
 async def _decide_throughput(ctx, directory, req: Request, group: Grp, role, body):
