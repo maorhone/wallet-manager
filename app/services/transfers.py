@@ -388,8 +388,9 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
             .with_for_update()
         )
     )
-    if any(w.status != "pending" for w in held):
-        return False  # the destination already applied: nothing safe to undo here
+    if any(w.status not in ("pending", "failed") for w in held):
+        return False  # the destination already applied: nothing safe to undo here (a permanently
+        # failed write published nothing, so it can be cancelled with its source restored)
     rows = []
     for (kind, ident), delta in zip(ends, (transfer.amount, -transfer.amount), strict=True):
         row = await db.get(
@@ -481,12 +482,16 @@ async def compensate_failed_source(db, write: LitellmWrite) -> None:
         )
 
 
-async def _source_overspent(db, reader, transfer: Transfer, now: datetime) -> bool:
+async def _source_overspent(
+    db, reader, transfer: Transfer, now: datetime, tz: str = "UTC"
+) -> bool:
     kind, ident = transfer.source_kind, transfer.source_id
     row = await db.get(_MODEL[kind], ident if kind == "employee" else int(ident))
     total = getattr(row, {"employee": "base_cap", "group": "base_budget"}.get(kind, "budget"))
     spend = await fresh_spend(db, reader, now)  # SpendUnavailable propagates: caller holds
     total -= await unsettled_incoming(db, [kind], ident)  # pending credit never masks spend
+    if kind == "group":  # B1a1: consumption plus outstanding unspent allocations, as in planning
+        return await group_committed(db, spend, row, tz=tz) > total
     return spend.used(kind, ident) > total
 
 
@@ -639,7 +644,7 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
         )
     )
     for other in [transfer, *siblings]:
-        if await _source_overspent(db, reader, other, now):
+        if await _source_overspent(db, reader, other, now, settings.app_timezone):
             ok = False
             if other.state == "pending":
                 await _release_cancelled(db, settings, other)
@@ -710,7 +715,7 @@ async def settle(db, settings, reader, now: datetime, write_id: int | None = Non
             continue
         if transfer.first_write_id and len(ids) == 1 and reader is not None:
             try:
-                if await _source_overspent(db, reader, transfer, now):
+                if await _source_overspent(db, reader, transfer, now, settings.app_timezone):
                     await _release_cancelled(db, settings, transfer)
                     continue
             except SpendUnavailable:
