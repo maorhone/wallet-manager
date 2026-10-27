@@ -684,7 +684,8 @@ async def _retire_superseded(db, write_id: int) -> list[int]:
             if wid == other.first_write_id:
                 continue  # the source write is its own; only destination writes are superseded
             held = await db.get(LitellmWrite, wid)
-            if held is not None and held.status == "pending":
+            # a permanently failed destination write is superseded too: its credit is published
+            if held is not None and held.status in ("pending", "failed"):
                 held.status, held.last_error = "applied", f"superseded by write {write_id}"
                 retired.append(other.id)
     return retired

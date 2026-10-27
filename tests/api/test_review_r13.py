@@ -2,9 +2,13 @@
 
 from sqlalchemy import select
 
-from app.models import Grp, ServiceKey
-from tests.api.test_review_money import _log
+from app.litellm_client import LiteLLMReader
+from app.litellm_client.errors import LiteLLMPermanentError
+from app.models import Grp, LitellmWrite, ServiceKey, Transfer
+from app.outbox.worker import drain
+from tests.api.test_review_money import DANI, YAEL, _log
 from tests.api.test_review_r10 import _quiet_group
+from tests.api.test_transfers import move, send
 
 REP_HEADERS = {"X-Change-Reason": "split"}
 
@@ -40,3 +44,30 @@ async def test_r13_split_cut_refused_without_spend_source(login, provisioned):
     rep = await login("rep", litellm_database_url=None)
     r = await _split(rep, [{"group_id": 1, "base": 20}])
     assert r.status_code == 503, r.text
+
+
+# review-p5-r12 major B1a1: a failed destination write is settled by the sibling that published it
+async def test_r13_failed_destination_write_superseded_by_sibling(
+    login_wm, provisioned, litellm, prov_settings, ro_engine
+):
+    head = await login_wm("dana")
+    for amount in (10, 20):
+        assert (await send(head, "POST", "/transfers", move(amount, DANI, YAEL))).status_code == 200
+    real, calls = litellm.team_member_update, []
+
+    async def flaky(body):
+        if body.user_id == YAEL:
+            calls.append(body)
+            if len(calls) == 1:
+                raise LiteLLMPermanentError(400, "injected")
+        return await real(body)
+
+    litellm.team_member_update = flaky
+    reader = LiteLLMReader(ro_engine)
+    await drain(provisioned, litellm, prov_settings, reader)
+    litellm.team_member_update = real
+    await drain(provisioned, litellm, prov_settings, reader)
+    async with provisioned() as s:
+        assert set(await s.scalars(select(Transfer.state))) == {"applied"}
+        statuses = set(await s.scalars(select(LitellmWrite.status)))
+        assert "failed" not in statuses
