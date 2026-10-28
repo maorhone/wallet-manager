@@ -106,7 +106,7 @@ async def test_review_system_update_builds_system_team(provisioned, prov_setting
 
 # review-p5 blocker 4: source reduction first; destination write waits for it; failure rolls back
 async def test_review_transfer_partial_failure_compensates(
-    login_wm, provisioned, litellm, prov_settings, fake_app
+    login_wm, provisioned, litellm, prov_settings, fake_app, ro_engine
 ):
     head = await login_wm("dana")
     fake_app.state.fake.failures["/team/member_update"] = [400, 1]
@@ -118,7 +118,7 @@ async def test_review_transfer_partial_failure_compensates(
         source_write, target_write = [await s.get(LitellmWrite, i) for i in row.write_ids]
         assert (source_write.entity_id, target_write.entity_id) == (DANI, YAEL)
         assert target_write.depends_on == source_write.id
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     assert (await head.get(f"/transfers/{tid}")).json()["status"] == "failed"
     async with provisioned() as s:
         assert (await s.get(Employee, DANI)).base_cap == 15000
