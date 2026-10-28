@@ -9,11 +9,11 @@ from tests.api.test_nested_group_budget import child_of
 from tests.api.test_requests import submit
 from tests.api.test_review_money import DANI
 from tests.api.test_review_r7 import _log_at
-from tests.helpers.commit import caps
-from tests.helpers.commit import consume as _consume
 from tests.api.test_service_keys import body as key_body
 from tests.api.test_service_keys import post as post_key
 from tests.api.test_transfers import send
+from tests.helpers.commit import caps
+from tests.helpers.commit import consume as _consume
 from tests.helpers.grants import new_grant, new_share
 
 A1 = 1  # base 250000, factor 1; three members at 15000 (45000 of caps)
