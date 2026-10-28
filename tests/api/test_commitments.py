@@ -9,7 +9,8 @@ from tests.api.test_nested_group_budget import child_of
 from tests.api.test_requests import submit
 from tests.api.test_review_money import DANI
 from tests.api.test_review_r7 import _log_at
-from tests.api.test_review_r18 import _consume, caps
+from tests.helpers.commit import caps
+from tests.helpers.commit import consume as _consume
 from tests.api.test_service_keys import body as key_body
 from tests.api.test_service_keys import post as post_key
 from tests.api.test_transfers import send
