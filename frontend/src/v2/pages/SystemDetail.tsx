@@ -33,9 +33,9 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
   const [moved, setMoved] = useState<{ keyId: number; target: number; applied: boolean } | null>(
     null,
   );
-  if (keys.isPending) return <p role="status">{he.loading}</p>;
-  if (keys.error || !keys.data) return <ErrorState error={keys.error} onRetry={keys.refetch} />;
-  const items = keys.data.items;
+  // The summary (budget, consumption, funding) comes with the inventory and never waits for the
+  // key list: a caller who may not read keys still sees it (review-p5-r17 F1).
+  const items = keys.data?.items ?? [];
   const used = subject.used ?? items.reduce((sum, k) => sum + k.used, 0);
   const movable = items.filter((k) => k.status === 'active');
   const keyId = movable.some((k) => String(k.id) === chosen) ? Number(chosen) : movable[0]?.id;
@@ -73,7 +73,11 @@ export function SystemDetail({ subject, canMove }: { subject: DetailSubject; can
         )}
       </dl>
       <h3>{s.keys}</h3>
-      {items.length ? (
+      {keys.isPending ? (
+        <p role="status">{he.loading}</p>
+      ) : keys.error || !keys.data ? (
+        <ErrorState error={keys.error} onRetry={keys.refetch} />
+      ) : items.length ? (
         <table>
           <thead>
             <tr>

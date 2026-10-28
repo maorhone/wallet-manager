@@ -1151,6 +1151,8 @@ export const useOrgAllocate = (orgId: number) => {
       budget: number;
       budgetPeriod?: string;
       reason: string;
+      /** Caller-owned: kept across retries of the same allocation, renewed after success. */
+      key: string;
     }) => {
       const path =
         v.kind === 'department'
@@ -1160,7 +1162,7 @@ export const useOrgAllocate = (orgId: number) => {
         v.kind === 'department'
           ? { budget: v.budget, budget_period: v.budgetPeriod ?? '1mo' }
           : { budget: v.budget };
-      const write = { reason: v.reason, idempotencyKey: crypto.randomUUID() };
+      const write = { reason: v.reason, idempotencyKey: v.key };
       // The key is kept so the same write can be replayed to read its synchronization state.
       return apiPut<WriteResponse>(path, body, write).then((result) => ({
         result,

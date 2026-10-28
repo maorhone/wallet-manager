@@ -3,9 +3,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Initiative from './Initiative';
+import { SystemDetail } from './SystemDetail';
 
 const h = vi.hoisted(() => ({
   keys: [] as unknown[],
+  keysError: null as Error | null,
   mutate: vi.fn(),
   initiatives: [] as unknown[],
   mine: [] as unknown[],
@@ -14,7 +16,10 @@ const h = vi.hoisted(() => ({
 vi.mock('../../api/queries', () => ({
   useMyInitiatives: () => ({ isPending: false, data: { items: h.mine } }),
   useMySystems: () => ({ isPending: false, data: { items: [] } }),
-  useServiceKeys: () => ({ isPending: false, data: { items: h.keys, spend_taken_at: null } }),
+  useServiceKeys: () =>
+    h.keysError
+      ? { isPending: false, error: h.keysError, data: undefined, refetch: vi.fn() }
+      : { isPending: false, data: { items: h.keys, spend_taken_at: null } },
   useOrgEnvelopes: () => ({
     isPending: false,
     data: { systems: { rows: [] }, initiatives: h.initiatives },
@@ -22,6 +27,8 @@ vi.mock('../../api/queries', () => ({
   useSubjectTelemetry: () => ({ isPending: false, data: h.health }),
   useMoveKey: () => ({ mutate: h.mutate, isPending: false, isError: false }),
 }));
+
+vi.mock('../../components/ErrorState', () => ({ ErrorState: () => <p role="alert">error</p> }));
 
 const key = (id: number, alias: string, status = 'active') => ({
   id, alias, status, used: 0, max_parallel: 1, rpm_limit: 1, sync_status: 'applied',
@@ -47,9 +54,23 @@ describe('SystemDetail / Initiative (review-p5-r6 majors)', () => {
     h.initiatives = [ini];
     h.mine = [];
     h.health = { available: true, by_reason: [], last_blocks: [], taken_at: '' };
+    h.keysError = null;
     h.mutate.mockReset();
   });
   afterEach(cleanup);
+
+  // review-p5-r17 major F1: a caller who may not read keys still sees the authorized summary
+  it('keeps the budget summary visible when the key list is refused', () => {
+    h.keysError = new Error('forbidden');
+    render(
+      <SystemDetail
+        subject={{ kind: 'system', id: 9, name: 'Billing', budget: 1000, used: 400 }}
+        canMove={false}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Billing' })).toBeTruthy();
+    expect(screen.getByText('600')).toBeTruthy();
+  });
 
   // review-p5-r12 major F1: the owner sees classified failures, or that they cannot be read
   it('shows classified service failures and an explicit unavailable state', () => {

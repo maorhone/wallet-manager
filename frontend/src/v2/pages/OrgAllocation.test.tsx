@@ -45,6 +45,7 @@ describe('OrgAllocation', () => {
         budget: 700,
         budgetPeriod: '7d',
         reason: 'תכנון',
+        key: expect.any(String),
       },
       expect.anything(),
     );
@@ -52,10 +53,27 @@ describe('OrgAllocation', () => {
     fireEvent.change(screen.getByLabelText('הקצאה: מערכת ארגונית'), { target: { value: '150' } });
     fireEvent.click(screen.getByRole('button', { name: 'שמירה' }));
     expect(mutate).toHaveBeenCalledWith(
-      { kind: 'system', id: 3, budget: 150, reason: 'תכנון' },
+      { kind: 'system', id: 3, budget: 150, reason: 'תכנון', key: expect.any(String) },
       expect.anything(),
     );
     expect(screen.getByText('ארגון חדש')).toBeTruthy();
+  });
+
+  // review-p5-r17 major F2: a retry after a lost response reuses the key, a new amount does not
+  it('keeps the idempotency key across retries of the same allocation', () => {
+    mutate.mockClear();
+    render(<OrgAllocation organizationId={1} isAdmin />);
+    fireEvent.change(screen.getByLabelText('סיבת השינוי'), { target: { value: 'תכנון' } });
+    const input = screen.getByLabelText('הקצאה: מחלקה א');
+    const save = () => fireEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    fireEvent.change(input, { target: { value: '700' } });
+    save();
+    save();
+    fireEvent.change(input, { target: { value: '800' } });
+    save();
+    const keys = mutate.mock.calls.map((c) => c[0].key);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
   });
 
   it('does not carry a department draft into a system with the same id', () => {

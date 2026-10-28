@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type MutableRefObject } from 'react';
 import {
   useCreateOrganization,
   useOrgAllocate,
@@ -28,6 +28,7 @@ function Table({
   reason,
   outcomes,
   onSaved,
+  sent,
 }: {
   rows: OrgEnvelopeRow[];
   kind: 'department' | 'system';
@@ -37,6 +38,9 @@ function Table({
   // Held above the tabs, so switching tabs neither drops a pending write nor its poller (D-071).
   outcomes: Outcome[];
   onSaved: (o: Outcome) => void;
+  // Idempotency key per envelope row and payload, held above the tabs: a retry after a lost
+  // response replays the first write instead of executing it again (review-p5-r17 F2).
+  sent: MutableRefObject<Map<string, { sig: string; key: string }>>;
 }) {
   const [edit, setEdit] = useState<Record<number, string>>({});
   if (!rows.length) return <p className="v2-muted">{s.none}</p>;
@@ -72,18 +76,25 @@ function Table({
                 <button
                   type="button"
                   disabled={!reason || edit[r.id] === undefined || allocate.isPending}
-                  onClick={() =>
+                  onClick={() => {
+                    const v = {
+                      kind,
+                      id: r.id,
+                      budget: Number(edit[r.id]),
+                      budgetPeriod: r.budget_period,
+                      reason,
+                    };
+                    const slot = `${kind}:${r.id}`;
+                    const sig = JSON.stringify(v);
+                    const prior = sent.current.get(slot);
+                    const key = prior?.sig === sig ? prior.key : crypto.randomUUID();
+                    sent.current.set(slot, { sig, key });
                     allocate.mutate(
-                      {
-                        kind,
-                        id: r.id,
-                        budget: Number(edit[r.id]),
-                        budgetPeriod: r.budget_period,
-                        reason,
-                      },
+                      { ...v, key },
                       {
                         // Reconcile: after a persisted write the server value replaces the draft.
                         onSuccess: ({ result, replay }) => {
+                          sent.current.delete(slot);
                           onSaved({ kind, name: r.name, result, replay });
                           setEdit((d) =>
                             Object.fromEntries(
@@ -92,8 +103,8 @@ function Table({
                           );
                         },
                       },
-                    )
-                  }
+                    );
+                  }}
                 >
                   {s.save}
                 </button>
@@ -130,6 +141,7 @@ export default function OrgAllocation({
   const [newName, setNewName] = useState('');
   // One key per distinct organization submission: a retry replays, a new name does not.
   const sent = useRef<{ name: string; key: string } | null>(null);
+  const allocKeys = useRef(new Map<string, { sig: string; key: string }>());
   if (env.isPending) return <p role="status">{he.loading}</p>;
   if (env.error || !env.data) return <ErrorState error={env.error} onRetry={env.refetch} />;
   const { departments, systems } = env.data;
@@ -167,6 +179,7 @@ export default function OrgAllocation({
             rows={departments.rows}
             kind="department"
             allocate={allocate}
+            sent={allocKeys}
             reason={reason}
             outcomes={outcomes.filter((o) => o.kind === 'department')}
             onSaved={(o) => setOutcomes((all) => [...all, o])}
@@ -177,6 +190,7 @@ export default function OrgAllocation({
             rows={systems.rows}
             kind="system"
             allocate={allocate}
+            sent={allocKeys}
             reason={reason}
             outcomes={outcomes.filter((o) => o.kind === 'system')}
             onSaved={(o) => setOutcomes((all) => [...all, o])}
