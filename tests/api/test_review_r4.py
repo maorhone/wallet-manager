@@ -60,7 +60,7 @@ async def test_r4_group_allocation_excludes_pending_incoming(login_wm, provision
 
 # review-p5-r3 blocker 1 (transfers:369): compensation never over-allocates the new parent
 async def test_r4_compensation_refuses_to_overfill_current_parent(
-    login_wm, provisioned, litellm, prov_settings, fake_app
+    login_wm, provisioned, litellm, prov_settings, fake_app, ro_engine
 ):
     child = await _child(provisioned, base=100, cap=50)
     iid = await _initiative(provisioned, budget=0)
@@ -79,7 +79,7 @@ async def test_r4_compensation_refuses_to_overfill_current_parent(
         await s.flush()
         (await s.get(Grp, child)).parent_group_id = parent.id
         await s.commit()
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     async with provisioned() as s:
         assert (await s.get(Grp, child)).base_budget == 50  # no silent over-allocation
         assert await s.scalar(select(Transfer.state)) == "failed"

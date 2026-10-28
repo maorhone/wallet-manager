@@ -68,6 +68,8 @@ def _aggregate(rows, period: str, maps: tuple):
             scopes = [("group", str(group.id)), ("department", str(group.department_id))]
             if r.user and member_group.get(r.user) == group.id:  # membership spend only
                 scopes.append(("employee", r.user))
+            if r.user:  # also for members who moved on: their spend stays in this group's total
+                scopes.append(("member_group", f"{group.id}:{r.user}"))
         else:
             system = systems.get(r.team_id)
             scopes = [("system", str(system.id))] if system is not None else []

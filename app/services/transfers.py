@@ -18,7 +18,7 @@ live in this module and change balances only here.
   are aggregate SQL over the full history.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -371,26 +371,36 @@ async def _undo(db, transfer: Transfer, reason: str, reader=None, tz: str = "UTC
 
 
 async def _overallocates_parent(db, transfer, rows, parents, reader=None, tz="UTC") -> bool:
-    """Net effect of the restore on each current parent: both ends, whatever their kind."""
-    net: dict[int, Decimal] = {}
+    """Would the restore overfill a current parent? Recomputed, not added (not linear).
+
+    Both ends are applied as proposed values (cap, child budget, initiative budget) and every
+    affected parent's resulting commitment is recomputed with FRESH spend. An unreadable reading
+    raises ``SpendUnavailable``: the caller keeps the transfer retryable, it is never "overfull".
+    """
+    changes: dict[int, commitments.Change] = {}
+    raised: set[int] = set()
     for row, field, new in rows:
         if isinstance(row, Grp):
-            pid = parents.get(str(row.id))
-        elif isinstance(row, Employee | Initiative):
-            pid = row.group_id
+            pid, patch = parents.get(str(row.id)), {"child_budgets": {row.id: new}}
+        elif isinstance(row, Employee):
+            pid, patch = row.group_id, {"caps": {row.upn: new}}
+        elif isinstance(row, Initiative):
+            pid, patch = row.group_id, {"initiative_budgets": {row.id: new}}
         else:
             continue  # internal systems are carved from the department, not a group
-        if pid is not None:
-            net[pid] = net.get(pid, ZERO) + new - getattr(row, field)
-    spend = None
-    for pid, delta in net.items():
-        if delta <= 0:
+        if pid is None:
             continue
+        if new > getattr(row, field):
+            raised.add(pid)
+        cur = changes.get(pid, commitments.Change())
+        changes[pid] = replace(cur, **{k: {**getattr(cur, k), **v} for k, v in patch.items()})
+    spend = None
+    for pid in sorted(raised):
+        if spend is None:
+            spend = await fresh_spend(db, reader, datetime.now(ZoneInfo(tz)))
         parent = await db.get(Grp, pid, populate_existing=True)
         try:
-            if spend is None:  # fresh spend, read once; unreadable = cannot prove it fits
-                spend = await commitments.read_spend(db, reader, None, tz)
-            await commitments.check(db, spend, parent, commitments.Change(credit=delta), tz)
+            await commitments.check(db, spend, parent, changes[pid], tz, not_worse=True)
         except ApiError:
             return True
     return False

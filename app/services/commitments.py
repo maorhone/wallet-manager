@@ -18,7 +18,7 @@ from sqlalchemy import select
 from app.db import LockKind
 from app.errors import ApiError
 from app.models import Employee, Grant, GrantShare, Grp, Initiative, ServiceKey
-from app.services.attribution import ShareSpan, attribute
+from app.services.attribution import ShareSpan
 from app.services.spend import Spend, SpendUnavailable, fresh_spend, month_bounds
 from app.services.validation import (
     check_sum,
@@ -146,12 +146,27 @@ def apply(rows: Rows, change: Change) -> Rows:
     )
 
 
+def pmo_funded(m: MemberRow) -> Decimal:
+    """The part of this window's spend above the base cap that grant shares funded.
+
+    A closed share keeps a CUMULATIVE stored usage (every period up to its closing), so it may
+    only account for what this window's overage can hold: min(left, used), never the stored
+    total. Active shares take min(left, amount). Earliest expiry first.
+    """
+    left, total = max(m.spend - m.cap, ZERO), ZERO
+    for s in sorted(m.shares, key=lambda s: (s.expires_at, s.id)):
+        take = min(left, s.used if s.used is not None else s.amount)
+        total += take
+        left -= take
+    return total
+
+
 def compute(rows: Rows, with_shares: bool = False) -> Snapshot:
     """Pure arithmetic. ``with_shares`` adds active grant shares to each allocation (display)."""
     pmo = ZERO
     caps = ZERO
     for m in rows.members:
-        pmo += sum(attribute(m.spend, m.cap, m.shares).values(), ZERO)
+        pmo += pmo_funded(m)
         if not m.left:
             extra = ZERO
             if with_shares:
@@ -189,6 +204,17 @@ async def load_rows(db, group: Grp, spend: Spend, tz: str) -> Rows:
         )
         for e in await db.scalars(select(Employee).where(Employee.group_id == group.id))
     )  # fmt: skip
+    # Members who moved out keep their PMO-funded spend in THIS group's spend: their shares are
+    # closed with the move, so attribute them from the per-group member spend (no allocation).
+    here = {m.upn for m in members}
+    for upn in sorted(set(shares) - here):
+        emp = await db.get(Employee, upn)
+        members += (
+            MemberRow(
+                upn, emp.base_cap if emp else ZERO, spend.used("member_group", f"{group.id}:{upn}"),
+                True, tuple(shares[upn]),
+            ),
+        )  # fmt: skip
     keys = tuple(
         KeyRow(k.id, k.max_budget or ZERO, k.retired_budget, spend.used("service_key", k.id))
         for k in await db.scalars(
@@ -263,9 +289,17 @@ async def _is_noop(db, group: Grp, c: Change) -> bool:
     return kids == c.child_budgets and not c.remove_children
 
 
-async def check(db, spend: Spend, group: Grp, change: Change, tz: str, rows=None) -> None:
-    """The bound itself, with spend already read. Raises the over-allocation error."""
+async def check(
+    db, spend: Spend, group: Grp, change: Change, tz: str, rows=None, not_worse=False
+) -> None:
+    """The bound itself, with spend already read. Raises the over-allocation error.
+
+    ``not_worse``: a restore of credit that already existed may not make an already overfull
+    group fuller, but is allowed when it does not raise the commitment.
+    """
     snap = await snapshot(db, group, spend, tz=tz, change=change)
+    if not_worse and snap.total + change.credit <= (await snapshot(db, group, spend, tz=tz)).total:
+        return
     base = group.base_budget if change.base is None else change.base
     if err := check_sum(
         snap.total + change.credit,

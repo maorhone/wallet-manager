@@ -67,39 +67,41 @@ async def test_r3_initiative_destination_is_fenced(
 
 # review-p5-r2 blockers 4 and 9 (transfers:321, worker:161): compensation exactly once
 async def test_r3_compensation_is_idempotent_for_initiative(
-    login_wm, provisioned, litellm, prov_settings, fake_app
+    login_wm, provisioned, litellm, prov_settings, fake_app, ro_engine
 ):
     iid = await _initiative(provisioned, budget=0, owner=YAEL)
     head, admin = await login_wm("dana"), await login_wm("admin")
     fake_app.state.fake.failures["/team/member_update"] = [400, 2]
     r = await send(head, "POST", "/transfers", move(50, DANI, str(iid), ("employee", "initiative")))
     assert r.status_code == 200, r.text
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     async with provisioned() as s:
         source_write = await s.scalar(
             select(LitellmWrite.id).where(LitellmWrite.status == "failed")
         )
         assert (await s.get(Initiative, iid)).budget == 0
     assert (await send(admin, "POST", f"/outbox/{source_write}/retry")).status_code == 200
-    await drain(provisioned, litellm, prov_settings)  # fails again: must not reverse twice
+    await drain(
+        provisioned, litellm, prov_settings, LiteLLMReader(ro_engine)
+    )  # fails again: must not reverse twice
     async with provisioned() as s:
         assert (await s.get(Employee, DANI)).base_cap == 15000
         assert (await s.get(Initiative, iid)).budget == 0
 
 
 async def test_r3_two_concurrent_compensations_change_balances_once(
-    login_wm, provisioned, litellm, prov_settings, fake_app
+    login_wm, provisioned, litellm, prov_settings, fake_app, ro_engine
 ):
     head = await login_wm("dana")
     fake_app.state.fake.failures["/team/member_update"] = [400, 1]
     assert (await send(head, "POST", "/transfers", move(500))).status_code == 200
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     assert await _caps(provisioned) == {DANI: 15000, YAEL: 15000}
 
     async def again():
         async with provisioned() as s:
             write = await s.scalar(select(LitellmWrite).where(LitellmWrite.status == "failed"))
-            await compensate_failed_source(s, write)
+            await compensate_failed_source(s, write, LiteLLMReader(ro_engine))
             await s.commit()
 
     await asyncio.gather(again(), again())
@@ -108,7 +110,7 @@ async def test_r3_two_concurrent_compensations_change_balances_once(
 
 # review-p5-r2 blocker 6 (transfers:311): no 500-row window
 async def test_r3_old_transfer_still_compensated_after_500_newer(
-    login_wm, provisioned, litellm, prov_settings, fake_app
+    login_wm, provisioned, litellm, prov_settings, fake_app, ro_engine
 ):
     head = await login_wm("dana")
     fake_app.state.fake.failures["/team/member_update"] = [400, 1]
@@ -122,7 +124,7 @@ async def test_r3_old_transfer_still_compensated_after_500_newer(
             for _ in range(501)
         )  # fmt: skip
         await s.commit()
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     assert await _caps(provisioned) == {DANI: 15000, YAEL: 15000}
 
 

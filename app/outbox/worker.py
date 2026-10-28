@@ -179,7 +179,17 @@ async def drain(
             except (LiteLLMPermanentError, DesiredUnavailable) as exc:
                 row.status, row.last_error = "failed", str(exc)
                 result.failed += 1
-                await compensate_failed_source(s, row, reader, settings.app_timezone)
+                try:
+                    await compensate_failed_source(s, row, reader, settings.app_timezone)
+                except SpendUnavailable:
+                    # compensation cannot be decided without fresh spend: stay retryable (the
+                    # permanent error repeats, compensation runs again), never "overfull"
+                    result.failed -= 1
+                    row.status, row.attempts = "pending", row.attempts + 1
+                    row.last_error = "compensation waits for a readable spend"
+                    await s.commit()
+                    result.stopped = True
+                    return result
             await s.execute(
                 update(Request)
                 .where(Request.application_write_id == row.id)
