@@ -105,22 +105,6 @@ async def key_allocated(db, owner_kind: str, owner_id: int) -> Decimal:
     )
 
 
-async def group_own_allocated(db, group) -> Decimal:
-    """Member caps plus service-key budgets (what a group carves for itself)."""
-    from sqlalchemy import func, select
-
-    from app.models import Employee
-
-    members = await db.scalar(
-        select(func.coalesce(func.sum(Employee.base_cap), 0)).where(
-            Employee.group_id == group.id,
-            Employee.status != "left",
-        )
-    )
-    initiatives = await initiative_allocated(db, group.id)
-    return members + initiatives + await key_allocated(db, "group", group.id)
-
-
 async def settled_budget(db, group, base: Decimal | None = None) -> Decimal:
     """Group base minus unsettled incoming credit: the only part the factor may multiply."""
     return (group.base_budget if base is None else base) - await pending_incoming(
@@ -141,41 +125,3 @@ async def initiative_allocated(db, group_id: int, exclude_id: int | None = None)
             Initiative.id != (exclude_id or 0),
         )
     )
-
-
-async def group_allocated(db, group) -> Decimal:
-    """D-055: a child group's base is carved from its parent, so it counts here once."""
-    from sqlalchemy import func, select
-
-    from app.models import Grp
-
-    children = await db.scalar(
-        select(func.coalesce(func.sum(Grp.base_budget), 0)).where(
-            Grp.parent_group_id == group.id, Grp.status != "archived"
-        )
-    )
-    return children + await group_own_allocated(db, group)
-
-
-async def check_group_tree(
-    db, dept, groups, bases: dict, pmo: Decimal, reserve: Decimal, rows=None
-) -> ApiError | None:
-    """Top-level bases + pools fit the department; each parent covers children + own caps."""
-    live = [g for g in groups if g.status != "archived"]
-    top = sum((bases[g.id] for g in live if g.parent_group_id is None), Decimal(0))
-    internal = await internal_allocated(db, dept.id)
-    if err := check_sum(top + pmo + reserve + internal, dept.budget, rows=rows):
-        return err
-    for parent in live:
-        kids = sum((bases[g.id] for g in live if g.parent_group_id == parent.id), Decimal(0))
-        # leaf groups too when cut: a cut may never release pending incoming or committed funding
-        if (kids or bases[parent.id] < parent.base_budget) and (
-            err := check_sum(
-                kids + await group_own_allocated(db, parent),
-                await settled_budget(db, parent, bases[parent.id]),
-                parent.overalloc_factor,
-                rows,
-            )
-        ):
-            return err
-    return None

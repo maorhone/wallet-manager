@@ -13,7 +13,7 @@ from app.outbox.worker import drain
 from app.services.production import system_committed
 from app.services.spend import Spend
 from app.services.transfers import lock_scope, transfer_status
-from app.services.validation import group_allocated
+from tests.helpers.commit import group_allocated
 from tests.api.test_review_money import DANI, YAEL, _child, _initiative
 from tests.api.test_transfers import A1, move, send
 

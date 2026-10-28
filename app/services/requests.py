@@ -30,10 +30,15 @@ from app.permissions import (
 from app.schemas.groups import MemberLimitsIn
 from app.schemas.initiatives import InitiativeIn
 from app.schemas.production import ProductionSystemPatch
-from app.services import initiatives, members, notifications, org_systems, production
+from app.services import (
+    commitments,
+    initiatives,
+    members,
+    notifications,
+    org_systems,
+    production,
+)
 from app.services.personal_values import OWNER_ROLE, authorize
-from app.services.transfers import fresh_group_committed
-from app.services.validation import check_sum, settled_budget
 from app.writes import WriteContext
 
 TYPES = ("credits", "initiative", "throughput")
@@ -363,11 +368,9 @@ async def _apply_credits(
     if employee is None or employee.status != "active" or employee.group_id != group.id:
         raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
     role = authorize(principal, employee, group, await target_tier(ctx.db, directory, employee.upn))
-    allocated = await fresh_group_committed(ctx, reader, clock, group)
-    if err := check_sum(
-        allocated + amount, await settled_budget(ctx.db, group), group.overalloc_factor
-    ):
-        raise err
+    await commitments.assert_fits(
+        ctx, reader, clock, group, commitments.Change(cap_increase={employee.upn: amount})
+    )
     before = {"base_cap": employee.base_cap}
     employee.base_cap += amount
     ctx.audit(
@@ -403,11 +406,9 @@ async def _apply_target_credits(
         row = owned
         if row.status != "active" or row.group_id != group.id:
             raise ApiError(409, "CONFLICT", "The target is no longer active in this section")
-        allocated = await fresh_group_committed(ctx, reader, clock, group)
-        if err := check_sum(
-            allocated + amount, await settled_budget(ctx.db, group), group.overalloc_factor
-        ):
-            raise err
+        await commitments.assert_fits(
+            ctx, reader, clock, group, commitments.Change(initiative_increase={row.id: amount})
+        )
         before, row.budget = {"budget": row.budget}, row.budget + amount
         ctx.audit(
             "initiative", row.id, before, {"budget": row.budget}, HEAD,

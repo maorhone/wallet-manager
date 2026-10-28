@@ -15,13 +15,12 @@ from app.models import (
     Request,
 )
 from app.permissions import ADMIN, ORG_ALLOCATOR, REP, can_view_department
+from app.services import commitments, views
 from app.services import requests as requests_service
-from app.services import views
 from app.services.history import initiative_budgets_as_of, values_with_transfers
 from app.services.rate_card import metered_value
 from app.services.service_keys import _moved_keys, initiative_used  # noqa: F401
 from app.services.spend import Spend
-from app.services.transfers import group_committed
 
 DEFAULT_SHORTAGE = Decimal("0.85")
 
@@ -98,14 +97,10 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
     own_used = spend.used("group", group_id)
     unused = None  # a past period has no live allocations to read: the allocated-minus-used rule
     if at is None:
-        committed = await group_committed(
-            db,
-            spend,
-            group,
-            with_shares=True,
-            initiative_spent=ini_used,
-            tz=settings.app_timezone,
+        snap = await commitments.snapshot(
+            db, group, spend, tz=settings.app_timezone, with_shares=True
         )
+        committed = snap.total + snap.consumption_pmo  # display: gross of PMO-funded spend
         unused = max(committed - own_used - (used - own_used), Decimal(0))
     total = w["rollup_total"]  # same funding boundary as ``used`` (descendant grants, once)
     remaining = total - used

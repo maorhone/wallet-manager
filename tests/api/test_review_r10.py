@@ -56,7 +56,7 @@ async def _revoked_initiative_key(s, consumed, period=PERIOD):
 
 # review-p5-r9 major B1a1: a revoked initiative key's consumption is not unspent funding
 async def test_r10_group_committed_counts_revoked_initiative_key_spend(provisioned):
-    from app.services.transfers import group_committed
+    from tests.helpers.commit import group_committed
 
     async with provisioned() as s:
         await _quiet_group(s)

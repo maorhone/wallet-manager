@@ -14,9 +14,9 @@ from tests.api.test_transfers import send
 A1 = 1  # base 250000, factor 1; three members at 15000
 
 
-async def _consume(fake_engine, amount=200000):
+async def _consume(fake_engine, amount=200000, user=DANI):
     # consumption that no current allocation shows (departed member / revoked key look the same)
-    await _log_at(fake_engine, 1, "A1", DANI, amount, datetime.now(UTC))
+    await _log_at(fake_engine, 1, "A1", user, amount, datetime.now(UTC))
 
 
 def caps(**by_upn):
@@ -91,7 +91,9 @@ async def test_r18_initiative_refused_without_reader(login):
 
 # review-p5-r17 blocker B1c: credit approvals count consumed credit (personal and targeted)
 async def test_r18_personal_credit_approval_counts_consumption(login_wm, fake_engine):
-    await _consume(fake_engine)
+    # redesign U1: the requester's own overspend is already counted (cap raised below spend adds
+    # no unspent credit), so the consumption here is a departed member's
+    await _consume(fake_engine, user="gone@corp.example")
     dani, dana = await login_wm("dani"), await login_wm("dana")
     rid = await submit(dani, amount=100)
     r = await send(

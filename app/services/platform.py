@@ -25,9 +25,8 @@ from app.schemas.platform import (
     OrganizationCreateIn,
     RoleBindingIn,
 )
-from app.services import departments
+from app.services import commitments, departments
 from app.services.owners import holders
-from app.services.validation import check_group_tree
 from app.writes import WriteContext
 
 # §11.1: the policy keys ``GET /policies`` returns today, plus ``overalloc_factors``
@@ -316,7 +315,9 @@ async def _locked_group(ctx: WriteContext, principal: Principal, group_id: int):
     return group, role
 
 
-async def _check_budgets(ctx: WriteContext, department_id: int) -> None:
+async def _check_budgets(
+    ctx: WriteContext, department_id: int, reader=None, clock=None, moved: int | None = None
+) -> None:
     await ctx.db.flush()
     dept = await ctx.db.get(Department, department_id)
     await ctx.db.refresh(dept)
@@ -324,12 +325,18 @@ async def _check_budgets(ctx: WriteContext, department_id: int) -> None:
     for parent_id in sorted({g.parent_group_id for g in groups if g.parent_group_id}):
         await ctx.lock(LockKind.GROUP, parent_id)  # serialize with member-cap and key writes
     bases = {g.id: g.base_budget for g in groups}
-    if err := await check_group_tree(ctx.db, dept, groups, bases, dept.pmo_pool, dept.reserve):
-        raise err
+    await commitments.check_group_tree(
+        ctx, reader, clock, dept, groups, bases, dept.pmo_pool, dept.reserve, moved=moved
+    )
 
 
 async def move_group(
-    ctx: WriteContext, principal: Principal, group_id: int, parent_group_id: int | None
+    ctx: WriteContext,
+    principal: Principal,
+    group_id: int,
+    parent_group_id: int | None,
+    reader=None,
+    clock=None,
 ) -> list[dict]:
     group, role = await _locked_group(ctx, principal, group_id)
     parents = await _parents(ctx, group.department_id)
@@ -337,7 +344,7 @@ async def move_group(
     _check_tree({**parents, group_id: parent_group_id})
     before = {"parent_group_id": group.parent_group_id}
     group.parent_group_id = parent_group_id
-    await _check_budgets(ctx, group.department_id)
+    await _check_budgets(ctx, group.department_id, reader, clock, moved=group.id)
     after = {
         "parent_group_id": parent_group_id,
         "department_id": group.department_id,

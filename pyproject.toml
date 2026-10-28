@@ -12,7 +12,15 @@ dependencies = [
 dev = ["pytest", "pytest-asyncio", "pytest-timeout", "respx", "ruff", "pgembed"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "pytest-timeout", "respx", "ruff", "pgembed"]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-timeout",
+    "respx",
+    "ruff",
+    "pgembed",
+    "hypothesis>=6.170.13",
+]
 
 [build-system]
 requires = ["hatchling"]

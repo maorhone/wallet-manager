@@ -1,7 +1,5 @@
 import asyncio
-from datetime import datetime
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
@@ -10,14 +8,8 @@ from app.errors import ApiError, invalid_request, scope_forbidden
 from app.models import Department, DepartmentModelAllowance, Grp, Organization
 from app.permissions import Principal, can_edit_dept_budget, can_edit_split
 from app.schemas.departments import DepartmentBudgetIn, DepartmentSplitIn, ModelAmounts
-from app.services.spend import SpendUnavailable, fresh_spend
-from app.services.transfers import group_committed
-from app.services.validation import (
-    check_group_tree,
-    check_sum,
-    internal_allocated,
-    pending_incoming,
-)
+from app.services import commitments
+from app.services.validation import check_sum, internal_allocated, pending_incoming
 from app.writes import WriteContext
 
 
@@ -78,7 +70,7 @@ async def apply_budget(ctx: WriteContext, dept: Department, body: DepartmentBudg
     return [{"entity": "department", "id": dept.id, "values": after}]
 
 
-async def _check_consumption_floor(ctx, changed, new, reader, clock) -> None:
+async def _check_consumption_floor(ctx, changed, new, parents, reader, clock) -> None:
     """A cut may not release credit already consumed (revoked keys, departed members) or pending.
 
     Same floor as a transfer out of the group: fresh spend + what is still allocated and unspent
@@ -87,19 +79,16 @@ async def _check_consumption_floor(ctx, changed, new, reader, clock) -> None:
     cuts = [g for g in changed if new[g.id] < g.base_budget]
     if not cuts:
         return
-    tz = ZoneInfo(ctx.settings.app_timezone)
-    now = (clock.now() if clock else datetime.now(tz)).astimezone(tz)
-    try:
-        spend = await fresh_spend(ctx.db, reader, now)
-    except SpendUnavailable:
-        raise ApiError(
-            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
-        ) from None
+    tz = ctx.settings.app_timezone
+    spend = await commitments.read_spend(ctx.db, reader, clock, tz)
     rows = []
     for g in cuts:
-        floor = await group_committed(
-            ctx.db, spend, g, tz=ctx.settings.app_timezone, child_budgets=new
-        )
+        kids = {i: b for i, b in new.items() if parents.get(i) == g.id}  # its own children
+        floor = (
+            await commitments.snapshot(
+                ctx.db, g, spend, tz=tz, change=commitments.Change(child_budgets=kids)
+            )
+        ).total
         floor += await pending_incoming(ctx.db, "group", g.id)
         if new[g.id] < floor:
             rows.append({"group_id": g.id, "code": "BELOW_CONSUMED", "floor": floor})
@@ -144,11 +133,12 @@ async def set_split(
     changed = [g for g in groups.values() if g.id in new and new[g.id] != g.base_budget]
     bases = {g.id: new.get(g.id, g.base_budget) for g in groups.values()}
     rows = [{"group_id": g.id, "code": "PARENT_OVERALLOCATED"} for g in changed]
-    if err := await check_group_tree(
-        ctx.db, dept, groups.values(), bases, body.pmo_pool, body.reserve, rows
-    ):
-        raise err
-    await _check_consumption_floor(ctx, changed, new, reader, clock)
+    await commitments.check_group_tree(
+        ctx, reader, clock, dept, groups.values(), bases, body.pmo_pool, body.reserve, rows
+    )
+    await _check_consumption_floor(
+        ctx, changed, new, {g.id: g.parent_group_id for g in groups.values()}, reader, clock
+    )
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
     entities = []

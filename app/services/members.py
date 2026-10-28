@@ -18,15 +18,13 @@ from app.permissions import (
     target_tier,
 )
 from app.schemas.groups import MemberCapIn, MemberDefaultsIn, MemberLimitsIn
+from app.services import commitments
 from app.services.personal_values import authorize, authorize_rows
 from app.services.spend import SpendUnavailable, fresh_spend
-from app.services.transfers import fresh_group_committed
 from app.services.validation import (
     check_limit,
     check_model_sums,
-    check_sum,
     pending_incoming,
-    settled_budget,
 )
 from app.writes import WriteContext
 
@@ -104,12 +102,10 @@ async def set_caps(
     changed = [r.upn for r in body if members[r.upn].base_cap != r.base_cap]
     await _check_cut_floors(ctx, reader, clock, members, body)
     rows = [{"upn": u, "code": "PARENT_OVERALLOCATED"} for u in changed]
-    if changed:  # review-p5-r18: spend-aware (departed members, revoked keys stay counted)
-        total = await fresh_group_committed(ctx, reader, clock, group, employee_caps=new)
-        if err := check_sum(
-            total, await settled_budget(ctx.db, group), group.overalloc_factor, rows
-        ):
-            raise err
+    if changed:  # spend-aware (departed members, revoked keys stay counted); no-op saves skip
+        await commitments.assert_fits(
+            ctx, reader, clock, group, commitments.Change(caps={u: new[u] for u in changed}), rows
+        )
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
     entities = []

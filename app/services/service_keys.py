@@ -20,14 +20,11 @@ from app.models import (
     ServiceKey,
 )
 from app.permissions import AI_TEAM, can_manage_service_keys, can_view_service_keys
-from app.services import blocks
+from app.services import blocks, commitments
 from app.services.spend import Spend
 from app.services.validation import (
     check_limit,
-    check_sum,
-    key_allocated,
     pending_incoming,
-    settled_budget,
 )
 from app.writes import sync_status, write_response
 
@@ -171,26 +168,16 @@ async def create(ctx, principal, client, body, reader=None, clock=None):
         await ctx.db.refresh(initiative)
         if initiative.status != "active":
             raise invalid_request("Initiative is closed", {"status": initiative.status})
-        allocated = await initiative_committed(ctx.db, initiative.id)
-        budget = initiative.budget - await incoming_pending(ctx.db, initiative.id)
-        err = check_sum(allocated + body.max_budget, budget)
+        await commitments.assert_fits_initiative(ctx.db, initiative, body.max_budget)
         entity = "group"
     elif body.owner_kind == "group":
-        from app.services.transfers import fresh_group_committed
-
-        allocated = await fresh_group_committed(ctx, reader, clock, owner)
-        err = check_sum(
-            allocated + body.max_budget,
-            await settled_budget(ctx.db, owner),
-            owner.overalloc_factor,
+        await commitments.assert_fits(
+            ctx, reader, clock, owner, commitments.Change(new_keys=(body.max_budget,))
         )
         entity = "group"
     else:
-        allocated = await key_allocated(ctx.db, "system", owner.id)
-        err = check_sum(allocated + body.max_budget, owner.budget)
+        await commitments.assert_fits_system(ctx.db, owner, body.max_budget)
         entity = "production_system"
-    if err:
-        raise err
     ai_team = principal.is_admin or principal.has(AI_TEAM, "global")
     for field, policy_name in (("max_parallel", "concurrency"), ("rpm_limit", "rpm")):
         policy = await ctx.db.get(Policy, policy_name)
@@ -208,7 +195,7 @@ async def create(ctx, principal, client, body, reader=None, clock=None):
     return await generate(ctx, client, owner, key, role, {})
 
 
-async def change(ctx, principal, client, key_id, action):
+async def change(ctx, principal, client, key_id, action, reader=None, clock=None):
     key = await ctx.db.get(ServiceKey, key_id)
     if key is None:
         raise ApiError(404, "NOT_FOUND", "Service key not found")
@@ -224,20 +211,19 @@ async def change(ctx, principal, client, key_id, action):
     if action == "rotate":
         if key.owner_kind == "initiative":
             initiative = await ctx.db.get(Initiative, key.owner_id)
-            allocated = await initiative_committed(ctx.db, initiative.id)
-            budget = initiative.budget - await incoming_pending(ctx.db, initiative.id)
-            err = check_sum(allocated + key.max_budget, budget)
-            if err:
-                raise err
+            await commitments.assert_fits_initiative(ctx.db, initiative, key.max_budget)
             # Both credentials can spend until deletion has applied. Never refund the
             # old cap based on a stale spend snapshot, even after revocation/deletion.
             key.retired_budget += key.max_budget
         elif key.owner_kind == "system":
             # Another full-cap credential: the whole system commitment must still fit (r3 B3).
-            allocated = await key_allocated(ctx.db, "system", owner.id)
-            if err := check_sum(allocated + key.max_budget, owner.budget):
-                raise err
+            await commitments.assert_fits_system(ctx.db, owner, key.max_budget)
             key.retired_budget += key.max_budget  # generations merge in spend: keep reserving
+        else:  # group: the old generation keeps reserving its cap (spend merges across them)
+            await commitments.assert_fits(
+                ctx, reader, clock, owner, commitments.Change(rotate_keys=frozenset({key.id}))
+            )
+            key.retired_budget += key.max_budget
         return await generate(ctx, client, owner, key, role, before, rotating=True)
     key.status = "revoked"
     ctx.audit(

@@ -30,13 +30,10 @@ from app.errors import ApiError, invalid_request
 from app.models import (
     AuditLog,
     Employee,
-    Grant,
-    GrantShare,
     Grp,
     Initiative,
     LitellmWrite,
     ProductionSystem,
-    ServiceKey,
     Transfer,
 )
 from app.outbox.enqueue import enqueue
@@ -49,12 +46,12 @@ from app.permissions import (
     target_tier,
 )
 from app.schemas.transfers import EndpointIn, TransferIn
-from app.services import notifications
+from app.services import commitments, notifications
 from app.services.personal_values import authorize
 from app.services.production import system_committed
-from app.services.service_keys import initiative_committed, initiative_used
+from app.services.service_keys import initiative_committed
 from app.services.spend import Spend, SpendUnavailable, fresh_spend
-from app.services.validation import check_sum, group_allocated, pending_incoming, settled_budget
+from app.services.validation import pending_incoming
 from app.writes import WriteContext, plain
 
 ZERO = Decimal(0)
@@ -100,90 +97,6 @@ async def lock_scope(db, group: Grp, endpoints) -> None:
         await lock_parent(db, LockKind.GROUP, gid)
 
 
-async def group_committed(
-    db,
-    spend: Spend,
-    group: Grp,
-    with_shares: bool = False,
-    initiative_spent=None,
-    tz: str = "UTC",
-    child_budgets: dict[int, Decimal] | None = None,
-    employee_caps: dict[str, Decimal] | None = None,
-) -> Decimal:
-    """Consumption plus what is still allocated and unspent; spent credit is counted once.
-
-    Employee and key spend is part of the group team's own spend, so only the unspent rest of
-    each allocation is added. A child group has its own team: its whole carve (or its spend,
-    if larger) stays reserved in the parent. ``with_shares`` adds each employee's active grant
-    shares to their allocation (the overview's "allocated and unused"; a transfer moves base
-    credit only, so its floors leave them out).
-    """
-    committed = spend.used("group", group.id)
-    shares: dict[str, Decimal] = {}
-    if with_shares:
-        for upn, amount in await db.execute(
-            select(GrantShare.upn, GrantShare.amount)
-            .join(Grant, Grant.id == GrantShare.grant_id)
-            .where(GrantShare.status == "active", Grant.group_id == group.id)
-        ):
-            shares[upn] = shares.get(upn, ZERO) + amount
-    for cap, upn in await db.execute(
-        select(Employee.base_cap, Employee.upn).where(
-            Employee.group_id == group.id, Employee.status != "left"
-        )
-    ):
-        cap = (employee_caps or {}).get(upn, cap)  # proposed caps, if any
-        committed += max(cap + shares.get(upn, ZERO) - spend.used("employee", upn), ZERO)
-    for child in await db.scalars(
-        select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
-    ):
-        budget = (child_budgets or {}).get(child.id, child.base_budget)  # proposed cuts, if any
-        committed += max(budget, spend.used("group", child.id))
-    initiatives = {
-        i.id: i for i in await db.scalars(select(Initiative).where(Initiative.group_id == group.id))
-    }
-    # An initiative's consumption comes from ALL its keys, revoked ones included: it is in the
-    # group's own spend already, so it must not stay counted as unspent funding (r9 B1a1).
-    # ``initiative_used`` also covers keys moved to a system (r9 B3, r10 B1a1); the overview
-    # passes its already computed values.
-    spent = initiative_spent
-    if spent is None:
-        spent = {
-            i: await initiative_used(db, spend, i, spend.period, tz, window=True)
-            for i in initiatives
-        }
-    for key in await db.scalars(
-        select(ServiceKey).where(
-            ServiceKey.status.in_(("active", "pending")),
-            ServiceKey.owner_kind == "group",
-            ServiceKey.owner_id == group.id,
-        )
-    ):
-        committed += max((key.max_budget or ZERO) - spend.used("service_key", key.id), ZERO)
-    for i in initiatives.values():
-        if i.status == "active":
-            committed += max(i.budget - spent.get(i.id, ZERO), ZERO)
-    return committed
-
-
-async def fresh_group_committed(ctx, reader, clock, group: Grp, **kw) -> Decimal:
-    """THE allocation check input (review-p5-r18): fresh spend, never zero when unreadable.
-
-    Every mutation that carves more out of a section (member caps, group keys, initiatives,
-    credit approvals) compares this with the settled budget, so consumption of departed members
-    and revoked keys stays committed. A missing reader or unreadable database refuses (503).
-    """
-    tz = ZoneInfo(ctx.settings.app_timezone)
-    try:
-        now = (clock.now() if clock else datetime.now(tz)).astimezone(tz)
-        spend = await fresh_spend(ctx.db, reader, now)
-    except SpendUnavailable:
-        raise ApiError(
-            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
-        ) from None
-    return await group_committed(ctx.db, spend, group, tz=ctx.settings.app_timezone, **kw)
-
-
 async def _side(db, spend: Spend, group: Grp, ep: EndpointIn, tz: str = "UTC") -> Side:
     """Load one end, which must belong to ``group``; anything else is invisible (404)."""
     if ep.kind == "employee":
@@ -207,7 +120,7 @@ async def _side(db, spend: Spend, group: Grp, ep: EndpointIn, tz: str = "UTC") -
         row = await db.get(Grp, row_id)
         if row is None or row.parent_group_id != group.id or row.status == "archived":
             raise _not_found()
-        committed = await group_committed(db, spend, row, tz=tz)
+        committed = (await commitments.snapshot(db, row, spend, tz=tz)).total
         return Side("group", ep.id, row.name, row.base_budget, committed, row)
     row = await db.get(ProductionSystem, row_id)
     if (
@@ -391,7 +304,7 @@ async def _transfer_of_source(db, write_id: int) -> Transfer | None:
     return await db.scalar(select(Transfer).where(Transfer.first_write_id == write_id))
 
 
-async def _undo(db, transfer: Transfer, reason: str) -> bool:
+async def _undo(db, transfer: Transfer, reason: str, reader=None, tz: str = "UTC") -> bool:
     """Restore both domain balances and cancel the held destination writes, exactly once.
 
     Locks first (module docstring), then the state claim ``pending -> compensated`` is a
@@ -428,7 +341,7 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
         rows.append((row, field, getattr(row, field) + delta))
     claim = update(Transfer).where(Transfer.id == transfer.id, Transfer.state == "pending")
     if any(new < 0 for _, _, new in rows) or await _overallocates_parent(
-        db, transfer, rows, parents
+        db, transfer, rows, parents, reader, tz
     ):
         # the target gave the credit away, or returning it would overfill the source's current
         # parent: no balance change, the transfer stays failed for an operator (never silent)
@@ -457,7 +370,7 @@ async def _undo(db, transfer: Transfer, reason: str) -> bool:
     return True
 
 
-async def _overallocates_parent(db, transfer, rows, parents) -> bool:
+async def _overallocates_parent(db, transfer, rows, parents, reader=None, tz="UTC") -> bool:
     """Net effect of the restore on each current parent: both ends, whatever their kind."""
     net: dict[int, Decimal] = {}
     for row, field, new in rows:
@@ -469,20 +382,21 @@ async def _overallocates_parent(db, transfer, rows, parents) -> bool:
             continue  # internal systems are carved from the department, not a group
         if pid is not None:
             net[pid] = net.get(pid, ZERO) + new - getattr(row, field)
+    spend = None
     for pid, delta in net.items():
         if delta <= 0:
             continue
         parent = await db.get(Grp, pid, populate_existing=True)
-        if check_sum(
-            await group_allocated(db, parent) + delta,
-            await settled_budget(db, parent),
-            parent.overalloc_factor,
-        ):
+        try:
+            if spend is None:  # fresh spend, read once; unreadable = cannot prove it fits
+                spend = await commitments.read_spend(db, reader, None, tz)
+            await commitments.check(db, spend, parent, commitments.Change(credit=delta), tz)
+        except ApiError:
             return True
     return False
 
 
-async def compensate_failed_source(db, write: LitellmWrite) -> None:
+async def compensate_failed_source(db, write: LitellmWrite, reader=None, tz: str = "UTC") -> None:
     """The source reduction failed for good: undo the move so no credit exists twice.
 
     Called by the outbox worker when a write turns ``failed``. The held destination write is
@@ -491,7 +405,7 @@ async def compensate_failed_source(db, write: LitellmWrite) -> None:
     """
     transfer = await _transfer_of_source(db, write.id)
     if transfer is None or not await _undo(
-        db, transfer, f"cancelled: source write {write.id} failed"
+        db, transfer, f"cancelled: source write {write.id} failed", reader, tz
     ):
         return
     # an earlier write of the same source may have published this reduction as part of its
@@ -516,11 +430,11 @@ async def _source_overspent(db, reader, transfer: Transfer, now: datetime, tz: s
     spend = await fresh_spend(db, reader, now)  # SpendUnavailable propagates: caller holds
     total -= await unsettled_incoming(db, [kind], ident)  # pending credit never masks spend
     if kind == "group":  # B1a1: consumption plus outstanding unspent allocations, as in planning
-        return await group_committed(db, spend, row, tz=tz) > total
+        return (await commitments.snapshot(db, row, spend, tz=tz)).total > total
     return spend.used(kind, ident) > total
 
 
-async def _release_cancelled(db, settings, transfer: Transfer) -> None:
+async def _release_cancelled(db, settings, transfer: Transfer, reader=None) -> None:
     # A destination write that was attempted (transient error, response lost) may have been
     # published upstream: its restored value is republished too (review-p5-r16 B1a1).
     uncertain = list(
@@ -533,7 +447,11 @@ async def _release_cancelled(db, settings, transfer: Transfer) -> None:
         )
     )
     undone = await _undo(
-        db, transfer, f"cancelled: source spent the released credit (transfer {transfer.id})"
+        db,
+        transfer,
+        f"cancelled: source spent the released credit (transfer {transfer.id})",
+        reader,
+        settings.app_timezone,
     )
     if undone:
         for w in uncertain:
@@ -712,7 +630,7 @@ async def fence_release(db, settings, reader, write: LitellmWrite, now: datetime
         if await _source_overspent(db, reader, other, now, settings.app_timezone):
             ok = False
             if other.state == "pending":
-                await _release_cancelled(db, settings, other)
+                await _release_cancelled(db, settings, other, reader)
     return ok
 
 
@@ -781,7 +699,7 @@ async def settle(db, settings, reader, now: datetime, write_id: int | None = Non
         if transfer.first_write_id and len(ids) == 1:
             try:
                 if await _source_overspent(db, reader, transfer, now, settings.app_timezone):
-                    await _release_cancelled(db, settings, transfer)
+                    await _release_cancelled(db, settings, transfer, reader)
                     continue
             except SpendUnavailable:
                 continue

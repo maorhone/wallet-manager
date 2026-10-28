@@ -15,7 +15,7 @@ TZ = "Asia/Jerusalem"
 
 # review-p5-r10 major B1a1: a key moved to a system keeps counting as the initiative's spend
 async def test_r11_group_committed_counts_moved_key_spend(provisioned):
-    from app.services.transfers import group_committed
+    from tests.helpers.commit import group_committed
 
     async with provisioned() as s:
         await _quiet_group(s)
@@ -39,7 +39,7 @@ async def test_r11_group_committed_counts_moved_key_spend(provisioned):
 
 # review-p5-r11 major B1a1: a move before the current month still counts inside the window
 async def test_r12_group_committed_counts_prior_month_move(provisioned):
-    from app.services.transfers import group_committed
+    from tests.helpers.commit import group_committed
 
     async with provisioned() as s:
         await _quiet_group(s)

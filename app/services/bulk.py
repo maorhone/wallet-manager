@@ -11,10 +11,9 @@ from app.errors import ApiError, invalid_request
 from app.models import GrantShare, Grp
 from app.permissions import Principal, can_write_members, target_tier
 from app.schemas.groups import BulkAllocationIn, MemberCapIn
-from app.services import members
+from app.services import commitments, members
 from app.services.personal_values import authorize
 from app.services.spend import Spend
-from app.services.transfers import group_committed
 from app.services.validation import settled_budget
 from app.writes import WriteContext
 
@@ -69,7 +68,9 @@ async def preview(
         )
     new = {r.upn: r.base_cap for r in rows}
     spend = await Spend.load(db, datetime.now(UTC).strftime("%Y-%m"))  # preview: cached is fine
-    own = await group_committed(db, spend, group, employee_caps=new)
+    own = (
+        await commitments.snapshot(db, group, spend, tz="UTC", change=commitments.Change(caps=new))
+    ).total
     available = await settled_budget(db, group) * group.overalloc_factor
     return {
         "rows": out,

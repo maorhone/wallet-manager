@@ -14,13 +14,13 @@ from app.services.spend import Spend, _aggregate
 from app.services.transfers import held_by_incoming
 from app.services.validation import (
     check_sum,
-    group_allocated,
     key_allocated,
     pending_incoming,
     settled_budget,
 )
 from tests.api.test_review_money import DANI, YAEL
 from tests.api.test_transfers import move, send
+from tests.helpers.commit import group_allocated
 
 A1 = 1
 

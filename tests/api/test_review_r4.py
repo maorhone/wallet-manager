@@ -10,12 +10,12 @@ from app.outbox.enqueue import enqueue
 from app.outbox.worker import drain
 from app.services.transfers import held_by_incoming
 from app.services.validation import (
-    group_allocated,
     key_allocated,
     pending_incoming,
     settled_budget,
 )
 from tests.api.test_org_systems import envelope, post, system
+from tests.helpers.commit import group_allocated
 from tests.api.test_review_money import DANI, YAEL, _child, _initiative
 from tests.api.test_transfers import A1, move, send
 

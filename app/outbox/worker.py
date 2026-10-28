@@ -179,7 +179,7 @@ async def drain(
             except (LiteLLMPermanentError, DesiredUnavailable) as exc:
                 row.status, row.last_error = "failed", str(exc)
                 result.failed += 1
-                await compensate_failed_source(s, row)
+                await compensate_failed_source(s, row, reader, settings.app_timezone)
             await s.execute(
                 update(Request)
                 .where(Request.application_write_id == row.id)

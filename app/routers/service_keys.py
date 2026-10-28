@@ -21,7 +21,10 @@ async def create(body: ServiceKeyIn, request: Request, ctx: Write, principal: Cu
 
 @router.post("/service-keys/{key_id}/rotate")
 async def rotate(key_id: int, request: Request, ctx: Write, principal: CurrentPrincipal):
-    return await service_keys.change(ctx, principal, request.app.state.litellm, key_id, "rotate")
+    state = request.app.state
+    return await service_keys.change(
+        ctx, principal, state.litellm, key_id, "rotate", state.litellm_reader, state.clock
+    )
 
 
 @router.post("/service-keys/{key_id}/revoke")

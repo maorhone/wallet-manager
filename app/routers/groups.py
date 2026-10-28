@@ -33,9 +33,15 @@ async def insert_parent(
 
 
 @router.patch("/groups/{group_id}/parent")
-async def move_parent(group_id: int, body: GroupParentIn, ctx: Write, principal: CurrentPrincipal):
+async def move_parent(
+    group_id: int, body: GroupParentIn, request: Request, ctx: Write, principal: CurrentPrincipal
+):
+    state = request.app.state
     return await write_response(
-        ctx, await platform.move_group(ctx, principal, group_id, body.parent_group_id)
+        ctx,
+        await platform.move_group(
+            ctx, principal, group_id, body.parent_group_id, state.litellm_reader, state.clock
+        ),
     )
 
 

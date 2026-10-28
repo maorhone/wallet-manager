@@ -14,10 +14,9 @@ from app.permissions import (
     can_view_group,
     group_roles_of,
 )
+from app.services import commitments
 from app.services.overview import initiative_used
 from app.services.spend import Spend
-from app.services.transfers import fresh_group_committed
-from app.services.validation import check_sum, settled_budget
 from app.services.views import period_ctx
 
 
@@ -43,11 +42,9 @@ async def create(
         raise invalid_request("period_end is before period_start")
     # review-p5-r16 B1b: consumption (revoked keys, departed members) stays committed, so the
     # check uses the spend-aware commitment; a reader that cannot be read refuses (never zero).
-    committed = await fresh_group_committed(ctx, reader, clock, group)
-    if err := check_sum(
-        committed + body.budget, await settled_budget(ctx.db, group), group.overalloc_factor
-    ):
-        raise err
+    await commitments.assert_fits(
+        ctx, reader, clock, group, commitments.Change(new_initiatives=(body.budget,))
+    )
     initiative = Initiative(
         **body.model_dump(),
         group_id=group_id,
