@@ -9,7 +9,7 @@ the capacity (``settled_budget``).
 """
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -178,8 +178,8 @@ async def load_rows(db, group: Grp, spend: Spend, tz: str) -> Rows:
         .join(Grant, Grant.id == GrantShare.grant_id)
         .where(Grant.group_id == group.id)
     ):
-        expires = s.expires_at or g.expires_at
-        if g.starts_at < end and expires > start:
+        expires = s.expires_at or g.expires_at or datetime.max.replace(tzinfo=UTC)
+        if (g.starts_at is None or g.starts_at < end) and expires > start:
             used = s.used if s.status == "closed" else None
             shares.setdefault(s.upn, []).append(ShareSpan(s.id, s.amount, expires, used))
     members = tuple(
