@@ -52,6 +52,49 @@ class OChild:
 
 
 @dataclass
+class OTransfer:
+    """A raw transfer row as the group sees it. v1 states: pending/failed/applied/compensated.
+
+    v2 (docs/design/transfers-v2.md): RESERVED, SOURCE_APPLIED, PUBLISHING, SETTLED, COMPENSATING,
+    STUCK, COMPENSATED, with ``reverted`` (RevertDomain done) and ``restore_confirmed``.
+    """
+
+    amount: Decimal
+    state: str
+    incoming: bool = True  # False: this group is the SOURCE of the transfer
+    reverted: bool = False
+    restore_confirmed: bool = False
+
+
+UNSETTLED = {"pending", "failed", "RESERVED", "SOURCE_APPLIED", "PUBLISHING"}
+LIMBO = {"COMPENSATING", "STUCK"}
+
+
+def pending_incoming_of(transfers: list[OTransfer]) -> Decimal:
+    """Credit in whose transfer is not settled and whose domain credit was not reverted."""
+    return sum(
+        (
+            t.amount
+            for t in transfers
+            if t.incoming and (t.state in UNSETTLED or (t.state in LIMBO and not t.reverted))
+        ),
+        ZERO,
+    )
+
+
+def held_restore_of(transfers: list[OTransfer]) -> Decimal:
+    """A reverted COMPENSATING/STUCK source credit stays held until the repair is confirmed."""
+    return sum(
+        (
+            t.amount
+            for t in transfers
+            if not t.incoming and t.state in LIMBO and t.reverted and not t.restore_confirmed
+        ),
+        ZERO,
+    )
+
+
+@dataclass
 class OGroup:
     base: Decimal
     factor: int = 1
@@ -60,19 +103,33 @@ class OGroup:
     keys: list[OKey] = field(default_factory=list)
     initiatives: list[OInitiative] = field(default_factory=list)
     children: list[OChild] = field(default_factory=list)
-    pending_incoming: Decimal = ZERO
-    held_restore: Decimal = ZERO
+    transfers: list[OTransfer] = field(default_factory=list)
+
+    @property
+    def pending_incoming(self) -> Decimal:
+        return pending_incoming_of(self.transfers)
+
+    @property
+    def held_restore(self) -> Decimal:
+        return held_restore_of(self.transfers)
 
     @property
     def spend(self) -> Decimal:
-        return self.extra_spend + sum((m.spend for m in self.members), ZERO)
+        """The ledger: members, every group key (revoked too), every initiative key, the rest."""
+        return (
+            self.extra_spend
+            + sum((m.spend for m in self.members), ZERO)
+            + sum((k.spend for k in self.keys), ZERO)
+            + sum((sum(i.key_spends, ZERO) for i in self.initiatives), ZERO)
+        )
 
 
 def pmo_of(m: OMember) -> Decimal:
-    """An independent loop: closed shares keep their stored usage, active ones take the rest."""
+    """An independent loop. A closed share's stored usage is cumulative over all periods, so it
+    can fund at most this window's overage: min(left, used); an active one min(left, amount)."""
     left, total = max(m.spend - m.cap, ZERO), ZERO
     for s in sorted(m.shares, key=lambda s: (s.expires, s.id)):
-        take = s.used if s.closed else min(left, s.amount)
+        take = min(left, s.used if s.closed else s.amount)
         total += take
         left = max(left - take, ZERO)
     return total

@@ -85,6 +85,6 @@ def test_backfill_remaining_shapes():  # redesign U0-fix2 backfill-shapes
 
 def test_oracle_closed_shares_and_cut_floors():  # redesign U0-fix2 oracle
     c = _flat(COMMITMENTS)
-    assert "a **closed** share contributes its stored `used`" in c
+    assert "a **closed** share contributes `min(left, stored used)`" in c
     assert "AND no cut floor is violated" in c
     assert "BELOW_CONSUMED` (floor)" in c

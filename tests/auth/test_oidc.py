@@ -107,7 +107,6 @@ async def test_callback_rejects_bad_nonce(oidc, key):
     assert (await oidc.get("/me")).status_code == 401
 
 
-@pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-28; see OPEN-ITEMS")
 async def test_login_without_groups_claim_uses_directory(oidc, key):
     """§6: an ADFS token with no groups claim falls back to the directory's ``groups_of``."""
     with respx.mock(assert_all_called=False) as router:

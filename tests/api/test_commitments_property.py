@@ -12,7 +12,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import delete, select, text, update
 
-from app.models import Employee, Grant, GrantShare, Grp, Initiative
+from app.models import Employee, Grant, GrantShare, Grp, Initiative, Transfer
 from tests import oracle as o
 from tests.api.test_nested_group_budget import child_of
 from tests.api.test_transfers import send
@@ -30,6 +30,18 @@ def scenarios(draw):
         "spend": [draw(st.sampled_from([0, 0, 1000, 20000, 90000])) for _ in SPEND_USERS],
         "pmo": draw(st.sampled_from([0, 0, 30000, 90000])),  # active share of dani
         "initiative": draw(st.sampled_from([None, 0, 5000, 60000])),
+        "transfer": draw(
+            st.sampled_from(
+                [
+                    None,
+                    None,
+                    ("pending", 30000),
+                    ("failed", 60000),
+                    ("applied", 50000),
+                    ("compensated", 70000),
+                ]
+            )
+        ),
         "child": draw(st.sampled_from([None, 0, 20000, 100000])),
         "op": draw(
             st.sampled_from(["caps", "caps", "initiative", "child"]),
@@ -58,6 +70,7 @@ async def _reset(sf, fake_engine):
     async with fake_engine.begin() as conn:
         await conn.execute(text('DELETE FROM "LiteLLM_SpendLogs"'))
     async with sf() as s:
+        await s.execute(delete(Transfer))
         await s.execute(delete(GrantShare))
         await s.execute(delete(Grant))
         await s.execute(delete(Initiative))
@@ -96,6 +109,20 @@ async def _arrange(sf, fake_engine, sc):
                     expires_at=now + timedelta(days=20),
                 )  # fmt: skip
             )
+        if sc["transfer"]:
+            state, amount = sc["transfer"]
+            s.add(
+                Transfer(
+                    group_id=A1,
+                    source_kind="group",
+                    source_id="2",
+                    target_kind="group",
+                    target_id=str(A1),
+                    amount=amount,
+                    created_by="prop",
+                    state=state,
+                )  # fmt: skip
+            )
         if sc["initiative"] is not None:
             s.add(
                 Initiative(
@@ -119,6 +146,8 @@ def model(sc, child_id) -> o.OGroup:
         shares = [o.OShare(1, Decimal(sc["pmo"]), 1)] if i == 1 and sc["pmo"] else []
         members.append(o.OMember(Decimal(15000), Decimal(sc["spend"][i]), shares=shares))
     g = o.OGroup(Decimal(250000), extra_spend=Decimal(sc["spend"][3]), members=members)
+    if sc["transfer"]:  # raw transfer rows: the oracle derives the unsettled credit itself
+        g.transfers.append(o.OTransfer(Decimal(sc["transfer"][1]), sc["transfer"][0]))
     if sc["initiative"] is not None:
         g.initiatives.append(o.OInitiative(Decimal(sc["initiative"])))
     if sc["child"] is not None:

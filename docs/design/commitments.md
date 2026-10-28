@@ -64,8 +64,7 @@ endpoints use `snapshot` with cached spend (`Spend.load`) and never raise 503.
 
 `spend.used("group", id)` is the group team's own spend including its members' and keys' spend.
 It is split with `attribution.attribute` (`attribution.py:28`): for each member,
-`attribute(member_spend, base_cap, shares)` yields the part funded by active/closed PMO grant
-shares; `consumption_pmo = Σ over members of attributed share usage`, and
+`pmo_funded` walks the member's shares by `(expires_at, id)`, each taking `min(left, amount)` (active) or `min(left, stored used)` (closed), where `left = max(member_spend − base_cap, 0)`. A closed share's stored usage is cumulative over all periods, so it can fund at most this window's overage. Members who moved out keep their PMO split: their spend comes from the per-group member scope `member_group` (`<group id>:<upn>`), they hold no allocation; `consumption_pmo = Σ over members of attributed share usage`, and
 `consumption_base = group_spend − consumption_pmo`. Only `consumption_base` counts against the
 group's base budget, so PMO-funded spend is never charged as base (fixes r18 B1c,
 `requests.py:368`). Spend of departed members (`status="left"`) and revoked keys stays in
@@ -159,8 +158,8 @@ still calls `group_own_allocated`.
   per-entity spend rows, pending-incoming transfers of a generated org tree.
 - For a group: `spent_g = spend(group)`; `pmo_g = Σ_members pmo_m`, where `pmo_m` is an
   independent loop (not the clamped closed form): `left = max(member_spend − current base_cap, 0)`;
-  walk the member's shares by `(expires_at, id)`; a **closed** share contributes its stored `used`
-  (never recomputed) and reduces `left` by it (floored at 0); an **active** share contributes
+  walk the member's shares by `(expires_at, id)`; a **closed** share contributes `min(left, stored used)` (the stored value is cumulative, so it
+  never exceeds this window's overage) and reduces `left` by it; an **active** share contributes
   `min(left, amount)` and reduces `left`. Generated cases must include a cap raised or lowered
   after a share closed, and spend below the cap with a closed share holding stored usage;
   `unspent = Σ_caps max(cap − spend_m, 0) + Σ_initiatives max(budget − Σ keys spend, 0) + Σ_keys max(max_budget + retired − spend_k, 0) + Σ_children max(base, spend_child)`;
@@ -243,3 +242,9 @@ section; conditional indicator, no predicted exhaustion dates), (3) reallocation
 Data comes from existing endpoints (requests list, overview, reports); an empty group shows an
 explicit empty state; a failing sub-request must not blank the other groups. Out of scope for U4:
 new thresholds beyond what the spec lists as open (O-061).
+
+## 8. U1-fix1 clarifications
+
+- Compensation parent re-check (`_overallocates_parent`): both restored ends are applied as proposed values (cap, child budget, initiative budget) and each raised parent's commitment is **recomputed** with fresh spend, never "snapshot + nominal delta" (commitments are not linear). A restore that does not raise the parent's commitment is allowed even if the parent is already over capacity (`check(..., not_worse=True)`).
+- Unreadable spend during compensation raises `SpendUnavailable`: the failed source write goes back to `pending` (retryable) and the transfer stays `pending`; it is never turned into `failed` (row 12b).
+- The oracle's group spend is the ledger: members, every group key (revoked too), every initiative key, plus spend in no allocation. Capacity is derived from raw transfer rows (`OTransfer`: unsettled, unreverted COMPENSATING/STUCK, held restores). The DB-backed property uses the v1 states until U3 introduces `held_restore`.

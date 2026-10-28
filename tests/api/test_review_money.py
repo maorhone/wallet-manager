@@ -105,7 +105,6 @@ async def test_review_system_update_builds_system_team(provisioned, prov_setting
 
 
 # review-p5 blocker 4: source reduction first; destination write waits for it; failure rolls back
-@pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-28; see OPEN-ITEMS")
 async def test_review_transfer_partial_failure_compensates(
     login_wm, provisioned, litellm, prov_settings, fake_app
 ):

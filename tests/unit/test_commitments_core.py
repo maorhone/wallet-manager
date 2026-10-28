@@ -10,6 +10,7 @@ from app.services import commitments as c
 from app.services.attribution import ShareSpan
 from tests import oracle as o
 
+D = Decimal
 money = st.integers(0, 400).map(Decimal)
 
 
@@ -50,9 +51,17 @@ def groups(draw):
         o.OChild(draw(money), draw(money), draw(st.sampled_from([False, False, True])))
         for _ in range(draw(st.integers(0, 3)))
     ]
+    states = ["pending", "failed", "applied", "RESERVED", "SETTLED", "COMPENSATING", "STUCK"]
+    transfers = [
+        o.OTransfer(
+            draw(money), draw(st.sampled_from(states)), draw(st.booleans()),
+            draw(st.booleans()), draw(st.booleans()),
+        )
+        for _ in range(draw(st.integers(0, 3)))
+    ]  # fmt: skip
     return o.OGroup(
         draw(money), draw(st.integers(1, 2)), draw(money), mem, keys, initiatives, children,
-        draw(money), draw(money),
+        transfers,
     )  # fmt: skip
 
 
@@ -131,3 +140,28 @@ def test_pmo_funded_spend_is_not_base():
     snap = c.compute(to_rows(g))
     assert (snap.consumption_base, snap.consumption_pmo) == (10, 90)
     assert snap.total == 10 and o.fits(g)
+
+
+# redesign U1-fix1 oracle-ledger: key and initiative consumption is group consumption
+def test_oracle_counts_key_and_initiative_consumption_even_when_revoked():
+    key = o.OKey(D(100), D(0), D(60))
+    g = o.OGroup(D(500), keys=[key])
+    assert o.committed(g) == 100 and c.compute(to_rows(g)).total == 100
+    key.active = False  # revoked: its 60 stays consumed
+    assert o.committed(g) == 60 and c.compute(to_rows(g)).total == 60
+    g = o.OGroup(D(500), initiatives=[o.OInitiative(D(100), [D(30), D(20)], active=False)])
+    assert o.committed(g) == 50 and c.compute(to_rows(g)).total == 50
+
+
+def test_capacity_is_derived_from_raw_transfer_rows():
+    t = [
+        o.OTransfer(D(10), "RESERVED"),
+        o.OTransfer(D(20), "COMPENSATING"),  # not reverted: still unavailable
+        o.OTransfer(D(40), "COMPENSATING", reverted=True),  # credit left the domain
+        o.OTransfer(D(5), "SETTLED"),
+        o.OTransfer(D(7), "STUCK", incoming=False, reverted=True),  # held source restore
+        o.OTransfer(D(3), "STUCK", incoming=False, reverted=True, restore_confirmed=True),
+    ]
+    g = o.OGroup(D(100), factor=2, transfers=t)
+    assert (g.pending_incoming, g.held_restore) == (30, 7)
+    assert o.capacity(g) == (100 - 30 - 7) * 2

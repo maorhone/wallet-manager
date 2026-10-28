@@ -1,4 +1,3 @@
-import pytest
 from sqlalchemy import select
 
 from app.models import DepartmentModelAllowance, GroupModelPot
@@ -25,7 +24,6 @@ async def test_allowances_replace_map_and_need_admin(login, put, provisioned):
         assert r.status_code == 403
 
 
-@pytest.mark.xfail(strict=False, reason="flaky under load 2026-10-28; see OPEN-ITEMS")
 async def test_pots_exceed_allowance_422(login, put, provisioned):
     await _allow(login, put, {"gpt-4o": 100000})
     rep = await login("rep")
