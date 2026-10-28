@@ -1167,3 +1167,18 @@ Tests: tests/api/test_review_r16.py (r17 tests). Targeted only (4/15); full run 
 Cause check: initiative reader-None fallback (B1b) was introduced by 3b9d896 (r17, too narrow: one call site only); the other allocation findings (members/bulk/service keys/credit approvals) are pre-existing `group_allocated` call sites; B1a1 follows 2dfe334 (r17 republish, no ordering between repairs).
 Groups: (1) ONE allocation check `transfers.fresh_group_committed` (fresh spend, 503 without reader, `employee_caps` override for proposed caps) used by members.set_caps (so bulk commit), service_keys group-key creation, initiatives.create (no Spend.load fallback any more), both credit approvals; bulk preview uses group_committed on cached spend. A no-op cap save skips the check. (2) B1a1: `held_by_incoming` -> `_repair_unconfirmed`: any write of the source of a compensated transfer (incl. restore-source) waits until every restore-target write is applied. (3) authz B2+F1: `can_view_service_keys` lets the head of a department system's managing group read keys/telemetry (read only); SystemDetail renders the summary independent of the key list. (4) overview child rows and department section rows include PMO grants of the same subtree. (5) rate card edits take LockKind.PLATFORM id 2. (6) F2: useOrgAllocate takes a caller-owned key kept per row+payload above the tabs (OrgAllocation).
 Tests: tests/api/test_review_r18.py (12), SystemDetail.test.tsx, OrgAllocation.test.tsx. Two load flakes (setup timeouts) quarantined: test_matrix (lifecycle permissions), test_r8_metered_value_uses_rate_at_consumption_date. Full backend run: 430 passed + 2 timeouts that pass alone.
+
+## Phase 5 redesign (phase-5-redesign)
+Branch cut from phase-5 at 90f5db3. Plan: docs/design/redesign-p5-plan.md. Contracts: docs/design/transfers-v2.md (U2, U3), docs/design/commitments.md (U1, U4 scope).
+
+| Unit | Content | Status | Sha | Tests |
+|---|---|---|---|---|
+| U0 | Design docs | done (docs only) | see git log | test_repo_hygiene green |
+| U1 | commitments.py + call sites + oracle | todo | | |
+| U2 | Pure transfer state machine + Hypothesis | todo | | |
+| U3 | Executor + migration 0018 | todo | | |
+| U4 | Authz table, useIdempotentMutation, action center | todo | | |
+| U5 | e2e + flakes + green full run | todo | | |
+| U6 | External split re-review + merge | todo | | |
+
+Next: U1. Notes: the plan copy replaces the owner's name with "the owner" (repo hygiene). The `commitments.md` §4 notes that `initiatives.py` has no budget-update function and group-key rotation has no check today (r18 B3a).
