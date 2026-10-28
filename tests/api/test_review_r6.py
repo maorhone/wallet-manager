@@ -133,7 +133,7 @@ async def test_r6_two_transfers_to_one_target_settle(
 
 # review-p5-r5 major (transfers:392): compensation counts employee/initiative decreases
 async def test_r6_compensation_nets_employee_change(
-    login_wm, provisioned, litellm, prov_settings, fake_app
+    login_wm, provisioned, litellm, prov_settings, fake_app, ro_engine
 ):
     child = await _child(provisioned, base=100, cap=50)
     async with provisioned() as s:
@@ -145,7 +145,7 @@ async def test_r6_compensation_nets_employee_change(
     r = await send(head, "POST", "/transfers", move(20, str(child), DANI, ("group", "employee")))
     assert r.status_code == 200, r.text
     tid = int(r.json()["entities"][0]["id"])
-    await drain(provisioned, litellm, prov_settings)
+    await drain(provisioned, litellm, prov_settings, LiteLLMReader(ro_engine))
     async with provisioned() as s:
         assert (await s.get(Transfer, tid)).state == "compensated"
         assert (await s.get(Grp, child)).base_budget == 100
