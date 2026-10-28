@@ -32,7 +32,8 @@ from app.schemas.initiatives import InitiativeIn
 from app.schemas.production import ProductionSystemPatch
 from app.services import initiatives, members, notifications, org_systems, production
 from app.services.personal_values import OWNER_ROLE, authorize
-from app.services.validation import check_sum, group_allocated, settled_budget
+from app.services.transfers import fresh_group_committed
+from app.services.validation import check_sum, settled_budget
 from app.writes import WriteContext
 
 TYPES = ("credits", "initiative", "throughput")
@@ -314,9 +315,13 @@ async def decide(
         if in_system:
             req.status = await _apply_org_system_credits(ctx, principal, req, Decimal(amount))
         elif req.type == "credits" and req.payload.get("target"):
-            req.status = await _apply_target_credits(ctx, principal, req, group, Decimal(amount))
+            req.status = await _apply_target_credits(
+                ctx, principal, req, group, Decimal(amount), reader, clock
+            )
         elif req.type == "credits":
-            await _apply_credits(ctx, principal, directory, req, group, Decimal(amount))
+            await _apply_credits(
+                ctx, principal, directory, req, group, Decimal(amount), reader, clock
+            )
             req.status = "pending_apply"
         else:
             await _apply_initiative(ctx, principal, req, group, Decimal(amount), reader, clock)
@@ -351,14 +356,14 @@ async def decide(
 
 
 async def _apply_credits(
-    ctx, principal, directory, req: Request, group: Grp, amount: Decimal
+    ctx, principal, directory, req: Request, group: Grp, amount: Decimal, reader=None, clock=None
 ) -> None:
     """Raise the requester's base cap by ``amount``, within the section's allocatable."""
     employee = await ctx.db.get(Employee, req.requester_upn)
     if employee is None or employee.status != "active" or employee.group_id != group.id:
         raise ApiError(409, "CONFLICT", "The requester is no longer an active member")
     role = authorize(principal, employee, group, await target_tier(ctx.db, directory, employee.upn))
-    allocated = await group_allocated(ctx.db, group)
+    allocated = await fresh_group_committed(ctx, reader, clock, group)
     if err := check_sum(
         allocated + amount, await settled_budget(ctx.db, group), group.overalloc_factor
     ):
@@ -381,7 +386,9 @@ async def _apply_org_system_credits(ctx, principal, req: Request, amount: Decima
     return "pending_apply"
 
 
-async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount: Decimal) -> str:
+async def _apply_target_credits(
+    ctx, principal, req: Request, group: Grp, amount: Decimal, reader=None, clock=None
+) -> str:
     """D-046..D-048: the decision applies to the targeted initiative / internal system."""
     t = req.payload["target"]
     owned = await ctx.db.get(Initiative if t["kind"] == "initiative" else ProductionSystem, t["id"])
@@ -396,7 +403,7 @@ async def _apply_target_credits(ctx, principal, req: Request, group: Grp, amount
         row = owned
         if row.status != "active" or row.group_id != group.id:
             raise ApiError(409, "CONFLICT", "The target is no longer active in this section")
-        allocated = await group_allocated(ctx.db, group)
+        allocated = await fresh_group_committed(ctx, reader, clock, group)
         if err := check_sum(
             allocated + amount, await settled_budget(ctx.db, group), group.overalloc_factor
         ):

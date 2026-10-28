@@ -1,5 +1,6 @@
 """D-066/D-075: bulk allocation replaces each chosen member's base cap."""
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -12,7 +13,9 @@ from app.permissions import Principal, can_write_members, target_tier
 from app.schemas.groups import BulkAllocationIn, MemberCapIn
 from app.services import members
 from app.services.personal_values import authorize
-from app.services.validation import group_allocated, settled_budget
+from app.services.spend import Spend
+from app.services.transfers import group_committed
+from app.services.validation import settled_budget
 from app.writes import WriteContext
 
 
@@ -65,10 +68,8 @@ async def preview(
             }
         )
     new = {r.upn: r.base_cap for r in rows}
-    own = sum((new.get(u, e.base_cap) for u, e in current.items()), Decimal(0))
-    own += await group_allocated(db, group) - sum(
-        (e.base_cap for e in current.values()), Decimal(0)
-    )
+    spend = await Spend.load(db, datetime.now(UTC).strftime("%Y-%m"))  # preview: cached is fine
+    own = await group_committed(db, spend, group, employee_caps=new)
     available = await settled_budget(db, group) * group.overalloc_factor
     return {
         "rows": out,

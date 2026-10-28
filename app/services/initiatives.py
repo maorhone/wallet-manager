@@ -1,8 +1,5 @@
 """Internal Usage initiatives (5.6, D-067): a budget carved from a section, spent through keys."""
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -18,8 +15,8 @@ from app.permissions import (
     group_roles_of,
 )
 from app.services.overview import initiative_used
-from app.services.spend import Spend, SpendUnavailable, fresh_spend
-from app.services.transfers import group_committed
+from app.services.spend import Spend
+from app.services.transfers import fresh_group_committed
 from app.services.validation import check_sum, settled_budget
 from app.services.views import period_ctx
 
@@ -46,19 +43,7 @@ async def create(
         raise invalid_request("period_end is before period_start")
     # review-p5-r16 B1b: consumption (revoked keys, departed members) stays committed, so the
     # check uses the spend-aware commitment; a reader that cannot be read refuses (never zero).
-    tz = ZoneInfo(ctx.settings.app_timezone)
-    now = (clock.now() if clock else datetime.now(tz)).astimezone(tz)
-    try:
-        spend = (
-            await fresh_spend(ctx.db, reader, now)
-            if reader is not None
-            else await Spend.load(ctx.db, now.strftime("%Y-%m"))  # no LiteLLM DB configured
-        )
-    except SpendUnavailable:
-        raise ApiError(
-            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
-        ) from None
-    committed = await group_committed(ctx.db, spend, group, tz=ctx.settings.app_timezone)
+    committed = await fresh_group_committed(ctx, reader, clock, group)
     if err := check_sum(
         committed + body.budget, await settled_budget(ctx.db, group), group.overalloc_factor
     ):

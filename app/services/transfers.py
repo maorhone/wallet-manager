@@ -108,6 +108,7 @@ async def group_committed(
     initiative_spent=None,
     tz: str = "UTC",
     child_budgets: dict[int, Decimal] | None = None,
+    employee_caps: dict[str, Decimal] | None = None,
 ) -> Decimal:
     """Consumption plus what is still allocated and unspent; spent credit is counted once.
 
@@ -131,6 +132,7 @@ async def group_committed(
             Employee.group_id == group.id, Employee.status != "left"
         )
     ):
+        cap = (employee_caps or {}).get(upn, cap)  # proposed caps, if any
         committed += max(cap + shares.get(upn, ZERO) - spend.used("employee", upn), ZERO)
     for child in await db.scalars(
         select(Grp).where(Grp.parent_group_id == group.id, Grp.status != "archived")
@@ -162,6 +164,24 @@ async def group_committed(
         if i.status == "active":
             committed += max(i.budget - spent.get(i.id, ZERO), ZERO)
     return committed
+
+
+async def fresh_group_committed(ctx, reader, clock, group: Grp, **kw) -> Decimal:
+    """THE allocation check input (review-p5-r18): fresh spend, never zero when unreadable.
+
+    Every mutation that carves more out of a section (member caps, group keys, initiatives,
+    credit approvals) compares this with the settled budget, so consumption of departed members
+    and revoked keys stays committed. A missing reader or unreadable database refuses (503).
+    """
+    tz = ZoneInfo(ctx.settings.app_timezone)
+    try:
+        now = (clock.now() if clock else datetime.now(tz)).astimezone(tz)
+        spend = await fresh_spend(ctx.db, reader, now)
+    except SpendUnavailable:
+        raise ApiError(
+            503, "SPEND_UNAVAILABLE", "Current usage could not be read; try again shortly"
+        ) from None
+    return await group_committed(ctx.db, spend, group, tz=ctx.settings.app_timezone, **kw)
 
 
 async def _side(db, spend: Spend, group: Grp, ep: EndpointIn, tz: str = "UTC") -> Side:

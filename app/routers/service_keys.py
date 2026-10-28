@@ -13,7 +13,10 @@ router = APIRouter()
 
 @router.post("/service-keys")
 async def create(body: ServiceKeyIn, request: Request, ctx: Write, principal: CurrentPrincipal):
-    return await service_keys.create(ctx, principal, request.app.state.litellm, body)
+    state = request.app.state
+    return await service_keys.create(
+        ctx, principal, state.litellm, body, state.litellm_reader, state.clock
+    )
 
 
 @router.post("/service-keys/{key_id}/rotate")

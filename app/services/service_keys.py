@@ -25,7 +25,6 @@ from app.services.spend import Spend
 from app.services.validation import (
     check_limit,
     check_sum,
-    group_allocated,
     key_allocated,
     pending_incoming,
     settled_budget,
@@ -164,7 +163,7 @@ async def incoming_pending(db, initiative_id) -> Decimal:
     return await pending_incoming(db, "initiative", initiative_id)
 
 
-async def create(ctx, principal, client, body):
+async def create(ctx, principal, client, body, reader=None, clock=None):
     role = await can_manage_service_keys(ctx.db, principal, body.owner_kind, body.owner_id)
     owner = await owner_lock(ctx, body.owner_kind, body.owner_id)
     if body.owner_kind == "initiative":
@@ -177,7 +176,9 @@ async def create(ctx, principal, client, body):
         err = check_sum(allocated + body.max_budget, budget)
         entity = "group"
     elif body.owner_kind == "group":
-        allocated = await group_allocated(ctx.db, owner)
+        from app.services.transfers import fresh_group_committed
+
+        allocated = await fresh_group_committed(ctx, reader, clock, owner)
         err = check_sum(
             allocated + body.max_budget,
             await settled_budget(ctx.db, owner),
