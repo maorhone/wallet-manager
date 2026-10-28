@@ -585,6 +585,29 @@ def apply_holdback(body, hold: Decimal):
     return body.model_copy(update={field: float(Decimal(str(value)) - hold)})
 
 
+async def _repair_unconfirmed(db, row: LitellmWrite) -> bool:
+    """r17 B1a1: restored source credit stays unpublished until every uncertain destination
+    reduction of the compensated transfer is confirmed applied (a failed repair keeps it held)."""
+    kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]
+    repair = (
+        select(LitellmWrite.id)
+        .where(
+            LitellmWrite.idempotency_key.like(
+                func.concat("transfer:", Transfer.id, ":restore-target:%")
+            ),
+            LitellmWrite.status != "applied",
+        )
+        .exists()
+    )
+    q = select(Transfer.id).where(
+        Transfer.state == "compensated",
+        Transfer.source_kind.in_(kinds),
+        Transfer.source_id == row.entity_id,
+        repair,
+    )
+    return await db.scalar(q.limit(1)) is not None
+
+
 async def held_by_incoming(db, row: LitellmWrite) -> bool:
     """A rebuilt write would publish credit whose source reduction is not applied yet (r3 B1).
 
@@ -592,6 +615,8 @@ async def held_by_incoming(db, row: LitellmWrite) -> bool:
     transfer is ``applied`` (source applied AND fence passed), so no older write can carry the
     incoming credit upstream past an unreadable or failed fence (r5 B1a1).
     """
+    if await _repair_unconfirmed(db, row):
+        return True
     if await _is_source_write(db, row):
         return False  # its payload excludes unsettled incoming credit (source_holdback)
     kinds = [k for k, entity in _ENTITY.items() if entity == row.entity]

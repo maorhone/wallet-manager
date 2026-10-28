@@ -4,11 +4,12 @@ import uuid
 from datetime import UTC, datetime
 
 from app.outbox.worker import drain
-from tests.api.test_requests import send, submit
+from tests.api.test_requests import submit
 from tests.api.test_review_money import DANI
 from tests.api.test_review_r7 import _log_at
 from tests.api.test_service_keys import body as key_body
 from tests.api.test_service_keys import post as post_key
+from tests.api.test_transfers import send
 
 A1 = 1  # base 250000, factor 1; three members at 15000
 
@@ -112,3 +113,46 @@ async def test_r18_initiative_credit_approval_counts_consumption(login_wm, fake_
         dana, "POST", f"/requests/{rid}/decide", {"decision": "approve", "amount": 40000}
     )
     assert r.status_code == 422 and r.json()["code"] == "PARENT_OVERALLOCATED", r.text
+
+
+# review-p5-r17 blocker B1a1: the source credit is restored upstream only after every uncertain
+# destination reduction is confirmed; a permanently failing repair keeps it held
+async def test_r18_source_restore_waits_for_destination_repair(
+    login_wm, provisioned, fake_engine, litellm, prov_settings, ro_engine
+):
+    from sqlalchemy import select
+
+    from app.litellm_client import LiteLLMReader
+    from app.litellm_client.errors import LiteLLMPermanentError, LiteLLMTransientError
+    from app.models import Employee, LitellmWrite, Transfer
+    from tests.api.test_review_money import YAEL
+    from tests.api.test_transfers import move
+
+    head = await login_wm("dana")
+    assert (await send(head, "POST", "/transfers", move(50, DANI, YAEL))).status_code == 200
+    real, calls = litellm.team_member_update, []
+
+    async def flaky(body):
+        if body.user_id == YAEL:
+            calls.append(body.max_budget_in_team)
+            if len(calls) == 1:
+                await real(body)
+                raise LiteLLMTransientError("response lost")
+            raise LiteLLMPermanentError(400, "bad")
+        return await real(body)
+
+    litellm.team_member_update = flaky
+    reader = LiteLLMReader(ro_engine)
+    await drain(provisioned, litellm, prov_settings, reader)
+    await _consume(fake_engine, 10**8)
+    for _ in range(3):
+        await drain(provisioned, litellm, prov_settings, reader)
+    async with provisioned() as s:
+        assert await s.scalar(select(Transfer.state)) == "compensated"
+        status = dict(
+            (await s.execute(select(LitellmWrite.idempotency_key, LitellmWrite.status))).all()
+        )
+        target = [v for k, v in status.items() if ":restore-target:" in k]
+        assert target and target != ["applied"]
+        assert [v for k, v in status.items() if k.endswith(":restore-source")] == ["pending"]
+        assert (await s.get(Employee, DANI)) is not None
