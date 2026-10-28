@@ -51,7 +51,8 @@ async def assert_fits(ctx, reader, clock, group, change: ProposedChange) -> None
    missing reader → `ApiError(503, "SPEND_UNAVAILABLE", ...)` (copy of the message at
    `transfers.py:181`). Never treat unreadable spend as zero.
 4. `check_sum(snapshot.total, settled_budget(group), group.overalloc_factor)` (`validation.py`),
-   where `settled_budget = base_budget − pending_incoming` (`validation.py:123–128`). Over-allocation
+   where `settled_budget = base_budget − pending_incoming − held_restore` (`validation.py:123–128`; both terms as defined in
+   `transfers-v2.md` 1.1b, so a restored-but-held source credit is not capacity). Over-allocation
    factor and the "advanced" per-model quotas stay as today.
 
 `assert_fits` is the single place that raises `OVER_ALLOCATED`-style errors for groups. Preview
@@ -93,14 +94,16 @@ Revoked/deleted keys contribute 0 unspent; their spend stays in consumption.
 
 ### 2.4 Pending incoming
 
-`pending_incoming(group)` (`validation.py`) is credit transferred in whose transfer is in
-`RESERVED`/`SOURCE_APPLIED`/`PUBLISHING` and whose domain credit has not been reverted
-(`transfers-v2.md` 1.1b; v1: not `applied`). COMPENSATING after `RevertDomain`, COMPENSATED and
-STUCK-after-revert transfers are excluded: their credit already left the domain balance, so
-subtracting it would shrink capacity forever. A source's `held_restore` is also subtracted from
-capacity until released. It is NOT part of `total` and is subtracted from the capacity
-(`settled_budget`). It can neither be allocated nor key-reserved (invariant 2 of
-`transfers-v2.md`).
+`pending_incoming(group)` (`validation.py`) is credit transferred in whose transfer is not
+`SETTLED` and whose domain credit has not been reverted (`transfers-v2.md` 1.1b; v1: not
+`applied`): RESERVED, SOURCE_APPLIED, PUBLISHING, and also COMPENSATING or STUCK transfers
+before `RevertDomain` (a refused or delayed revert, rows 12/12b, leaves the credit in the domain
+and it must stay unavailable). Transfers after `RevertDomain` (any state, COMPENSATED included)
+are excluded: their credit already left the domain balance, so subtracting it would shrink
+capacity forever. A source's `held_restore` (reverted COMPENSATING/STUCK, `restore_source` not
+CONFIRMED) is subtracted as well. Neither is part of `total`; both are subtracted from the
+capacity: `settled_budget = base_budget − pending_incoming − held_restore`. They can neither be
+allocated nor key-reserved (invariant 2 of `transfers-v2.md`).
 
 ## 3. Locking and fresh spend
 
@@ -154,21 +157,34 @@ still calls `group_own_allocated`.
 
 - Input: all employees, keys (with `retired_budget`), initiatives, children, grants/shares,
   per-entity spend rows, pending-incoming transfers of a generated org tree.
-- For a group: `spent_g = spend(group)`; `pmo_g = Σ_members min(max(member_spend − base_cap, 0), Σ shares)`
-  (the same clamped formula, written independently as a loop over members);
+- For a group: `spent_g = spend(group)`; `pmo_g = Σ_members pmo_m`, where `pmo_m` is an
+  independent loop (not the clamped closed form): `left = max(member_spend − current base_cap, 0)`;
+  walk the member's shares by `(expires_at, id)`; a **closed** share contributes its stored `used`
+  (never recomputed) and reduces `left` by it (floored at 0); an **active** share contributes
+  `min(left, amount)` and reduces `left`. Generated cases must include a cap raised or lowered
+  after a share closed, and spend below the cap with a closed share holding stored usage;
   `unspent = Σ_caps max(cap − spend_m, 0) + Σ_initiatives max(budget − Σ keys spend, 0) + Σ_keys max(max_budget + retired − spend_k, 0) + Σ_children max(base, spend_child)`;
   `committed = (spent_g − pmo_g) + unspent`;
-  `capacity = (base_budget − pending_incoming) × factor`.
+  `capacity = (base_budget − pending_incoming − held_restore) × factor`, with `pending_incoming`
+  (not SETTLED, not domain-reverted, incl. COMPENSATING/STUCK before revert) and `held_restore`
+  computed from the raw transfer rows; generated orgs include held restores and unreverted
+  compensating/stuck receipts.
 - Decision for an operation: apply it to a copy of the rows, recompute `committed` for the
   affected group(s) and, for tree ops (child cut/raise, move, split), for each parent; **accept ⇔
-  committed ≤ capacity for all of them** (a no-op change accepts without evaluating, per decision 2;
-  unreadable spend → reject with 503).
+  committed ≤ capacity for all of them AND no cut floor is violated** (a no-op change accepts
+  without evaluating, per decision 2; unreadable spend → reject with 503). Cut floors (section 3,
+  `BELOW_CONSUMED`): a lowered member cap or child budget must stay ≥ that entity's consumption plus
+  its unsettled incoming (`members._check_cut_floors`); the oracle computes them per entity from
+  raw rows. Expected rejections are classified as `OVER_ALLOCATED` (group bound) or
+  `BELOW_CONSUMED` (floor); e.g. group budget 100, member spend 60, cap cut 80 → 50: committed
+  60 fits, the floor rejects.
 - Property tests (`tests/test_commitments_property.py`, Hypothesis, `derandomize=True`,
   `deadline=None`, `max_examples=150`, no wall-clock): generate trees (≤ 3 levels, ≤ 4 members,
   ≤ 3 keys with rotations, initiatives, departed members, revoked keys, PMO shares, spend), a
   random mutation sequence through the public service functions. Assert:
   an accepted op satisfies the oracle bound (no over-allocation); a rejected op, with readable
-  spend, actually violates it (no false rejects, e.g. B1c); `snapshot(...).total == oracle.committed`.
+  spend, actually violates the group bound or a cut floor, and the error code matches the violated
+  rule (no false rejects, e.g. B1c); `snapshot(...).total == oracle.committed`.
 
 ## 7. U4 scope (authz, UI idempotency, Department action center)
 

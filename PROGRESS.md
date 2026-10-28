@@ -1173,7 +1173,7 @@ Branch cut from phase-5 at 90f5db3. Plan: docs/design/redesign-p5-plan.md. Contr
 
 | Unit | Content | Status | Sha | Tests |
 |---|---|---|---|---|
-| U0 | Design docs | done (docs only); U0-fix1 done: held restore in every payload, `included`-based leg confirmation, reverted receipts not pending, target activation (`activated(E)`), row 2b (initiative source), source-only backfill | see git log | tests/test_design_docs.py + hygiene green |
+| U0 | Design docs | done (docs only); U0-fix2 done: unreverted compensating/stuck receipts stay pending, `settled_budget` and oracle subtract held restores, per-entity single-flight write fence (3.6), resolve needs domain reconciliation, publication vs availability hold split, world-level conservation predicate, legacy queued targets wait for the fence, more backfill shapes, oracle honours closed shares and cut floors; U0-fix1 done: held restore in every payload, `included`-based leg confirmation, reverted receipts not pending, target activation (`activated(E)`), row 2b (initiative source), source-only backfill | see git log | tests/test_design_docs.py + hygiene green |
 | U1 | commitments.py + call sites + oracle | todo | | |
 | U2 | Pure transfer state machine + Hypothesis | todo | | |
 | U3 | Executor + migration 0018 | todo | | |
