@@ -93,9 +93,13 @@ Revoked/deleted keys contribute 0 unspent; their spend stays in consumption.
 
 ### 2.4 Pending incoming
 
-`pending_incoming(group)` (`validation.py`) is credit transferred in whose transfer is not
-`SETTLED` (v2) / not `applied` (current). It is NOT part of `total` and is subtracted from the
-capacity (`settled_budget`). It can neither be allocated nor key-reserved (invariant 2 of
+`pending_incoming(group)` (`validation.py`) is credit transferred in whose transfer is in
+`RESERVED`/`SOURCE_APPLIED`/`PUBLISHING` and whose domain credit has not been reverted
+(`transfers-v2.md` 1.1b; v1: not `applied`). COMPENSATING after `RevertDomain`, COMPENSATED and
+STUCK-after-revert transfers are excluded: their credit already left the domain balance, so
+subtracting it would shrink capacity forever. A source's `held_restore` is also subtracted from
+capacity until released. It is NOT part of `total` and is subtracted from the capacity
+(`settled_budget`). It can neither be allocated nor key-reserved (invariant 2 of
 `transfers-v2.md`).
 
 ## 3. Locking and fresh spend
