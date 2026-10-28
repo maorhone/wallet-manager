@@ -156,3 +156,27 @@ async def test_r18_source_restore_waits_for_destination_repair(
         assert target and target != ["applied"]
         assert [v for k, v in status.items() if k.endswith(":restore-source")] == ["pending"]
         assert (await s.get(Employee, DANI)) is not None
+
+
+# review-p5-r17 major B2: the head of a delegated system's section reads its keys and telemetry
+async def test_r18_head_reads_delegated_system_details(login, provisioned):
+    from app.models import ProductionSystem
+
+    async with provisioned() as s:
+        system = ProductionSystem(
+            name="Billing", department_id=1, owner_upn="yael@corp.example", status="active",
+            managing_group_id=1, budget=10, funding="department",
+        )  # fmt: skip
+        s.add(system)
+        await s.commit()
+        sid = system.id
+    q = f"owner_kind=system&owner_id={sid}"
+    head, member = await login("dana"), await login("dani")
+    for path in ("/service-keys", "/service-keys/telemetry"):
+        assert (await head.get(f"{path}?{q}")).status_code == 200, path
+        assert (await member.get(f"{path}?{q}")).status_code == 403, path
+    listed = (await head.get(f"/service-keys?{q}")).json()
+    assert listed["items"] == []
+    # read only: the head cannot create keys on it
+    r = await post_key(head, payload=key_body(owner_kind="system", owner_id=sid))
+    assert r.status_code == 403, r.text

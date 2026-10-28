@@ -356,6 +356,10 @@ async def can_view_service_keys(session, p: Principal, owner_kind: str, owner_id
     except ApiError:
         if system.owner_upn == p.upn:  # the owner reads limits and keys, never writes (D-048)
             return "owner"
+        # review-p5-r17 B2: the head of the section the system is delegated to reads it too
+        if system.managing_group_id is not None:
+            if HEAD in await _group_roles(session, p, system.managing_group_id):
+                return HEAD
         raise
 
 
