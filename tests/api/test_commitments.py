@@ -183,7 +183,9 @@ async def test_u1_cap_cut_floor_still_applies(login, put, fake_engine, fake_app)
     assert (await _put_caps(head, put, dani=13000)).status_code == 200
 
 
-async def test_u1_member_caps_in_db_are_untouched_when_refused(login, put, seeded, fake_engine, fake_app):
+async def test_u1_member_caps_in_db_are_untouched_when_refused(
+    login, put, seeded, fake_engine, fake_app
+):
     await _consume(fake_engine, user=GONE)
     head = await login("dana")
     assert (await _put_caps(head, put, yael=40000)).status_code == 422

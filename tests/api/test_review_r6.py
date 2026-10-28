@@ -13,9 +13,9 @@ from app.outbox.worker import drain
 from app.services.production import system_committed
 from app.services.spend import Spend
 from app.services.transfers import lock_scope, transfer_status
-from tests.helpers.commit import group_allocated
 from tests.api.test_review_money import DANI, YAEL, _child, _initiative
 from tests.api.test_transfers import A1, move, send
+from tests.helpers.commit import group_allocated
 
 
 def _pending(kind, ident, amount=100, state="pending"):

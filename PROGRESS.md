@@ -1174,11 +1174,13 @@ Branch cut from phase-5 at 90f5db3. Plan: docs/design/redesign-p5-plan.md. Contr
 | Unit | Content | Status | Sha | Tests |
 |---|---|---|---|---|
 | U0 | Design docs | done (docs only); U0-fix2 done: unreverted compensating/stuck receipts stay pending, `settled_budget` and oracle subtract held restores, per-entity single-flight write fence (3.6), resolve needs domain reconciliation, publication vs availability hold split, world-level conservation predicate, legacy queued targets wait for the fence, more backfill shapes, oracle honours closed shares and cut floors; U0-fix1 done: held restore in every payload, `included`-based leg confirmation, reverted receipts not pending, target activation (`activated(E)`), row 2b (initiative source), source-only backfill | see git log | tests/test_design_docs.py + hygiene green |
-| U1 | commitments.py + call sites + oracle | todo | | |
+| U1 | commitments.py + call sites + oracle | in progress: all call sites go through `commitments.assert_fits`; regression, guard, pure + DB property tests added; full run pending | see git log | targeted U1-2: 65 passed then stopped on a load error that passes alone |
 | U2 | Pure transfer state machine + Hypothesis | todo | | |
 | U3 | Executor + migration 0018 | todo | | |
 | U4 | Authz table, useIdempotentMutation, action center | todo | | |
 | U5 | e2e + flakes + green full run | todo | | |
 | U6 | External split re-review + merge | todo | | |
 
-Next: U1. Notes: the plan copy replaces the owner's name with "the owner" (repo hygiene). The `commitments.md` §4 notes that `initiatives.py` has no budget-update function and group-key rotation has no check today (r18 B3a).
+U1 notes: `commitments.Change` is one dataclass (not a tagged union) with optional fields; `check_group_tree` moved from validation to commitments (needs reader/clock, 503 when spend unreadable); worker compensation passes its reader (`compensate_failed_source(db, write, reader, tz)`, spend read lazily only when a restore raises a parent) and an unreadable reading counts as "cannot prove it fits" (transfer stays failed, never duplicated). `held_restore` does not exist yet (U3 adds it to `settled_budget`). Existing test `test_r18_personal_credit_approval_counts_consumption` now uses a departed member's consumption: raising the requester's own cap while they are overspent adds no unspent credit under the doc formula (cap recomputed, PMO split recomputed). Old `group_allocated`/`group_committed` tests use `tests/helpers/commit.py`. Property tests: `tests/unit/test_commitments_core.py` (pure core vs `tests/oracle.py`) and `tests/api/test_commitments_property.py` (40 drawn scenarios through the HTTP API).
+
+Next: U1 full run, then STEP-DONE. Notes: the plan copy replaces the owner's name with "the owner" (repo hygiene). The `commitments.md` §4 notes that `initiatives.py` has no budget-update function and group-key rotation has no check today (r18 B3a).
