@@ -41,7 +41,7 @@ class LockKind(enum.IntEnum):
     EMPLOYEE = 4  # member lifecycle actions on one person (id = employee_lock_id(upn))
     JOB = 5  # scheduler job locks (session-level, one replica per job)
     REQUEST = 6  # serialize replay lookup and the entire request transaction
-    PLATFORM = 7  # creation registries: 0 = departments, 1 = groups
+    PLATFORM = 7  # creation registries: 0 = departments, 1 = groups, 2 = rate card
     PRODUCTION = 8  # production org budget and its systems (id = department_id)
 
 

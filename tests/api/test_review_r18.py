@@ -180,3 +180,65 @@ async def test_r18_head_reads_delegated_system_details(login, provisioned):
     # read only: the head cannot create keys on it
     r = await post_key(head, payload=key_body(owner_kind="system", owner_id=sid))
     assert r.status_code == 403, r.text
+
+
+# review-p5-r17 major B3: rows fund the same subtree they consume (PMO grants once)
+async def test_r18_overview_rows_include_pmo_funding(login, provisioned):
+    from app.models import Grant
+    from tests.api.test_review_money import _child
+
+    gid = await _child(provisioned, base=100)
+    async with provisioned() as s:
+        s.add(Grant(department_id=1, group_id=gid, amount=100, status="active", created_by="x"))
+        await s.commit()
+    from app.models import SpendSnapshot
+
+    async with provisioned() as s:
+        s.add(
+            SpendSnapshot(
+                scope_kind="group", scope_id=str(gid), period=datetime.now(UTC).strftime("%Y-%m"),
+                model=None, spend=150,
+            )
+        )  # fmt: skip
+        await s.commit()
+    head = await login("dana")
+    rows = (await head.get("/budget/overview?scope=group:1")).json()["rows"]
+    child = next(r for r in rows if r["kind"] == "group")
+    assert (child["total"], child["used"], float(child["percent"])) == (200, 150, 0.75)
+    attention = (await head.get("/attention?scope=group:1")).json()
+    assert [r["id"] for r in attention["shortage_risks"] if r["kind"] == "group"] == []
+    dept = (await (await login("admin")).get("/budget/overview?scope=department:1")).json()
+    section = next(x for x in dept["sections"] if x["id"] == 1)
+    assert section["total"] >= 200  # base plus the child's grant, once
+
+
+# review-p5-r17 major B3: concurrent first writes cannot mix currencies on an empty card
+async def test_r18_rate_card_first_writes_serialized(login, put, seeded, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.services import rate_card
+
+    real = asyncio.sleep
+
+    async def slow(_):
+        await real(0.3)
+
+    monkeypatch.setattr(rate_card, "asyncio", SimpleNamespace(sleep=slow))
+
+    admin = await login("admin")
+
+    def card(model, currency):
+        return {
+            "rates": [
+                {"model": model, "input_per_1m": "1", "output_per_1m": "2", "currency": currency}
+            ]
+        }
+
+    done = await asyncio.gather(
+        put(admin, "/rate-card", card("gpt-4", "USD")),
+        put(admin, "/rate-card", card("claude", "EUR")),
+    )
+    assert sorted(r.status_code for r in done) == [200, 422], [r.text for r in done]
+    rates = (await admin.get("/rate-card")).json()
+    assert len({x["currency"] for x in rates["rates"]}) == 1

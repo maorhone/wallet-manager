@@ -65,9 +65,15 @@ async def overview(db, principal, settings: Settings, scope: str, raw_period: st
         db, "group", {str(c.id): {"base_budget": c.base_budget} for c in kids}, at
     )
     for child in kids:
-        total = budgets[str(child.id)]["base_budget"]
-        # A child's row carries its whole subtree, like the headline (D-055, r6 B3).
+        # A child's row carries its whole subtree, like the headline (D-055, r6 B3): consumption
+        # and funding (base plus the subtree's PMO grants, once) cover the same groups (r17 B3).
         subtree = [child.id, *await views._descendants(db, child.id, at)]
+        total = budgets[str(child.id)]["base_budget"] + sum(
+            (
+                await views._grants_by_group(db, subtree, settings.app_timezone, s["period"])
+            ).values(),
+            Decimal(0),
+        )
         used = sum((spend.used("group", i) for i in subtree), Decimal(0))
         rows.append(
             {"kind": "group", "id": str(child.id), "name": child.name, "total": total,
@@ -245,7 +251,10 @@ async def department_overview(
         )
         used = sum((spend.used("group", i) for i in ids), Decimal(0))
         prev = sum((before.used("group", i) for i in ids), Decimal(0))
-        base = d["bases"][g.id]
+        base = d["bases"][g.id] + sum(
+            (await views._grants_by_group(db, ids, settings.app_timezone, pc["period"])).values(),
+            Decimal(0),
+        )  # same subtree as ``used``: base plus its PMO grants, once (r17 B3)
         sections.append(
             {"id": g.id, "name": g.name, "total": base, "used": used, "percent": _pct(used, base),
              "members": members, "used_per_member": used / members if members else None,

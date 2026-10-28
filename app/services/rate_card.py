@@ -1,5 +1,6 @@
 """Rate card (SoT D-049/D-054): metered usage value = tokens x rate per model, never a debit."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
+from app.db import LockKind
 from app.errors import invalid_request
 from app.models import AuditLog, RateCard, SpendSnapshot
 from app.permissions import Principal, can_manage_platform
@@ -34,7 +36,11 @@ async def set_rates(ctx: WriteContext, principal: Principal, body: RateCardIn) -
     models = [r.model for r in body.rates]
     if len(set(models)) != len(models):
         raise invalid_request("Duplicate model in rate card", {"field": "rates"})
+    # Serialize every card edit before the card is read: two first writes of different models
+    # could otherwise each pass the currency check against an empty card (r17 B3).
+    await ctx.lock(LockKind.PLATFORM, 2)  # 2 = the rate card (0 departments, 1 groups)
     existing = {r.model: r for r in await ctx.db.scalars(select(RateCard))}
+    await asyncio.sleep(0)  # yield after the read; tests widen this to prove the lock
     # One denomination for the whole card (r16 B3): values are summed across models and over
     # time without conversion, so the currency is fixed once the first rate exists.
     currencies = {r.currency for r in existing.values()} | {i.currency for i in body.rates}
