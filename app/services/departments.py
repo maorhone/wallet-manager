@@ -133,11 +133,12 @@ async def set_split(
     changed = [g for g in groups.values() if g.id in new and new[g.id] != g.base_budget]
     bases = {g.id: new.get(g.id, g.base_budget) for g in groups.values()}
     rows = [{"group_id": g.id, "code": "PARENT_OVERALLOCATED"} for g in changed]
-    await commitments.check_group_tree(
-        ctx, reader, clock, dept, groups.values(), bases, body.pmo_pool, body.reserve, rows
-    )
+    # the floor first: a cut below consumed credit is "below_consumed", not an over-allocation
     await _check_consumption_floor(
         ctx, changed, new, {g.id: g.parent_group_id for g in groups.values()}, reader, clock
+    )
+    await commitments.check_group_tree(
+        ctx, reader, clock, dept, groups.values(), bases, body.pmo_pool, body.reserve, rows
     )
     await asyncio.sleep(0)  # yield after the sums are read; tests widen this to prove the lock
 
